@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceLoop</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b10;
+      --panel: #11151d;
+      --panel2: #171d28;
+      --line: #283143;
+      --text: #eef2f8;
+      --muted: #919bad;
+      --accent: #6aa2ff;
+      --good: #4ade80;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 20% 0%, #14213b 0, var(--bg) 38%);
+      color: var(--text);
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    }
+    button, textarea, input { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--panel2);
+      color: var(--text);
+      padding: 9px 13px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #07101f; font-weight: 700; }
+    button.danger { background: #451722; border-color: #8f253c; }
+    button:disabled { opacity: .45; cursor: wait; }
+    .layout { max-width: 1420px; margin: auto; padding: 18px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+    h1 { font-size: 23px; margin: 0; }
+    h1 span { color: var(--muted); font-size: 13px; font-weight: 500; margin-left: 7px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .health { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .health-card, .card { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: 12px; }
+    .health-card { padding: 10px; min-height: 65px; }
+    .health-card b { display: block; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+    .health-card span { display: block; margin-top: 5px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ok { color: var(--good); }
+    .error { color: var(--bad); }
+    .stopped, .setup_required, .degraded { color: var(--warn); }
+    main { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(330px, .8fr); gap: 12px; }
+    .card { padding: 14px; }
+    .conversation { min-height: 520px; display: flex; flex-direction: column; }
+    #messages { flex: 1; overflow-y: auto; max-height: 58vh; padding-right: 4px; }
+    .message { border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; margin: 8px 0; white-space: pre-wrap; line-height: 1.4; }
+    .message.user { margin-left: 11%; background: #152440; }
+    .message.assistant { margin-right: 11%; background: var(--panel2); }
+    .message.system { color: var(--muted); font-size: 13px; border-style: dashed; }
+    .composer { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+    textarea {
+      width: 100%;
+      resize: vertical;
+      min-height: 76px;
+      max-height: 220px;
+      color: var(--text);
+      background: #0b0f16;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .composer-row { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; align-items: center; }
+    .toggles { display: flex; gap: 13px; color: var(--muted); font-size: 13px; }
+    .side { display: grid; gap: 12px; align-content: start; }
+    .card h2 { font-size: 15px; margin: 0 0 10px; }
+    .task { border-top: 1px solid var(--line); padding: 9px 0; }
+    .task:first-of-type { border-top: 0; }
+    .task-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+    .task p { margin: 6px 0; color: var(--muted); font-size: 13px; }
+    .task code { color: #b8d1ff; }
+    .task-actions { display: flex; gap: 7px; margin-top: 7px; }
+    .task-actions button { padding: 5px 8px; font-size: 12px; }
+    .memory-form { display: flex; gap: 7px; }
+    .memory-form input {
+      min-width: 0;
+      flex: 1;
+      color: var(--text);
+      background: #0b0f16;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .memory-item { display: flex; gap: 8px; justify-content: space-between; border-top: 1px solid var(--line); padding: 8px 0; font-size: 13px; }
+    .memory-item button { padding: 3px 7px; }
+    #interim { min-height: 22px; color: var(--accent); font-style: italic; font-size: 14px; padding: 4px 0; }
+    .empty { color: var(--muted); font-size: 13px; }
+    @media (max-width: 950px) {
+      .health { grid-template-columns: repeat(3, 1fr); }
+      main { grid-template-columns: 1fr; }
+      #messages { max-height: 50vh; }
+    }
+    @media (max-width: 520px) {
+      .layout { padding: 10px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .health { grid-template-columns: repeat(2, 1fr); }
+      .composer-row { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <header>
+      <h1>VoiceLoop <span>LM Studio · Deepgram · n8n · UI.Vision</span></h1>
+      <div class="actions">
+        <button id="listen">Start nasłuchu</button>
+        <button id="refresh">Odśwież</button>
+        <button id="stop" class="danger">STOP</button>
+      </div>
+    </header>
+
+    <section id="health" class="health"></section>
+
+    <main>
+      <section class="card conversation">
+        <div id="messages"></div>
+        <div id="interim"></div>
+        <div class="composer">
+          <textarea id="prompt" placeholder="Napisz lub powiedz, co mam zrobić…"></textarea>
+          <div class="composer-row">
+            <div class="toggles">
+              <label><input id="screen" type="checkbox"> dołącz aktywne okno</label>
+              <label><input id="cloud" type="checkbox"> zezwól na chmurę</label>
+            </div>
+            <button id="send" class="primary">Wyślij</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="card">
+          <h2>Ostatnie zadania</h2>
+          <div id="tasks"><span class="empty">Brak zadań.</span></div>
+        </section>
+        <section class="card">
+          <h2>Pamięć lokalna</h2>
+          <div class="memory-form">
+            <input id="memoryText" placeholder="Fakt lub preferencja">
+            <button id="remember">Zapamiętaj</button>
+          </div>
+          <div id="memories"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const state = { token: "", listening: false, commandIds: new Set() };
+    const $ = id => document.getElementById(id);
+
+    async function api(path, options = {}) {
+      const headers = Object.assign({}, options.headers || {});
+      if (state.token) headers["X-VoiceLoop-Token"] = state.token;
+      if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      const response = await fetch(path, Object.assign({}, options, { headers }));
+      if (!response.ok) {
+        let detail = response.statusText;
+        try { detail = (await response.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      if (response.status === 204) return null;
+      return response.json();
+    }
+
+    function addMessage(role, text, id) {
+      if (!text) return;
+      const node = document.createElement("div");
+      node.className = "message " + role;
+      if (id) node.dataset.requestId = id;
+      node.textContent = text;
+      $("messages").appendChild(node);
+      $("messages").scrollTop = $("messages").scrollHeight;
+    }
+
+    async function loadHealth() {
+      try {
+        const data = await api("/api/v1/health");
+        $("health").replaceChildren(...Object.entries(data.components).map(([name, item]) => {
+          const card = document.createElement("div");
+          card.className = "health-card";
+          const title = document.createElement("b");
+          title.textContent = name.replace("_", " ");
+          const value = document.createElement("span");
+          value.className = item.status;
+          value.textContent = item.status + (item.detail ? " · " + item.detail : "");
+          value.title = value.textContent;
+          card.append(title, value);
+          return card;
+        }));
+      } catch (error) {
+        $("health").textContent = "Rdzeń VoiceLoop nie odpowiada: " + error.message;
+      }
+    }
+
+    function renderTasks(tasks) {
+      const root = $("tasks");
+      root.replaceChildren();
+      if (!tasks.length) {
+        const empty = document.createElement("span");
+        empty.className = "empty";
+        empty.textContent = "Brak zadań.";
+        root.appendChild(empty);
+        return;
+      }
+      tasks.forEach(task => {
+        const node = document.createElement("div");
+        node.className = "task";
+        const head = document.createElement("div");
+        head.className = "task-head";
+        const title = document.createElement("strong");
+        title.textContent = task.intent || task.input_text;
+        const statusNode = document.createElement("span");
+        statusNode.className = task.status;
+        statusNode.textContent = task.status;
+        head.append(title, statusNode);
+        const detail = document.createElement("p");
+        detail.textContent = task.response_text || task.error || task.input_text;
+        node.append(head, detail);
+        if (task.status === "awaiting_confirmation") {
+          const actions = document.createElement("div");
+          actions.className = "task-actions";
+          const confirm = document.createElement("button");
+          confirm.textContent = "Potwierdź";
+          confirm.onclick = () => actOnTask(task.request_id, "confirm");
+          const cancel = document.createElement("button");
+          cancel.textContent = "Anuluj";
+          cancel.onclick = () => actOnTask(task.request_id, "cancel");
+          actions.append(confirm, cancel);
+          node.appendChild(actions);
+        }
+        root.appendChild(node);
+      });
+    }
+
+    async function loadTasks() {
+      try { renderTasks(await api("/api/v1/commands?limit=20")); } catch (_) {}
+    }
+
+    async function actOnTask(id, action) {
+      await api(`/api/v1/commands/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+      await loadTasks();
+    }
+
+    async function loadMemories() {
+      const root = $("memories");
+      try {
+        const items = await api("/api/v1/memories?limit=30");
+        root.replaceChildren(...items.map(item => {
+          const row = document.createElement("div");
+          row.className = "memory-item";
+          const text = document.createElement("span");
+          text.textContent = item.content;
+          const remove = document.createElement("button");
+          remove.textContent = "×";
+          remove.title = "Zapomnij";
+          remove.onclick = async () => {
+            await api(`/api/v1/memories/${item.id}`, { method: "DELETE" });
+            await loadMemories();
+          };
+          row.append(text, remove);
+          return row;
+        }));
+      } catch (error) {
+        root.textContent = error.message;
+      }
+    }
+
+    async function sendCommand() {
+      const text = $("prompt").value.trim();
+      if (!text) return;
+      $("send").disabled = true;
+      addMessage("user", text);
+      $("prompt").value = "";
+      try {
+        const result = await api("/api/v1/commands", {
+          method: "POST",
+          body: JSON.stringify({
+            schema_version: 1,
+            source: "panel",
+            text,
+            include_screen: $("screen").checked,
+            allow_cloud: $("cloud").checked
+          })
+        });
+        if (result.plan) {
+          addMessage("assistant", result.plan.clarification_question || result.plan.response_text, result.request_id);
+        }
+        await loadTasks();
+      } catch (error) {
+        addMessage("system", "Błąd: " + error.message);
+      } finally {
+        $("send").disabled = false;
+        $("prompt").focus();
+      }
+    }
+
+    async function toggleListening() {
+      const endpoint = state.listening ? "stop" : "start";
+      try {
+        await api(`/api/v1/listening/${endpoint}`, { method: "POST" });
+        state.listening = !state.listening;
+        $("listen").textContent = state.listening ? "Zatrzymaj nasłuch" : "Start nasłuchu";
+      } catch (error) {
+        addMessage("system", "Deepgram: " + error.message);
+      }
+    }
+
+    async function stopAll() {
+      await api("/api/v1/stop", { method: "POST" });
+      state.listening = false;
+      $("listen").textContent = "Start nasłuchu";
+      addMessage("system", "Wszystkie zadania i nasłuch zostały zatrzymane.");
+      await loadTasks();
+    }
+
+    function connectEvents() {
+      const stream = new EventSource("/api/v1/events");
+      stream.onmessage = event => {
+        const data = JSON.parse(event.data);
+        const type = data.type;
+        const payload = data.payload || {};
+        if (type === "transcript.interim") $("interim").textContent = payload.text || "";
+        if (type === "transcript.final") {
+          $("interim").textContent = "";
+          addMessage("user", payload.text || "");
+        }
+        if (type === "listening.connected") {
+          state.listening = true;
+          $("listen").textContent = "Zatrzymaj nasłuch";
+        }
+        if (type === "listening.stopped") {
+          state.listening = false;
+          $("listen").textContent = "Start nasłuchu";
+        }
+        if (type.startsWith("command.") || type === "action.completed") loadTasks();
+      };
+    }
+
+    async function init() {
+      try {
+        state.token = (await api("/api/v1/session")).token;
+      } catch (error) {
+        addMessage("system", "Nie udało się rozpocząć lokalnej sesji: " + error.message);
+        return;
+      }
+      $("send").onclick = sendCommand;
+      $("prompt").onkeydown = event => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendCommand();
+        }
+      };
+      $("listen").onclick = toggleListening;
+      $("stop").onclick = stopAll;
+      $("refresh").onclick = () => Promise.all([loadHealth(), loadTasks(), loadMemories()]);
+      $("remember").onclick = async () => {
+        const content = $("memoryText").value.trim();
+        if (!content) return;
+        await api("/api/v1/memories", {
+          method: "POST",
+          body: JSON.stringify({ kind: "fact", content, sensitivity: "private", source: "user" })
+        });
+        $("memoryText").value = "";
+        await loadMemories();
+      };
+      connectEvents();
+      await Promise.all([loadHealth(), loadTasks(), loadMemories()]);
+      setInterval(loadHealth, 8000);
+      addMessage("system", "VoiceLoop gotowy. Model lokalny jest używany domyślnie.");
+    }
+
+    init();
+  </script>
+</body>
+</html>

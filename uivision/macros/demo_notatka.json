@@ -1,0 +1,26 @@
+{
+  "Name": "demo_notatka",
+  "CreationDate": "2026-8-9",
+  "Commands": [
+    {
+      "Command": "XDesktopAutomation",
+      "Target": "true",
+      "Value": ""
+    },
+    {
+      "Command": "XRun",
+      "Target": "notepad.exe",
+      "Value": ""
+    },
+    {
+      "Command": "pause",
+      "Target": "2000",
+      "Value": ""
+    },
+    {
+      "Command": "XType",
+      "Target": "VoiceLoop dziala! To makro odpalil Twoj glos: VoiceAttack -> n8n -> UI.Vision.",
+      "Value": ""
+    }
+  ]
+}

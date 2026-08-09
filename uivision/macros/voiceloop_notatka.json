@@ -1,0 +1,26 @@
+{
+  "Name": "voiceloop_notatka",
+  "CreationDate": "2026-8-9",
+  "Commands": [
+    {
+      "Command": "XDesktopAutomation",
+      "Target": "true",
+      "Value": ""
+    },
+    {
+      "Command": "XRun",
+      "Target": "notepad.exe",
+      "Value": ""
+    },
+    {
+      "Command": "pause",
+      "Target": "2000",
+      "Value": ""
+    },
+    {
+      "Command": "XType",
+      "Target": "${!cmd_var1}",
+      "Value": ""
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+fastapi
+httpx
+pillow
+pydantic-settings
+pywin32
+pywinauto
+sounddevice
+uvicorn[standard]
+websockets

@@ -1,0 +1,71 @@
+{
+  "id": "vLoopVoice000001",
+  "name": "VoiceLoop Router v1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "voice-command-v1",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1f0a001-1111-4aaa-8aaa-000000000001",
+      "name": "Webhook (VoiceLoop v1)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "voiceloop-command-v1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $input.first().json;\nconst body = incoming.body || incoming;\nconst requestId = String(body.request_id || '');\nconst original = String(body.command_id || body.text || '').trim();\nconst normalized = original.toLowerCase().replace(/ł/g, 'l').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9 _.:\\/-]/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst rules = [\n  { intent: 'voice_test', words: ['ping', 'voice_test', 'voice test', 'test petli'], action_id: 'no_action', response_text: 'Pętla VoiceLoop działa.' },\n  { intent: 'open_calendar', words: ['open_calendar', 'open calendar', 'otworz kalendarz', 'kalendarz'], action_id: 'open_calendar', response_text: 'Otwieram kalendarz.' },\n  { intent: 'open_browser', words: ['open_browser', 'open browser', 'otworz przegladarke'], action_id: 'open_browser', response_text: 'Otwieram przeglądarkę.' },\n  { intent: 'open_chat', words: ['open_chat', 'open chat', 'otworz czat'], action_id: 'open_chat', response_text: 'Otwieram czat.' }\n];\n\nconst exact = rules.find(rule => rule.words.includes(normalized));\nconst result = exact ? {\n  schema_version: 1,\n  request_id: requestId,\n  intent: exact.intent,\n  action_id: exact.action_id,\n  args: {},\n  confidence: 1,\n  confirmation_required: false,\n  risk: 'low',\n  response_text: exact.response_text\n} : {\n  schema_version: 1,\n  request_id: requestId,\n  intent: 'unknown',\n  action_id: 'unknown',\n  args: {},\n  confidence: 0,\n  confirmation_required: false,\n  risk: 'low',\n  response_text: ''\n};\nreturn [{ json: result }];"
+      },
+      "id": "b1f0a002-2222-4bbb-8bbb-000000000002",
+      "name": "Router dozwolonych intencji",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "b1f0a006-6666-4fff-8fff-000000000006",
+      "name": "Odpowiedz planem",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [520, 0]
+    }
+  ],
+  "connections": {
+    "Webhook (VoiceLoop v1)": {
+      "main": [
+        [
+          {
+            "node": "Router dozwolonych intencji",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router dozwolonych intencji": {
+      "main": [
+        [
+          {
+            "node": "Odpowiedz planem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
