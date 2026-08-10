@@ -4,6 +4,7 @@ pillow
 pydantic-settings
 pywin32
 pywinauto
+qdrant-client
 sounddevice
 uvicorn[standard]
 websockets

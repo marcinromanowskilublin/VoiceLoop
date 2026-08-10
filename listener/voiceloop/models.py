@@ -80,6 +80,7 @@ class CommandPlan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
     provider: str = "deterministic"
     model: str | None = None
+    speak_result: bool = False
 
     @property
     def confirmation_required(self) -> bool:

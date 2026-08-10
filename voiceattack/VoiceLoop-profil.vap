@@ -15,7 +15,7 @@
           <IndentLevel>0</IndentLevel>
           <ConditionSkip>false</ConditionSkip>
           <Id>11111111-aaaa-4bbb-8ccc-000000000102</Id>
-          <ActionType>RunApplication</ActionType>
+          <ActionType>Launch</ActionType>
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
@@ -113,7 +113,7 @@
           <IndentLevel>0</IndentLevel>
           <ConditionSkip>false</ConditionSkip>
           <Id>11111111-aaaa-4bbb-8ccc-000000000202</Id>
-          <ActionType>RunApplication</ActionType>
+          <ActionType>Launch</ActionType>
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
@@ -211,7 +211,7 @@
           <IndentLevel>0</IndentLevel>
           <ConditionSkip>false</ConditionSkip>
           <Id>11111111-aaaa-4bbb-8ccc-000000000302</Id>
-          <ActionType>RunApplication</ActionType>
+          <ActionType>Launch</ActionType>
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
@@ -309,7 +309,7 @@
           <IndentLevel>0</IndentLevel>
           <ConditionSkip>false</ConditionSkip>
           <Id>11111111-aaaa-4bbb-8ccc-000000000402</Id>
-          <ActionType>RunApplication</ActionType>
+          <ActionType>Launch</ActionType>
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
@@ -407,7 +407,7 @@
           <IndentLevel>0</IndentLevel>
           <ConditionSkip>false</ConditionSkip>
           <Id>11111111-aaaa-4bbb-8ccc-000000000502</Id>
-          <ActionType>RunApplication</ActionType>
+          <ActionType>Launch</ActionType>
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
@@ -505,7 +505,7 @@
           <IndentLevel>0</IndentLevel>
           <ConditionSkip>false</ConditionSkip>
           <Id>11111111-aaaa-4bbb-8ccc-000000000602</Id>
-          <ActionType>RunApplication</ActionType>
+          <ActionType>Launch</ActionType>
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />

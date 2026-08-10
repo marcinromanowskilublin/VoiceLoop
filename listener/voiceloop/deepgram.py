@@ -29,8 +29,31 @@ class DeepgramListener:
         self.connected = False
         self.last_error: str | None = None
         self._task: asyncio.Task[None] | None = None
+        self._one_shot = False
+        self._one_shot_prefix = ""
+        self._one_shot_timeout_seconds = 30.0
 
     async def start(self) -> None:
+        self._one_shot = False
+        self._one_shot_prefix = ""
+        await self._start()
+
+    async def start_once(
+        self,
+        *,
+        prefix: str = "",
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        if self.running:
+            await self.stop()
+        self._one_shot = True
+        self._one_shot_prefix = prefix.strip()
+        if self._one_shot_prefix:
+            self._one_shot_prefix += " "
+        self._one_shot_timeout_seconds = max(5.0, min(timeout_seconds, 120.0))
+        await self._start()
+
+    async def _start(self) -> None:
         if self.running:
             return
         if not self.settings.deepgram_api_key:
@@ -44,6 +67,8 @@ class DeepgramListener:
 
     async def stop(self) -> None:
         self.running = False
+        self._one_shot = False
+        self._one_shot_prefix = ""
         if self._task:
             self._task.cancel()
             try:
@@ -56,9 +81,15 @@ class DeepgramListener:
 
     def health(self) -> tuple[bool, str]:
         if self.connected:
-            return True, f"connected ({self.settings.deepgram_model}, pl)"
+            mode = ", one-shot" if self._one_shot else ""
+            return (
+                True,
+                f"connected ({self.settings.deepgram_model}, "
+                f"{self.settings.deepgram_language}{mode})",
+            )
         if self.running:
-            return False, self.last_error or "connecting"
+            mode = " (one-shot)" if self._one_shot else ""
+            return False, self.last_error or f"connecting{mode}"
         return False, self.last_error or "stopped"
 
     def _url(self) -> str:
@@ -82,14 +113,44 @@ class DeepgramListener:
         attempt = 0
         while self.running:
             try:
-                await self._run_connection()
+                if self._one_shot:
+                    await asyncio.wait_for(
+                        self._run_connection(),
+                        timeout=self._one_shot_timeout_seconds,
+                    )
+                else:
+                    await self._run_connection()
                 attempt = 0
+            except TimeoutError:
+                self.connected = False
+                self.running = False
+                self._one_shot = False
+                self._one_shot_prefix = ""
+                self.last_error = "Upłynął czas oczekiwania na wypowiedź."
+                await self.events.publish(
+                    "listening.timeout",
+                    {"error": self.last_error},
+                )
+                await self.events.publish(
+                    "listening.stopped",
+                    {"reason": "one_shot_timeout"},
+                )
+                break
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self.connected = False
                 self.last_error = str(exc)
                 await self.events.publish("listening.error", {"error": self.last_error})
+                if self._one_shot:
+                    self.running = False
+                    self._one_shot = False
+                    self._one_shot_prefix = ""
+                    await self.events.publish(
+                        "listening.stopped",
+                        {"reason": "one_shot_error"},
+                    )
+                    break
                 if not self.running:
                     break
                 delay = delays[min(attempt, len(delays) - 1)]
@@ -120,11 +181,21 @@ class DeepgramListener:
 
         async def flush() -> None:
             nonlocal last_sent
-            text = " ".join(finals).strip()
+            transcript = " ".join(finals).strip()
             finals.clear()
-            if not text or text == last_sent:
+            if not transcript or transcript == last_sent:
                 return
-            last_sent = text
+            last_sent = transcript
+            text = f"{self._one_shot_prefix}{transcript}".strip()
+            if self._one_shot:
+                self.running = False
+                self._one_shot = False
+                self._one_shot_prefix = ""
+                await websocket.close()
+                await self.events.publish(
+                    "listening.stopped",
+                    {"reason": "one_shot_completed"},
+                )
             await self.events.publish("transcript.final", {"text": text})
             await self.on_final(text)
 

@@ -46,3 +46,30 @@ async def test_memory_create_list_delete(tmp_path) -> None:
     assert [item.content for item in items] == ["Lubię ciemny motyw."]
     assert deleted is True
     assert await store.list_memories() == []
+
+
+async def test_vector_memory_search(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+
+    await store.upsert_vector_memory(
+        source="screenpipe_activity",
+        source_id="cursor",
+        title="Cursor",
+        content="Praca nad projektem VoiceLoop w Cursorze.",
+        embedding=[1.0, 0.0, 0.0],
+        metadata={"app_name": "Cursor"},
+    )
+    await store.upsert_vector_memory(
+        source="screenpipe_activity",
+        source_id="browser",
+        title="Browser",
+        content="Czytanie wiadomości w przeglądarce.",
+        embedding=[0.0, 1.0, 0.0],
+    )
+
+    hits = await store.search_vector_memories([0.9, 0.1, 0.0], limit=1)
+
+    assert len(hits) == 1
+    assert hits[0].source_id == "cursor"
+    assert hits[0].metadata["app_name"] == "Cursor"

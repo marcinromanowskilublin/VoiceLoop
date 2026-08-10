@@ -9,7 +9,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($Macro -notmatch '^[A-Za-z0-9_.\-/]{1,160}\.json$') {
+if (
+    $Macro.Length -gt 160 -or
+    $Macro.Contains('..') -or
+    $Macro -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$' -or
+    [System.IO.Path]::GetFileName($Macro) -ne $Macro
+) {
     Write-Error 'Nieprawidlowa nazwa makra.'
     exit 2
 }
@@ -21,7 +26,16 @@ $uivisionHome = if ($env:UIVISION_HOME) { $env:UIVISION_HOME } else {
     Join-Path $env:USERPROFILE 'Desktop\uivision'
 }
 $page = Join-Path $uivisionHome 'ui.vision.html'
-$macroPath = Join-Path (Join-Path $uivisionHome 'macros') $Macro
+$macrosRoot = [System.IO.Path]::GetFullPath((Join-Path $uivisionHome 'macros'))
+$macroPath = [System.IO.Path]::GetFullPath((Join-Path $macrosRoot $Macro))
+$macrosPrefix = $macrosRoot.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $macroPath.StartsWith($macrosPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Error 'Makro musi znajdowac sie bezposrednio w katalogu runtime macros.'
+    exit 2
+}
 
 if (-not (Test-Path $chrome -PathType Leaf)) {
     Write-Error "Brak Chrome: $chrome"

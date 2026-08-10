@@ -113,7 +113,7 @@
 <body>
   <div class="layout">
     <header>
-      <h1>VoiceLoop <span>LM Studio · Deepgram · n8n · UI.Vision</span></h1>
+      <h1>VoiceLoop <span>Venice · Qwen · Nomic · Deepgram · n8n</span></h1>
       <div class="actions">
         <button id="listen">Start nasłuchu</button>
         <button id="refresh">Odśwież</button>
@@ -132,7 +132,10 @@
           <div class="composer-row">
             <div class="toggles">
               <label><input id="screen" type="checkbox"> dołącz aktywne okno</label>
-              <label><input id="cloud" type="checkbox"> zezwól na chmurę</label>
+              <label>
+                <input id="cloud" type="checkbox">
+                <span id="cloud-label">zezwól na chmurowy fallback</span>
+              </label>
             </div>
             <button id="send" class="primary">Wyślij</button>
           </div>
@@ -157,7 +160,12 @@
   </div>
 
   <script>
-    const state = { token: "", listening: false, commandIds: new Set() };
+    const state = {
+      token: "",
+      llmPrimary: "local",
+      listening: false,
+      commandIds: new Set()
+    };
     const $ = id => document.getElementById(id);
 
     async function api(path, options = {}) {
@@ -291,7 +299,7 @@
             source: "panel",
             text,
             include_screen: $("screen").checked,
-            allow_cloud: $("cloud").checked
+            allow_cloud: !$("cloud").disabled && $("cloud").checked
           })
         });
         if (result.plan) {
@@ -350,11 +358,19 @@
 
     async function init() {
       try {
-        state.token = (await api("/api/v1/session")).token;
+        const session = await api("/api/v1/session");
+        state.token = session.token;
+        state.llmPrimary = session.llm_primary || "local";
       } catch (error) {
         addMessage("system", "Nie udało się rozpocząć lokalnej sesji: " + error.message);
         return;
       }
+      const cloudPrimary = ["cloud", "venice"].includes(state.llmPrimary);
+      $("cloud").disabled = cloudPrimary;
+      $("cloud").checked = false;
+      $("cloud-label").textContent = cloudPrimary
+        ? "Venice jest modelem głównym (ustawienie serwera)"
+        : "zezwól na chmurowy fallback";
       $("send").onclick = sendCommand;
       $("prompt").onkeydown = event => {
         if (event.key === "Enter" && !event.shiftKey) {
@@ -378,7 +394,12 @@
       connectEvents();
       await Promise.all([loadHealth(), loadTasks(), loadMemories()]);
       setInterval(loadHealth, 8000);
-      addMessage("system", "VoiceLoop gotowy. Model lokalny jest używany domyślnie.");
+      addMessage(
+        "system",
+        cloudPrimary
+          ? "VoiceLoop gotowy. Venice jest głównym modelem, Qwen lokalnym fallbackiem."
+          : "VoiceLoop gotowy. Qwen jest głównym modelem lokalnym."
+      );
     }
 
     init();

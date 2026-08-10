@@ -38,12 +38,69 @@ class Settings(BaseSettings):
     lm_studio_model: str | None = None
     lm_studio_timeout_seconds: float = 90.0
 
+    llm_primary: str = "local"
     cloud_llm_enabled: bool = False
     cloud_llm_base_url: str | None = None
     cloud_llm_api_key: SecretStr | None = None
     cloud_llm_model: str | None = None
 
+    web_search_enabled: bool = True
+    web_search_provider: str = "duckduckgo"
+    web_search_fallback_provider: str = "duckduckgo"
+    web_search_api_key: SecretStr | None = None
+    web_search_gemini_model: str = "gemini-3.6-flash"
+    web_search_timeout_seconds: float = 6.0
+    web_search_max_results: int = 5
+
+    local_embeddings_enabled: bool = True
+    local_embeddings_base_url: str | None = None
+    local_embeddings_api_key: SecretStr | None = None
+    local_embeddings_model: str | None = None
+    local_embeddings_timeout_seconds: float = 30.0
+    vector_memory_context_limit: int = 8
+    qdrant_enabled: bool = True
+    qdrant_url: str = "http://127.0.0.1:6333"
+    qdrant_api_key: SecretStr | None = None
+    qdrant_collection: str = "voiceloop_memory"
+    qdrant_timeout_seconds: float = 10.0
+    qdrant_dual_write: bool = True
+    behavior_digest_enabled: bool = True
+    behavior_digest_model: str | None = None
+    behavior_digest_timeout_seconds: float = 240.0
+    behavior_digest_poll_seconds: int = 60
+    behavior_digest_recent_minutes: int = 30
+    behavior_digest_max_contexts: int = 24
+
+    screenpipe_enabled: bool = True
+    screenpipe_base_url: str = "http://127.0.0.1:3030"
+    screenpipe_api_token: SecretStr | None = None
+    screenpipe_timeout_seconds: float = 5.0
+    screenpipe_recent_window_seconds: int = 90
+    screenpipe_history_limit: int = 20
+    screenpipe_lookback_days: int = 14
+    screenpipe_deepgram_blocked_hosts: str = (
+        "youtube.com,www.youtube.com,m.youtube.com,music.youtube.com,youtu.be"
+    )
+    screenpipe_deepgram_call_hosts: str = (
+        "meet.google.com,teams.microsoft.com,zoom.us,discord.com,webex.com"
+    )
+    screenpipe_deepgram_call_apps: str = (
+        "zoom,teams,discord,webex,skype,slack"
+    )
+    screenpipe_deepgram_enabled: bool = True
+    screenpipe_deepgram_poll_seconds: int = 30
+    screenpipe_deepgram_meeting_grace_seconds: int = 90
+    screenpipe_deepgram_max_file_mb: int = 100
+    screenpipe_vector_memory_enabled: bool = True
+    screenpipe_vector_poll_seconds: int = 120
+    screenpipe_vector_recent_minutes: int = 60
+
     voiceattack_exe: str | None = None
+    azure_tts_enabled: bool = False
+    azure_tts_key: SecretStr | None = None
+    azure_tts_region: str | None = None
+    azure_tts_voice: str = "pl-PL-ZofiaNeural"
+    azure_tts_timeout_seconds: float = 20.0
     uivision_home: str | None = None
     uivision_timeout_seconds: int = 60
 

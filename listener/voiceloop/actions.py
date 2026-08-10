@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -12,11 +13,35 @@ from urllib.parse import urlparse
 
 from .memory import MemoryStore
 from .models import ActionResult, MemoryCreate, PlanStep, RiskLevel
+from .screenpipe import ScreenpipeClient, ScreenpipeError
 from .settings import Settings
 from .tts import WindowsTTS
+from .web_search import WebSearchClient, WebSearchError
 
 ActionHandler = Callable[[dict[str, Any]], Awaitable[tuple[str, dict[str, Any]]]]
 RISK_ORDER = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}
+NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{4,}\d|\d+(?:[.,]\d+)?)(?!\w)")
+TEXT_CONTROL_TYPES = {"Edit", "Document"}
+BROWSER_PROCESS_NAMES = {
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe",
+    "brave.exe",
+    "opera.exe",
+    "arc.exe",
+}
+ADDRESS_BAR_MARKERS = (
+    "address and search",
+    "address bar",
+    "search or enter web address",
+    "pasek adresu",
+    "pole adresu",
+    "adres i wyszukiwanie",
+    "omnibox",
+    "url",
+    "location",
+)
+LAST_WEB_SOURCES_STATE_KEY = "search_web.last_sources.v1"
 
 
 @dataclass(frozen=True)
@@ -27,6 +52,7 @@ class ActionSpec:
     risk: RiskLevel
     confirmation_required: bool
     handler: ActionHandler
+    execution_layer: int = 1
 
     def public_definition(self) -> dict[str, Any]:
         return {
@@ -35,14 +61,25 @@ class ActionSpec:
             "args_schema": self.args_schema,
             "risk": self.risk.value,
             "confirmation_required": self.confirmation_required,
+            "execution_layer": self.execution_layer,
         }
 
 
 class ActionRegistry:
-    def __init__(self, settings: Settings, memory: MemoryStore, tts: WindowsTTS) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        memory: MemoryStore,
+        tts: WindowsTTS,
+        screenpipe: ScreenpipeClient | None = None,
+        web_search: WebSearchClient | None = None,
+    ) -> None:
         self.settings = settings
         self.memory = memory
         self.tts = tts
+        self.screenpipe = screenpipe or ScreenpipeClient(settings)
+        self.web_search = web_search or WebSearchClient(settings)
+        self._last_web_sources: dict[str, Any] | None = None
         self._current_process: asyncio.subprocess.Process | None = None
         self._specs: dict[str, ActionSpec] = {}
         self._register_defaults()
@@ -86,11 +123,178 @@ class ActionRegistry:
         self._register(
             ActionSpec(
                 id="open_chat",
-                description="Otwiera stronę ChatGPT.",
+                description="Otwiera stronę ChatGPT (alias historyczny).",
                 args_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 risk=RiskLevel.LOW,
                 confirmation_required=False,
                 handler=self._open_chat,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="search_web",
+                description="Wyszukuje informacje w internecie i zwraca krótką listę wyników.",
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "minLength": 2, "maxLength": 400},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                        "api_name": {"type": "string", "minLength": 2, "maxLength": 200},
+                        "endpoint": {"type": "string", "minLength": 1, "maxLength": 300},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._search_web,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="open_gpt_chat",
+                description="Otwiera stronę ChatGPT.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._open_gpt_chat,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="open_gemini_chat",
+                description="Otwiera stronę Gemini.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._open_gemini_chat,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="describe_active_window",
+                description=(
+                    "Odczytuje tytuł i nazwę procesu aktualnie aktywnego okna Windows. "
+                    "Nie zapisuje danych, nie wykonuje kliknięć i nie tworzy zrzutu ekranu."
+                ),
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._describe_active_window,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="minimize_active_window",
+                description="Minimalizuje aktualnie aktywne okno Windows.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._minimize_active_window,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="minimize_all_windows",
+                description="Minimalizuje wszystkie otwarte okna i pokazuje pulpit.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._minimize_all_windows,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="copy_selected_text",
+                description="Kopiuje aktualnie zaznaczony tekst do schowka.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._copy_selected_text,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="copy_number_under_cursor",
+                description="Kopiuje numer wykryty w tekście pod kursorem do schowka.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._copy_number_under_cursor,
+                execution_layer=2,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="copy_sentence_under_cursor",
+                description="Kopiuje całe zdanie wykryte pod kursorem do schowka.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._copy_sentence_under_cursor,
+                execution_layer=2,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="describe_text_target",
+                description=(
+                    "Sprawdza aktywne okno i pole pod kursorem, aby potwierdzić gdzie "
+                    "trafi wpisywany tekst."
+                ),
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._describe_text_target,
+                execution_layer=2,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="paste_text_safe",
+                description=(
+                    "Wkleja tekst do aktywnego pola tylko gdy cel wygląda bezpiecznie "
+                    "(z blokadą paska adresu)."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1, "maxLength": 8000},
+                        "expected_window": {"type": "string", "maxLength": 160},
+                        "expected_app": {"type": "string", "maxLength": 80},
+                        "allow_address_bar": {"type": "boolean"},
+                    },
+                    "required": ["text"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.MEDIUM,
+                confirmation_required=True,
+                handler=self._paste_text_safe,
+                execution_layer=2,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="describe_recent_activity",
+                description=(
+                    "Odczytuje z lokalnego Screenpipe listę aplikacji i okien z ostatniego "
+                    "okresu. To akcja tylko do odczytu; nie pobiera obrazu ani audio."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "minutes": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 20160,
+                        }
+                    },
+                    "required": ["minutes"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._describe_recent_activity,
             )
         )
         self._register(
@@ -106,6 +310,7 @@ class ActionRegistry:
                 risk=RiskLevel.MEDIUM,
                 confirmation_required=False,
                 handler=self._create_note,
+                execution_layer=3,
             )
         )
         self._register(
@@ -115,7 +320,11 @@ class ActionRegistry:
                 args_schema={
                     "type": "object",
                     "properties": {
-                        "macro": {"type": "string"},
+                        "macro": {
+                            "type": "string",
+                            "pattern": r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$",
+                            "maxLength": 160,
+                        },
                         "var1": {"type": "string"},
                         "var2": {"type": "string"},
                         "var3": {"type": "string"},
@@ -126,6 +335,7 @@ class ActionRegistry:
                 risk=RiskLevel.MEDIUM,
                 confirmation_required=True,
                 handler=self._run_uivision_macro,
+                execution_layer=3,
             )
         )
         self._register(
@@ -144,6 +354,27 @@ class ActionRegistry:
                 risk=RiskLevel.MEDIUM,
                 confirmation_required=True,
                 handler=self._remember,
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="remember_last_source",
+                description=(
+                    "Zapisuje w pamięci ostatnie źródło z wyszukiwania internetowego "
+                    "lub sprawdzania dokumentacji API."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer", "minimum": 1, "maximum": 20},
+                        "note": {"type": "string", "maxLength": 500},
+                        "kind": {"type": "string", "maxLength": 50},
+                    },
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.MEDIUM,
+                confirmation_required=True,
+                handler=self._remember_last_source,
             )
         )
         self._register(
@@ -236,6 +467,9 @@ class ActionRegistry:
                 await process.wait()
         self._current_process = None
 
+    async def speak(self, text: str) -> None:
+        await self.tts.speak(text)
+
     async def _open_calendar(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         await asyncio.to_thread(os.startfile, "outlookcal:")
         return "Otwarto kalendarz.", {}
@@ -247,10 +481,662 @@ class ActionRegistry:
         return "Otwarto przeglądarkę.", {}
 
     async def _open_chat(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await self._open_gpt_chat(_)
+
+    async def _open_gpt_chat(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         opened = await asyncio.to_thread(webbrowser.open, "https://chatgpt.com", 2)
         if not opened:
             raise RuntimeError("Nie udało się otworzyć strony.")
         return "Otwarto ChatGPT.", {"url": "https://chatgpt.com"}
+
+    async def _open_gemini_chat(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        opened = await asyncio.to_thread(webbrowser.open, "https://gemini.google.com/app", 2)
+        if not opened:
+            raise RuntimeError("Nie udało się otworzyć strony.")
+        return "Otwarto Gemini.", {"url": "https://gemini.google.com/app"}
+
+    async def _search_web(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        query = str(args.get("query") or "").strip()
+        if len(query) < 2:
+            raise ValueError("Zapytanie do internetu jest zbyt krótkie.")
+        api_name = str(args.get("api_name") or "").strip()
+        endpoint = str(args.get("endpoint") or "").strip()
+        try:
+            requested_limit = int(args.get("limit", self.settings.web_search_max_results))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Parametr limit musi być liczbą całkowitą.") from exc
+        limit = max(1, min(requested_limit, 10))
+
+        if api_name and endpoint:
+            try:
+                inspection = await self.web_search.inspect_endpoint_in_documentation(
+                    api_name=api_name,
+                    endpoint=endpoint,
+                    limit=limit,
+                )
+            except WebSearchError as exc:
+                raise RuntimeError(str(exc)) from exc
+
+            docs_access = inspection.get("documentation_access", {})
+            docs_access_label = str(
+                docs_access.get("availability_label") or "nieznana"
+            ).strip()
+            checked_count = len(inspection.get("checked_sources", []))
+            matched_source = inspection.get("matched_source") or {}
+            matched_url = str(matched_source.get("url") or "").strip()
+
+            if inspection.get("endpoint_found"):
+                location = matched_url or "w dokumentacji online"
+                message = (
+                    f"Sprawdziłem API {api_name}. Endpoint „{endpoint}” wygląda na "
+                    f"dostępny ({location}). Dokumentacja: {docs_access_label}."
+                )
+            else:
+                message = (
+                    f"Sprawdziłem API {api_name}, ale nie potwierdziłem endpointu "
+                    f"„{endpoint}” w {checked_count} źródłach. Dokumentacja: "
+                    f"{docs_access_label}."
+                )
+
+            await self._store_last_web_sources(
+                query=str(inspection.get("query") or query),
+                results=inspection.get("results", []),
+                endpoint_check={
+                    "api_name": api_name,
+                    "endpoint": endpoint,
+                    "endpoint_found": bool(inspection.get("endpoint_found")),
+                    "documentation_access": docs_access,
+                },
+            )
+
+            return (
+                message,
+                {
+                    "query": inspection.get("query", query),
+                    "api_name": api_name,
+                    "endpoint": endpoint,
+                    "endpoint_check": inspection,
+                    "results": inspection.get("results", []),
+                },
+            )
+
+        try:
+            results = await self.web_search.search(query, limit=limit)
+        except WebSearchError as exc:
+            raise RuntimeError(str(exc)) from exc
+        serialized_results = [item.to_dict() for item in results]
+        await self._store_last_web_sources(query=query, results=serialized_results)
+        if not results:
+            return (
+                f"Nie znalazłem wyników dla: {query}.",
+                {"query": query, "results": []},
+            )
+        preview = "; ".join(
+            f"{index + 1}. {item.title}"
+            for index, item in enumerate(results[:3])
+        )
+        message = f"Znalazłem {len(results)} wyników dla „{query}”: {preview}."
+        return (
+            message,
+            {
+                "query": query,
+                "results": serialized_results,
+            },
+        )
+
+    async def _describe_active_window(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        message, data = await asyncio.to_thread(self._describe_active_window_sync)
+        if data["window_title"] or data["process_name"]:
+            return message, data
+
+        try:
+            context = await self.screenpipe.recent_context()
+        except ScreenpipeError:
+            context = None
+        if context is None:
+            return message, data
+
+        parts = ["Według ostatniego zapisu Screenpipe"]
+        if context.window_name:
+            parts.append(f"aktywne było okno: {context.window_name}")
+        if context.app_name:
+            parts.append(f"program: {context.app_name}")
+        return (
+            ". ".join(parts) + ".",
+            {
+                "window_title": context.window_name,
+                "process_name": context.app_name,
+                "source": "screenpipe",
+                "timestamp": context.timestamp,
+            },
+        )
+
+    async def _minimize_active_window(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        message, data = await asyncio.to_thread(self._minimize_active_window_sync)
+        return message, data
+
+    async def _minimize_all_windows(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        message, data = await asyncio.to_thread(self._minimize_all_windows_sync)
+        return message, data
+
+    async def _copy_selected_text(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._copy_selected_text_sync)
+
+    async def _copy_number_under_cursor(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._copy_number_under_cursor_sync)
+
+    async def _copy_sentence_under_cursor(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._copy_sentence_under_cursor_sync)
+
+    async def _describe_text_target(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._describe_text_target_sync)
+
+    async def _paste_text_safe(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._paste_text_safe_sync, args)
+
+    async def _describe_recent_activity(
+        self,
+        args: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        try:
+            requested_minutes = int(args.get("minutes", 30))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Parametr minutes musi być liczbą całkowitą.") from exc
+        max_minutes = max(1, self.settings.screenpipe_lookback_days) * 24 * 60
+        minutes = max(1, min(requested_minutes, max_minutes))
+        contexts = await self.screenpipe.recent_activity(minutes=minutes)
+        if not contexts:
+            return (
+                f"Screenpipe nie znalazł aktywności z ostatnich {minutes} minut.",
+                {"minutes": minutes, "items": []},
+            )
+
+        spoken = contexts[-8:]
+        labels = [
+            " — ".join(part for part in (item.app_name, item.window_name) if part)
+            for item in spoken
+        ]
+        message = (
+            f"W ostatnich {minutes} minutach Screenpipe zapisał między innymi: "
+            + "; ".join(label for label in labels if label)
+            + "."
+        )
+        return (
+            message,
+            {
+                "minutes": minutes,
+                "items": [
+                    {
+                        "app_name": item.app_name,
+                        "window_name": item.window_name,
+                        "timestamp": item.timestamp,
+                    }
+                    for item in contexts
+                ],
+            },
+        )
+
+    @staticmethod
+    def _describe_active_window_sync() -> tuple[str, dict[str, Any]]:
+        try:
+            import win32api
+            import win32con
+            import win32gui
+            import win32process
+        except ImportError as exc:
+            raise RuntimeError(f"Brak zależności Windows do odczytu aktywnego okna: {exc}") from exc
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            raise RuntimeError("Nie znaleziono aktywnego okna.")
+
+        title = (win32gui.GetWindowText(hwnd) or "").strip()
+        process_name = ""
+        try:
+            _, process_id = win32process.GetWindowThreadProcessId(hwnd)
+            handle = win32api.OpenProcess(
+                win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+                False,
+                process_id,
+            )
+            try:
+                process_name = os.path.basename(win32process.GetModuleFileNameEx(handle, 0))
+            finally:
+                win32api.CloseHandle(handle)
+        except Exception:
+            process_name = ""
+
+        if title and process_name:
+            message = f"Aktywne okno: {title}. Program: {process_name}."
+        elif title:
+            message = f"Aktywne okno: {title}."
+        elif process_name:
+            message = f"Aktywny program: {process_name}."
+        else:
+            message = "Aktywne okno nie ma dostępnego tytułu ani nazwy procesu."
+        return message, {"window_title": title, "process_name": process_name}
+
+    @staticmethod
+    def _minimize_active_window_sync() -> tuple[str, dict[str, Any]]:
+        try:
+            import win32con
+            import win32gui
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Brak zależności Windows do minimalizacji okna: {exc}"
+            ) from exc
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            raise RuntimeError("Nie znaleziono aktywnego okna.")
+        title = (win32gui.GetWindowText(hwnd) or "").strip()
+        if win32gui.IsIconic(hwnd):
+            message = (
+                f"Okno „{title}” jest już zminimalizowane."
+                if title
+                else "Aktywne okno jest już zminimalizowane."
+            )
+            return message, {"window_title": title, "already_minimized": True}
+
+        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        message = f"Zminimalizowałem okno „{title}”." if title else "Zminimalizowałem aktywne okno."
+        return message, {"window_title": title, "already_minimized": False}
+
+    @staticmethod
+    def _minimize_all_windows_sync() -> tuple[str, dict[str, Any]]:
+        try:
+            import win32com.client
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Brak zależności Windows do minimalizacji okien: {exc}"
+            ) from exc
+
+        shell = win32com.client.Dispatch("Shell.Application")
+        shell.MinimizeAll()
+        return "Zminimalizowałem wszystkie okna.", {"mode": "minimize_all"}
+
+    @staticmethod
+    def _describe_text_target_sync() -> tuple[str, dict[str, Any]]:
+        info = ActionRegistry._text_target_info_sync()
+        window_title = str(info.get("window_title") or "brak")
+        field_name = str(info.get("field_name") or "brak nazwy")
+        if info.get("looks_like_address_bar"):
+            message = (
+                f"Wykryłem pasek adresu lub wyszukiwania w oknie „{window_title}” "
+                f"(pole: „{field_name}”). Nie wpisuję tam tekstu."
+            )
+        elif info.get("is_editable"):
+            message = (
+                f"Pisanie wygląda bezpiecznie w oknie „{window_title}”, "
+                f"pole: „{field_name}”."
+            )
+        else:
+            message = (
+                f"Nie wykryłem aktywnego pola tekstowego w oknie „{window_title}”. "
+                "Najpierw kliknij docelowe pole wpisywania."
+            )
+        return message, info
+
+    @staticmethod
+    def _paste_text_safe_sync(args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        text = str(args.get("text") or "")
+        if not text.strip():
+            raise ValueError("Tekst do wpisania jest pusty.")
+
+        expected_window = str(args.get("expected_window") or "").strip().casefold()
+        expected_app = str(args.get("expected_app") or "").strip().casefold()
+        allow_address_bar = bool(args.get("allow_address_bar", False))
+        info = ActionRegistry._text_target_info_sync()
+        window_title = str(info.get("window_title") or "")
+        process_name = str(info.get("process_name") or "")
+
+        if expected_window and expected_window not in window_title.casefold():
+            raise RuntimeError(
+                f"Aktywne okno to „{window_title}”, a oczekiwane zawiera „{expected_window}”."
+            )
+        if (
+            expected_app
+            and expected_app not in process_name.casefold()
+            and expected_app not in window_title.casefold()
+        ):
+            raise RuntimeError(
+                f"Aktywna aplikacja to „{process_name or window_title}”, "
+                f"a oczekiwana zawiera „{expected_app}”."
+            )
+        if not info.get("is_editable"):
+            raise RuntimeError(
+                "Nie wykryłem aktywnego pola tekstowego pod kursorem. "
+                "Kliknij pole wpisywania i spróbuj ponownie."
+            )
+        if info.get("looks_like_address_bar") and not allow_address_bar:
+            raise RuntimeError(
+                "Wykryłem pasek adresu lub wyszukiwania. "
+                "Dla bezpieczeństwa przerwałem wpisywanie tekstu."
+            )
+
+        ActionRegistry._write_clipboard_text_sync(text)
+        ActionRegistry._send_paste_shortcut_sync()
+        field_name = str(info.get("field_name") or "pole tekstowe")
+        return (
+            f"Wkleiłem tekst do pola „{field_name}” w oknie „{window_title or 'bez tytułu'}”.",
+            {
+                "window_title": window_title,
+                "process_name": process_name,
+                "field_name": field_name,
+                "characters": len(text),
+                "safe_for_typing": bool(info.get("safe_for_typing")),
+            },
+        )
+
+    @staticmethod
+    def _text_target_info_sync() -> dict[str, Any]:
+        try:
+            import win32api
+            import win32con
+            import win32gui
+            import win32process
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Brak zależności Windows do weryfikacji pola tekstowego: {exc}"
+            ) from exc
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            raise RuntimeError("Nie znaleziono aktywnego okna.")
+        window_title = (win32gui.GetWindowText(hwnd) or "").strip()
+
+        process_name = ""
+        try:
+            _, process_id = win32process.GetWindowThreadProcessId(hwnd)
+            handle = win32api.OpenProcess(
+                win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+                False,
+                process_id,
+            )
+            try:
+                process_name = os.path.basename(win32process.GetModuleFileNameEx(handle, 0))
+            finally:
+                win32api.CloseHandle(handle)
+        except Exception:
+            process_name = ""
+
+        cursor_x, cursor_y = win32api.GetCursorPos()
+        field_name = ""
+        control_type = ""
+        automation_id = ""
+        class_name = ""
+        try:
+            from pywinauto import Desktop
+
+            wrapper = Desktop(backend="uia").from_point(cursor_x, cursor_y)
+            field_name = (getattr(wrapper, "window_text", lambda: "")() or "").strip()
+            element_info = getattr(wrapper, "element_info", None)
+            if element_info is not None:
+                element_name = str(getattr(element_info, "name", "") or "").strip()
+                if element_name:
+                    field_name = element_name
+                control_type = str(getattr(element_info, "control_type", "") or "").strip()
+                automation_id = str(getattr(element_info, "automation_id", "") or "").strip()
+                class_name = str(getattr(element_info, "class_name", "") or "").strip()
+        except Exception:
+            pass
+
+        control_lower = control_type.casefold()
+        class_lower = class_name.casefold()
+        is_editable = control_type in TEXT_CONTROL_TYPES or class_lower.startswith("edit")
+        combined = " ".join(
+            item
+            for item in (
+                field_name.casefold(),
+                automation_id.casefold(),
+                class_lower,
+                control_lower,
+            )
+            if item
+        )
+        looks_like_address_bar = any(marker in combined for marker in ADDRESS_BAR_MARKERS)
+        process_lower = process_name.casefold()
+        window_lower = window_title.casefold()
+        if (
+            not looks_like_address_bar
+            and process_lower in BROWSER_PROCESS_NAMES
+            and "search" in combined
+            and "chatgpt" not in window_lower
+            and "gemini" not in window_lower
+        ):
+            looks_like_address_bar = True
+
+        safe_for_typing = bool(is_editable and not looks_like_address_bar)
+        return {
+            "window_title": window_title,
+            "process_name": process_name,
+            "field_name": field_name,
+            "control_type": control_type,
+            "automation_id": automation_id,
+            "class_name": class_name,
+            "cursor_x": cursor_x,
+            "cursor_y": cursor_y,
+            "is_editable": bool(is_editable),
+            "looks_like_address_bar": bool(looks_like_address_bar),
+            "safe_for_typing": safe_for_typing,
+        }
+
+    @staticmethod
+    def _copy_selected_text_sync() -> tuple[str, dict[str, Any]]:
+        previous = ActionRegistry._read_clipboard_text_sync()
+        ActionRegistry._send_copy_shortcut_sync()
+        copied = ""
+        for _ in range(10):
+            time.sleep(0.05)
+            copied = ActionRegistry._read_clipboard_text_sync()
+            if copied.strip():
+                break
+        copied = copied.strip()
+        if not copied:
+            raise RuntimeError(
+                "Nie wykryłem zaznaczonego tekstu do skopiowania. Najpierw zaznacz tekst."
+            )
+
+        if previous.strip() and copied == previous.strip():
+            message = "Zaznaczony tekst jest już w schowku."
+        else:
+            message = "Skopiowałem zaznaczony tekst."
+        return message, {"text": copied, "source": "selection"}
+
+    @staticmethod
+    def _copy_number_under_cursor_sync() -> tuple[str, dict[str, Any]]:
+        candidates = ActionRegistry._text_candidates_under_cursor_sync()
+        if not candidates:
+            selected = ActionRegistry._safe_copy_selected_text_sync()
+            if selected:
+                candidates = [selected]
+        for candidate in candidates:
+            number = ActionRegistry._extract_number_from_text(candidate)
+            if number:
+                ActionRegistry._write_clipboard_text_sync(number)
+                return (
+                    f"Skopiowałem numer: {number}.",
+                    {"value": number, "source": "cursor_text"},
+                )
+        raise RuntimeError(
+            "Nie wykryłem numeru pod kursorem. Spróbuj wskazać tekst z numerem lub zaznaczyć go."
+        )
+
+    @staticmethod
+    def _copy_sentence_under_cursor_sync() -> tuple[str, dict[str, Any]]:
+        candidates = ActionRegistry._text_candidates_under_cursor_sync()
+        if not candidates:
+            selected = ActionRegistry._safe_copy_selected_text_sync()
+            if selected:
+                candidates = [selected]
+        for candidate in candidates:
+            sentence = ActionRegistry._extract_sentence_from_text(candidate)
+            if sentence:
+                ActionRegistry._write_clipboard_text_sync(sentence)
+                return (
+                    "Skopiowałem zdanie pod kursorem.",
+                    {"text": sentence, "source": "cursor_text"},
+                )
+        raise RuntimeError(
+            "Nie wykryłem pełnego zdania pod kursorem. Spróbuj wskazać obszar z tekstem."
+        )
+
+    @staticmethod
+    def _safe_copy_selected_text_sync() -> str:
+        try:
+            _, data = ActionRegistry._copy_selected_text_sync()
+            return str(data.get("text") or "").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _read_clipboard_text_sync() -> str:
+        try:
+            import win32clipboard
+            import win32con
+        except ImportError as exc:
+            raise RuntimeError(f"Brak zależności Windows do odczytu schowka: {exc}") from exc
+
+        for _ in range(6):
+            try:
+                win32clipboard.OpenClipboard()
+                try:
+                    if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                        value = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                        return str(value or "")
+                    return ""
+                finally:
+                    win32clipboard.CloseClipboard()
+            except Exception:
+                time.sleep(0.02)
+        return ""
+
+    @staticmethod
+    def _write_clipboard_text_sync(text: str) -> None:
+        try:
+            import win32clipboard
+            import win32con
+        except ImportError as exc:
+            raise RuntimeError(f"Brak zależności Windows do zapisu schowka: {exc}") from exc
+        cleaned = text.strip()
+        if not cleaned:
+            raise ValueError("Nie można zapisać pustego tekstu do schowka.")
+        for _ in range(6):
+            try:
+                win32clipboard.OpenClipboard()
+                try:
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, cleaned)
+                    return
+                finally:
+                    win32clipboard.CloseClipboard()
+            except Exception:
+                time.sleep(0.02)
+        raise RuntimeError("Nie udało się zapisać tekstu do schowka.")
+
+    @staticmethod
+    def _send_copy_shortcut_sync() -> None:
+        try:
+            import win32api
+            import win32con
+        except ImportError as exc:
+            raise RuntimeError(f"Brak zależności Windows do skrótu kopiowania: {exc}") from exc
+        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+        win32api.keybd_event(ord("C"), 0, 0, 0)
+        win32api.keybd_event(ord("C"), 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+    @staticmethod
+    def _send_paste_shortcut_sync() -> None:
+        try:
+            import win32api
+            import win32con
+        except ImportError as exc:
+            raise RuntimeError(f"Brak zależności Windows do skrótu wklejania: {exc}") from exc
+        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+        win32api.keybd_event(ord("V"), 0, 0, 0)
+        win32api.keybd_event(ord("V"), 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+    @staticmethod
+    def _text_candidates_under_cursor_sync() -> list[str]:
+        try:
+            import ctypes
+
+            from pywinauto import Desktop
+        except ImportError:
+            return []
+
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        point = POINT()
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(point)) == 0:
+            return []
+
+        try:
+            wrapper = Desktop(backend="uia").from_point(point.x, point.y)
+        except Exception:
+            return []
+
+        candidates: list[str] = []
+
+        def collect_text(value: str | None) -> None:
+            text = (value or "").strip()
+            if text:
+                text = re.sub(r"\s+", " ", text)
+                if text and text not in candidates:
+                    candidates.append(text)
+
+        collect_text(getattr(wrapper, "window_text", lambda: "")())
+        element_info = getattr(wrapper, "element_info", None)
+        if element_info is not None:
+            collect_text(getattr(element_info, "name", ""))
+
+        if hasattr(wrapper, "texts"):
+            try:
+                for text in wrapper.texts():
+                    collect_text(text)
+            except Exception:
+                pass
+
+        parent = wrapper
+        for _ in range(3):
+            try:
+                parent = parent.parent()
+            except Exception:
+                break
+            collect_text(getattr(parent, "window_text", lambda: "")())
+            parent_info = getattr(parent, "element_info", None)
+            if parent_info is not None:
+                collect_text(getattr(parent_info, "name", ""))
+
+        return candidates
+
+    @staticmethod
+    def _extract_number_from_text(text: str) -> str | None:
+        for match in NUMBER_PATTERN.finditer(text):
+            value = re.sub(r"\s+", " ", match.group(0)).strip()
+            if any(char.isdigit() for char in value):
+                return value
+        return None
+
+    @staticmethod
+    def _extract_sentence_from_text(text: str) -> str | None:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        if not cleaned:
+            return None
+        sentences = [
+            sentence.strip(" -")
+            for sentence in re.findall(r"[^.!?\n]+[.!?]?", cleaned)
+            if sentence.strip()
+        ]
+        for sentence in sentences:
+            if len(sentence.split()) >= 2:
+                return sentence
+        if len(cleaned.split()) >= 2:
+            return cleaned
+        return None
 
     async def _open_url(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         url = str(args.get("url") or "").strip()
@@ -266,21 +1152,31 @@ class ActionRegistry:
         text = str(args.get("text") or "").strip()
         if not text:
             raise ValueError("Treść notatki jest pusta.")
-        return await self._invoke_uivision(
+        _, data = await self._invoke_uivision(
             macro="voiceloop_notatka.json",
             var1=text[:8000],
             var2="",
             var3="",
         )
+        return "Notatka została zapisana.", data
 
     async def _run_uivision_macro(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         macro = str(args.get("macro") or "").strip()
-        if not re.fullmatch(r"[A-Za-z0-9_.\-/]{1,160}\.json", macro):
+        if (
+            len(macro) > 160
+            or ".." in macro
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.json", macro)
+        ):
             raise ValueError("Nieprawidłowa nazwa makra.")
         project_macro = self.settings.project_root / "uivision" / "macros" / macro
         runtime_macro = self.settings.ui_vision_home_path / "macros" / macro
-        if not project_macro.exists() and not runtime_macro.exists():
-            raise FileNotFoundError(f"Makro nie istnieje: {macro}")
+        if not project_macro.is_file():
+            raise FileNotFoundError(f"Makro nie znajduje się na allowliście projektu: {macro}")
+        if not runtime_macro.is_file():
+            raise FileNotFoundError(
+                f"Makro nie jest zsynchronizowane z runtime: {macro}. "
+                "Uruchom scripts\\sync-uivision.ps1."
+            )
         return await self._invoke_uivision(
             macro=macro,
             var1=str(args.get("var1") or "")[:8000],
@@ -347,6 +1243,81 @@ class ActionRegistry:
         )
         return "Zapamiętano.", {"memory_id": item.id}
 
+    async def _remember_last_source(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        try:
+            requested_index = int(args.get("index", 1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Parametr index musi być liczbą całkowitą.") from exc
+        index = max(1, min(requested_index, 20))
+
+        cached = await self._load_last_web_sources()
+        sources = cached.get("sources", []) if isinstance(cached, dict) else []
+        if not isinstance(sources, list) or not sources:
+            raise RuntimeError(
+                "Brak ostatnich źródeł do zapamiętania. Najpierw użyj wyszukiwania internetowego."
+            )
+        if index > len(sources):
+            raise ValueError(
+                f"Nie ma źródła nr {index}. Dostępnych źródeł: {len(sources)}."
+            )
+
+        source = sources[index - 1]
+        title = str(source.get("title") or source.get("url") or "bez tytułu").strip()
+        url = str(source.get("url") or "").strip()
+        if not url:
+            raise RuntimeError("Wybrane źródło nie ma adresu URL.")
+        snippet = str(source.get("snippet") or "").strip()
+        provider = str(source.get("provider") or "").strip()
+        query = str(cached.get("query") or "").strip()
+        endpoint_check = cached.get("endpoint_check")
+        note = str(args.get("note") or "").strip()
+
+        content_lines = [
+            f"Źródło WWW: {title}",
+            f"URL: {url}",
+        ]
+        if query:
+            content_lines.append(f"Zapytanie: {query}")
+        if provider:
+            content_lines.append(f"Provider: {provider}")
+        if snippet:
+            content_lines.append(f"Opis: {snippet[:600]}")
+        if isinstance(endpoint_check, dict):
+            api_name = str(endpoint_check.get("api_name") or "").strip()
+            endpoint = str(endpoint_check.get("endpoint") or "").strip()
+            found = bool(endpoint_check.get("endpoint_found"))
+            access = endpoint_check.get("documentation_access")
+            access_label = ""
+            if isinstance(access, dict):
+                access_label = str(access.get("availability_label") or "").strip()
+            status = "potwierdzony" if found else "niepotwierdzony"
+            if api_name or endpoint:
+                detail = " ".join(part for part in (api_name, endpoint) if part).strip()
+                content_lines.append(f"Weryfikacja endpointu ({status}): {detail}")
+            if access_label:
+                content_lines.append(f"Dostępność dokumentacji: {access_label}")
+        if note:
+            content_lines.append(f"Notatka: {note[:500]}")
+
+        item = await self.memory.create_memory(
+            MemoryCreate(
+                kind=str(args.get("kind") or "web_source")[:50],
+                content="\n".join(content_lines)[:10000],
+                sensitivity="private",
+                source="assistant",
+            )
+        )
+        return (
+            f"Zapamiętałem źródło {index}: {title}.",
+            {
+                "memory_id": item.id,
+                "index": index,
+                "available_sources": len(sources),
+                "title": title,
+                "url": url,
+            },
+        )
+
     async def _recall(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         query = str(args.get("query") or "").casefold().strip()
         if not query:
@@ -364,3 +1335,69 @@ class ActionRegistry:
             raise ValueError("Brak tekstu do wypowiedzenia.")
         await self.tts.speak(text)
         return "Wypowiedziano tekst.", {}
+
+    async def _store_last_web_sources(
+        self,
+        *,
+        query: str,
+        results: list[dict[str, Any]],
+        endpoint_check: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_sources: list[dict[str, Any]] = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            url = str(result.get("url") or "").strip()
+            if not url:
+                continue
+            title = str(result.get("title") or url).strip()
+            snippet = str(result.get("snippet") or "").strip()
+            provider = str(result.get("provider") or "").strip()
+            normalized_sources.append(
+                {
+                    "title": title[:300],
+                    "url": url[:2000],
+                    "snippet": snippet[:1000],
+                    "provider": provider[:80],
+                }
+            )
+            if len(normalized_sources) >= 20:
+                break
+
+        payload: dict[str, Any] = {
+            "query": query[:400],
+            "sources": normalized_sources,
+        }
+        if endpoint_check:
+            payload["endpoint_check"] = endpoint_check
+
+        self._last_web_sources = payload
+        try:
+            await self.memory.set_state(
+                LAST_WEB_SOURCES_STATE_KEY,
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            )
+        except Exception:
+            # Nie przerywamy wyszukiwania, gdy pamięć stanu jest chwilowo niedostępna.
+            return
+
+    async def _load_last_web_sources(self) -> dict[str, Any]:
+        if self._last_web_sources is not None:
+            return self._last_web_sources
+
+        raw_state = await self.memory.get_state(LAST_WEB_SOURCES_STATE_KEY)
+        if not raw_state:
+            self._last_web_sources = {"query": "", "sources": []}
+            return self._last_web_sources
+        try:
+            payload = json.loads(raw_state)
+        except json.JSONDecodeError:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if not isinstance(payload.get("sources"), list):
+            payload["sources"] = []
+        if not isinstance(payload.get("query"), str):
+            payload["query"] = ""
+        self._last_web_sources = payload
+        return payload

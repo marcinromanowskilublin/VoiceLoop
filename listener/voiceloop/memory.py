@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,41 @@ from .models import (
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+@dataclass(frozen=True)
+class VectorMemoryHit:
+    source: str
+    source_id: str
+    title: str
+    content: str
+    metadata: dict[str, Any]
+    score: float
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class StoredVectorMemory:
+    source: str
+    source_id: str
+    title: str
+    content: str
+    metadata: dict[str, Any]
+    embedding: list[float]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ScreenpipeTranscript:
+    chunk_id: str
+    meeting_id: int
+    device_name: str
+    device_type: str
+    start_time: str
+    end_time: str
+    text: str
+    source: str
+    created_at: datetime
 
 
 class MemoryStore:
@@ -75,12 +111,55 @@ class MemoryStore:
                         updated_at TEXT NOT NULL
                     );
 
+                    CREATE TABLE IF NOT EXISTS app_state (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS screenpipe_meeting_jobs (
+                        meeting_id INTEGER PRIMARY KEY,
+                        status TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        processed_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS screenpipe_transcripts (
+                        chunk_id TEXT PRIMARY KEY,
+                        meeting_id INTEGER NOT NULL,
+                        device_name TEXT NOT NULL,
+                        device_type TEXT NOT NULL,
+                        start_time TEXT NOT NULL,
+                        end_time TEXT NOT NULL,
+                        text TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS vector_memories (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
+                        embedding_json TEXT NOT NULL,
+                        dimension INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(source, source_id)
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_commands_created
                         ON commands(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_conversation_created
                         ON conversation(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_memories_kind
                         ON memories(kind, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_screenpipe_transcripts_created
+                        ON screenpipe_transcripts(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_vector_memories_source
+                        ON vector_memories(source, created_at DESC);
                     """
                 )
 
@@ -287,6 +366,332 @@ class MemoryStore:
 
         return await asyncio.to_thread(_delete)
 
+    async def has_vector_memory(self, *, source: str, source_id: str) -> bool:
+        def _has() -> bool:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT 1 FROM vector_memories
+                    WHERE source = ? AND source_id = ?
+                    """,
+                    (source, source_id),
+                ).fetchone()
+                return row is not None
+
+        return await asyncio.to_thread(_has)
+
+    async def upsert_vector_memory(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        title: str,
+        content: str,
+        embedding: list[float],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if not embedding:
+            return
+        now = _now_iso()
+        safe_embedding = [float(value) for value in embedding]
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False, separators=(",", ":"))
+        embedding_json = json.dumps(safe_embedding, separators=(",", ":"))
+
+        def _upsert() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO vector_memories(
+                        source, source_id, title, content, metadata_json,
+                        embedding_json, dimension, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source, source_id) DO UPDATE SET
+                        title = excluded.title,
+                        content = excluded.content,
+                        metadata_json = excluded.metadata_json,
+                        embedding_json = excluded.embedding_json,
+                        dimension = excluded.dimension,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        source[:80],
+                        source_id[:200],
+                        title[:500],
+                        content[:4000],
+                        metadata_json[:8000],
+                        embedding_json,
+                        len(safe_embedding),
+                        now,
+                        now,
+                    ),
+                )
+
+        await asyncio.to_thread(_upsert)
+
+    async def search_vector_memories(
+        self,
+        query_embedding: list[float],
+        *,
+        limit: int = 8,
+        source: str | None = None,
+        min_score: float = 0.15,
+        candidate_limit: int = 2000,
+    ) -> list[VectorMemoryHit]:
+        if not query_embedding:
+            return []
+        safe_limit = max(1, min(limit, 30))
+        safe_candidate_limit = max(safe_limit, min(candidate_limit, 10000))
+        query = [float(value) for value in query_embedding]
+
+        def _rows() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                if source:
+                    return connection.execute(
+                        """
+                        SELECT * FROM vector_memories
+                        WHERE source = ?
+                        ORDER BY updated_at DESC
+                        LIMIT ?
+                        """,
+                        (source, safe_candidate_limit),
+                    ).fetchall()
+                return connection.execute(
+                    """
+                    SELECT * FROM vector_memories
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (safe_candidate_limit,),
+                ).fetchall()
+
+        rows = await asyncio.to_thread(_rows)
+        hits: list[VectorMemoryHit] = []
+        for row in rows:
+            try:
+                embedding = [float(value) for value in json.loads(row["embedding_json"])]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            score = self._cosine_similarity(query, embedding)
+            if score < min_score:
+                continue
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+            hits.append(
+                VectorMemoryHit(
+                    source=row["source"],
+                    source_id=row["source_id"],
+                    title=row["title"],
+                    content=row["content"],
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                    score=score,
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+            )
+        hits.sort(key=lambda hit: hit.score, reverse=True)
+        return hits[:safe_limit]
+
+    async def list_stored_vector_memories(
+        self,
+        *,
+        limit: int = 10000,
+    ) -> list[StoredVectorMemory]:
+        safe_limit = max(1, min(limit, 100000))
+
+        def _rows() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM vector_memories
+                    ORDER BY updated_at ASC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
+
+        rows = await asyncio.to_thread(_rows)
+        memories: list[StoredVectorMemory] = []
+        for row in rows:
+            try:
+                embedding = [float(value) for value in json.loads(row["embedding_json"])]
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            memories.append(
+                StoredVectorMemory(
+                    source=row["source"],
+                    source_id=row["source_id"],
+                    title=row["title"],
+                    content=row["content"],
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                    embedding=embedding,
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+            )
+        return memories
+
+    async def get_state(self, key: str) -> str | None:
+        def _get() -> str | None:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT value FROM app_state WHERE key = ?",
+                    (key,),
+                ).fetchone()
+                return str(row["value"]) if row else None
+
+        return await asyncio.to_thread(_get)
+
+    async def set_state(self, key: str, value: str) -> None:
+        now = _now_iso()
+
+        def _set() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO app_state(key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at
+                    """,
+                    (key, value, now),
+                )
+
+        await asyncio.to_thread(_set)
+
+    async def has_screenpipe_meeting_job(self, meeting_id: int) -> bool:
+        def _has() -> bool:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT 1 FROM screenpipe_meeting_jobs WHERE meeting_id = ?",
+                    (meeting_id,),
+                ).fetchone()
+                return row is not None
+
+        return await asyncio.to_thread(_has)
+
+    async def mark_screenpipe_meeting_job(
+        self,
+        meeting_id: int,
+        *,
+        status: str,
+        reason: str,
+    ) -> None:
+        def _mark() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO screenpipe_meeting_jobs(meeting_id, status, reason, processed_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(meeting_id) DO UPDATE SET
+                        status = excluded.status,
+                        reason = excluded.reason,
+                        processed_at = excluded.processed_at
+                    """,
+                    (meeting_id, status[:40], reason[:500], _now_iso()),
+                )
+
+        await asyncio.to_thread(_mark)
+
+    async def save_screenpipe_transcript(
+        self,
+        *,
+        chunk_id: str,
+        meeting_id: int,
+        device_name: str,
+        device_type: str,
+        start_time: str,
+        end_time: str,
+        text: str,
+        source: str,
+    ) -> None:
+        def _save() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO screenpipe_transcripts(
+                        chunk_id, meeting_id, device_name, device_type,
+                        start_time, end_time, text, source, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(chunk_id) DO NOTHING
+                    """,
+                    (
+                        chunk_id,
+                        meeting_id,
+                        device_name[:500],
+                        device_type[:40],
+                        start_time,
+                        end_time,
+                        text[:100000],
+                        source[:40],
+                        _now_iso(),
+                    ),
+                )
+
+        await asyncio.to_thread(_save)
+
+    async def has_screenpipe_transcript(self, chunk_id: str) -> bool:
+        def _has() -> bool:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT 1 FROM screenpipe_transcripts WHERE chunk_id = ?",
+                    (chunk_id,),
+                ).fetchone()
+                return row is not None
+
+        return await asyncio.to_thread(_has)
+
+    async def list_screenpipe_transcripts(
+        self,
+        *,
+        limit: int = 500,
+    ) -> list[ScreenpipeTranscript]:
+        safe_limit = max(1, min(limit, 5000))
+
+        def _rows() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM screenpipe_transcripts
+                    ORDER BY start_time DESC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
+
+        rows = await asyncio.to_thread(_rows)
+        return [
+            ScreenpipeTranscript(
+                chunk_id=row["chunk_id"],
+                meeting_id=row["meeting_id"],
+                device_name=row["device_name"],
+                device_type=row["device_type"],
+                start_time=row["start_time"],
+                end_time=row["end_time"],
+                text=row["text"],
+                source=row["source"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
+
+    async def prune_screenpipe_transcripts(self, *, retention_days: int) -> int:
+        retention_days = max(1, min(retention_days, 365))
+
+        def _prune() -> int:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    DELETE FROM screenpipe_transcripts
+                    WHERE datetime(created_at) < datetime('now', ?)
+                    """,
+                    (f"-{retention_days} days",),
+                )
+                return cursor.rowcount
+
+        return await asyncio.to_thread(_prune)
+
     @staticmethod
     def _command_from_row(row: sqlite3.Row) -> CommandView:
         plan = CommandPlan.model_validate_json(row["plan_json"]) if row["plan_json"] else None
@@ -307,3 +712,18 @@ class MemoryStore:
             plan=plan,
             results=results,
         )
+
+    @staticmethod
+    def _cosine_similarity(left: list[float], right: list[float]) -> float:
+        if len(left) != len(right) or not left:
+            return 0.0
+        dot = 0.0
+        left_norm = 0.0
+        right_norm = 0.0
+        for left_value, right_value in zip(left, right, strict=True):
+            dot += left_value * right_value
+            left_norm += left_value * left_value
+            right_norm += right_value * right_value
+        if left_norm <= 0.0 or right_norm <= 0.0:
+            return 0.0
+        return dot / ((left_norm**0.5) * (right_norm**0.5))

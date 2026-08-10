@@ -6,7 +6,9 @@ from contextlib import suppress
 from .actions import ActionRegistry
 from .events import EventBus
 from .memory import MemoryStore
-from .models import ActionResult, CommandPlan, CommandStatus, CommandView
+from .models import ActionResult, CommandPlan, CommandStatus, CommandView, utc_now
+
+CONFIRMATION_TTL_SECONDS = 300
 
 
 class CommandExecutor:
@@ -82,9 +84,30 @@ class CommandExecutor:
         return await self._enqueue(plan)
 
     async def confirm(self, request_id: str) -> CommandView | None:
+        command = await self.memory.get_command(request_id)
+        if command is None or command.status is not CommandStatus.AWAITING_CONFIRMATION:
+            return command
+        age_seconds = (utc_now() - command.updated_at).total_seconds()
+        if age_seconds > CONFIRMATION_TTL_SECONDS:
+            self.pending_confirmation.pop(request_id, None)
+            expired = await self.memory.update_command(
+                request_id,
+                status=CommandStatus.CANCELLED,
+                error="Potwierdzenie wygasło.",
+            )
+            await self.events.publish(
+                "command.cancelled",
+                {"request_id": request_id, "reason": "confirmation_expired"},
+            )
+            return expired
+
         plan = self.pending_confirmation.pop(request_id, None)
         if plan is None:
-            return await self.memory.get_command(request_id)
+            if command.plan is None or not command.plan.steps:
+                return command
+            plan = command.plan
+            for step in plan.steps:
+                self.actions.enforce_policy(step)
         return await self._enqueue(plan)
 
     async def cancel(self, request_id: str) -> CommandView | None:
@@ -235,6 +258,10 @@ class CommandExecutor:
                         "error": result.message,
                     },
                 )
+                if plan.speak_result:
+                    await self.actions.speak(
+                        f"Nie udało się wykonać polecenia. {result.message}"[:1000]
+                    )
                 return
             successful_steps.add(step.id)
 
@@ -252,3 +279,7 @@ class CommandExecutor:
                 "results": [result.model_dump(mode="json") for result in results],
             },
         )
+        if plan.speak_result:
+            messages = [result.message.strip() for result in results if result.message.strip()]
+            if messages:
+                await self.actions.speak(" ".join(dict.fromkeys(messages))[:2000])

@@ -7,7 +7,7 @@ import secrets
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -16,7 +16,9 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .actions import ActionRegistry
 from .assistant import AssistantService
+from .behavior_digest import LocalBehaviorDigestClient
 from .deepgram import DeepgramListener
+from .embeddings import OpenAICompatibleEmbeddingClient
 from .events import EventBus
 from .executor import CommandExecutor
 from .memory import MemoryStore
@@ -32,11 +34,22 @@ from .models import (
     MemoryItem,
 )
 from .n8n_client import N8nClient
+from .qdrant_memory import QdrantVectorStore
 from .screen import ScreenContextService
+from .screenpipe import ScreenpipeClient
+from .screenpipe_deepgram import ScreenpipeMeetingTranscriber
+from .screenpipe_memory import ScreenpipeVectorMemoryWorker
 from .settings import Settings, get_settings
 from .tts import WindowsTTS
+from .web_search import WebSearchClient
 
 LOGGER = logging.getLogger("voiceloop")
+
+LISTEN_ONCE_MODES = {
+    "assistant": ("Słucham.", ""),
+    "note": ("Co zapisać w notatce?", "Zapisz notatkę"),
+    "remember": ("Co mam zapamiętać?", "Zapamiętaj"),
+}
 
 
 @dataclass
@@ -45,11 +58,20 @@ class Services:
     token: str
     memory: MemoryStore
     events: EventBus
+    screenpipe: ScreenpipeClient
+    web_search: WebSearchClient
+    screenpipe_transcriber: ScreenpipeMeetingTranscriber
+    embeddings: OpenAICompatibleEmbeddingClient
+    qdrant: QdrantVectorStore
+    behavior_digester: LocalBehaviorDigestClient
+    screenpipe_vector_memory: ScreenpipeVectorMemoryWorker
     actions: ActionRegistry
+    tts: WindowsTTS
     executor: CommandExecutor
     assistant: AssistantService
     deepgram: DeepgramListener
     local_planner: OpenAICompatiblePlanner
+    cloud_planner: OpenAICompatiblePlanner | None
     n8n: N8nClient
 
 
@@ -59,8 +81,44 @@ def build_services(settings: Settings) -> Services:
     token = settings.ensure_local_token()
     memory = MemoryStore(settings.data_dir / "voiceloop.db")
     events = EventBus()
-    tts = WindowsTTS()
-    actions = ActionRegistry(settings, memory, tts)
+    tts = WindowsTTS(
+        azure_enabled=settings.azure_tts_enabled,
+        azure_key=(
+            settings.azure_tts_key.get_secret_value().strip()
+            if settings.azure_tts_key
+            else None
+        ),
+        azure_region=settings.azure_tts_region,
+        azure_voice=settings.azure_tts_voice,
+        azure_timeout_seconds=settings.azure_tts_timeout_seconds,
+    )
+    screenpipe = ScreenpipeClient(settings)
+    web_search = WebSearchClient(settings)
+    screenpipe_transcriber = ScreenpipeMeetingTranscriber(settings, screenpipe, memory)
+    embeddings = OpenAICompatibleEmbeddingClient(
+        base_url=(settings.local_embeddings_base_url or settings.lm_studio_base_url),
+        api_key=settings.local_embeddings_api_key or settings.lm_studio_api_key,
+        model=settings.local_embeddings_model,
+        timeout_seconds=settings.local_embeddings_timeout_seconds,
+        enabled=settings.local_embeddings_enabled,
+    )
+    qdrant = QdrantVectorStore(settings)
+    behavior_digester = LocalBehaviorDigestClient(
+        base_url=settings.lm_studio_base_url,
+        api_key=settings.lm_studio_api_key,
+        model=settings.behavior_digest_model or settings.lm_studio_model,
+        timeout_seconds=settings.behavior_digest_timeout_seconds,
+        enabled=settings.behavior_digest_enabled,
+    )
+    screenpipe_vector_memory = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=screenpipe,
+        memory=memory,
+        embeddings=embeddings,
+        qdrant=qdrant,
+        digester=behavior_digester,
+    )
+    actions = ActionRegistry(settings, memory, tts, screenpipe, web_search)
     executor = CommandExecutor(
         memory=memory,
         actions=actions,
@@ -89,7 +147,15 @@ def build_services(settings: Settings) -> Services:
             model=settings.cloud_llm_model,
             timeout_seconds=settings.lm_studio_timeout_seconds,
         )
-    model_router = ModelRouter(local=local_planner, cloud=cloud_planner)
+    llm_primary = settings.llm_primary.strip().lower()
+    if llm_primary in {"cloud", "venice"} and cloud_planner is not None:
+        model_router = ModelRouter(
+            local=cloud_planner,
+            cloud=local_planner,
+            fallback_requires_allow_cloud=False,
+        )
+    else:
+        model_router = ModelRouter(local=local_planner, cloud=cloud_planner)
     screen = ScreenContextService(settings.data_dir / "screens")
     assistant = AssistantService(
         memory=memory,
@@ -99,13 +165,22 @@ def build_services(settings: Settings) -> Services:
         model_router=model_router,
         screen=screen,
         tts=tts,
+        embeddings=embeddings,
+        qdrant=qdrant,
         action_definitions=actions.definitions(),
         dedupe_seconds=settings.command_dedupe_seconds,
+        vector_context_limit=settings.vector_memory_context_limit,
     )
 
     async def on_deepgram_final(text: str) -> None:
         try:
-            await assistant.handle(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+            await assistant.handle(
+                CommandRequest(
+                    source=CommandSource.DEEPGRAM,
+                    text=text,
+                    allow_cloud=settings.cloud_llm_enabled,
+                )
+            )
         except Exception:
             LOGGER.exception("Deepgram command failed")
 
@@ -119,11 +194,20 @@ def build_services(settings: Settings) -> Services:
         token=token,
         memory=memory,
         events=events,
+        screenpipe=screenpipe,
+        web_search=web_search,
+        screenpipe_transcriber=screenpipe_transcriber,
+        embeddings=embeddings,
+        qdrant=qdrant,
+        behavior_digester=behavior_digester,
+        screenpipe_vector_memory=screenpipe_vector_memory,
         actions=actions,
+        tts=tts,
         executor=executor,
         assistant=assistant,
         deepgram=deepgram,
         local_planner=local_planner,
+        cloud_planner=cloud_planner,
         n8n=n8n,
     )
 
@@ -139,6 +223,8 @@ async def lifespan(app: FastAPI):
     app.state.services = services
     await services.memory.initialize()
     await services.executor.start()
+    await services.screenpipe_transcriber.start()
+    await services.screenpipe_vector_memory.start()
     if settings.auto_start_listening:
         try:
             await services.deepgram.start()
@@ -147,9 +233,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await services.screenpipe_vector_memory.stop()
+        await services.screenpipe_transcriber.stop()
         await services.deepgram.stop()
         await services.assistant.close()
         await services.executor.close()
+        await services.qdrant.close()
 
 
 app = FastAPI(
@@ -181,9 +270,13 @@ def require_token(
 @app.get("/", include_in_schema=False)
 async def panel(request: Request) -> FileResponse:
     services = services_from(request)
-    preferred = services.settings.panel_dir / "index.html"
-    fallback = services.settings.panel_dir / "deepgram.html"
-    return FileResponse(preferred if preferred.exists() else fallback)
+    panel_path = services.settings.panel_dir / "index.html"
+    if not panel_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Panel VoiceLoop nie jest dostępny.",
+        )
+    return FileResponse(panel_path)
 
 
 @app.get("/api/v1/session", include_in_schema=False)
@@ -192,17 +285,42 @@ async def session(request: Request) -> dict[str, str]:
     client_host = request.client.host if request.client else ""
     if client_host not in {"127.0.0.1", "::1", "localhost"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Local access only")
-    return {"token": services.token}
+    return {
+        "token": services.token,
+        "llm_primary": services.settings.llm_primary.strip().lower(),
+    }
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
     services = services_from(request)
-    (lm_ok, lm_detail), (n8n_ok, n8n_detail) = await asyncio.gather(
+    cloud_health = (
+        services.cloud_planner.health()
+        if services.cloud_planner is not None
+        else asyncio.sleep(0, result=(False, "wyłączony"))
+    )
+    (
+        (lm_ok, lm_detail),
+        (cloud_ok, cloud_detail),
+        (embeddings_ok, embeddings_detail),
+        (qdrant_ok, qdrant_detail),
+        (digest_ok, digest_detail),
+        (n8n_ok, n8n_detail),
+        (screenpipe_ok, screenpipe_detail),
+        (web_search_ok, web_search_detail),
+    ) = await asyncio.gather(
         services.local_planner.health(),
+        cloud_health,
+        services.embeddings.health(),
+        services.qdrant.health(),
+        services.behavior_digester.health(),
         services.n8n.health(),
+        services.screenpipe.health(),
+        services.web_search.health(),
     )
     dg_ok, dg_detail = services.deepgram.health()
+    screenpipe_dg_ok, screenpipe_dg_detail = services.screenpipe_transcriber.health()
+    memory_worker_ok, memory_worker_detail = services.screenpipe_vector_memory.health()
     ui_page = services.settings.ui_vision_home_path / "ui.vision.html"
     va_path = services.settings.voiceattack_path
     components = {
@@ -211,6 +329,22 @@ async def health(request: Request) -> HealthResponse:
             status="ok" if lm_ok else "error",
             detail=lm_detail,
         ),
+        "cloud_llm": HealthComponent(
+            status="ok" if cloud_ok else ("error" if services.cloud_planner else "stopped"),
+            detail=cloud_detail,
+        ),
+        "local_embeddings": HealthComponent(
+            status="ok" if embeddings_ok else "stopped",
+            detail=embeddings_detail,
+        ),
+        "qdrant": HealthComponent(
+            status="ok" if qdrant_ok else "stopped",
+            detail=qdrant_detail,
+        ),
+        "behavior_digest": HealthComponent(
+            status="ok" if digest_ok else "stopped",
+            detail=digest_detail,
+        ),
         "n8n": HealthComponent(
             status="ok" if n8n_ok else "error",
             detail=n8n_detail,
@@ -218,6 +352,22 @@ async def health(request: Request) -> HealthResponse:
         "deepgram": HealthComponent(
             status="ok" if dg_ok else "stopped",
             detail=dg_detail,
+        ),
+        "screenpipe": HealthComponent(
+            status="ok" if screenpipe_ok else "stopped",
+            detail=screenpipe_detail,
+        ),
+        "web_search": HealthComponent(
+            status="ok" if web_search_ok else "stopped",
+            detail=web_search_detail,
+        ),
+        "screenpipe_deepgram": HealthComponent(
+            status="ok" if screenpipe_dg_ok else "stopped",
+            detail=screenpipe_dg_detail,
+        ),
+        "screenpipe_vector_memory": HealthComponent(
+            status="ok" if memory_worker_ok else "stopped",
+            detail=memory_worker_detail,
         ),
         "ui_vision": HealthComponent(
             status="ok" if ui_page.exists() else "setup_required",
@@ -228,7 +378,12 @@ async def health(request: Request) -> HealthResponse:
             detail=str(va_path),
         ),
     }
-    overall = "ok" if lm_ok else "degraded"
+    vector_backend_ok = qdrant_ok or not services.settings.qdrant_enabled
+    overall = (
+        "ok"
+        if (lm_ok or cloud_ok) and screenpipe_ok and vector_backend_ok
+        else "degraded"
+    )
     return HealthResponse(status=overall, version=__version__, components=components)
 
 
@@ -301,6 +456,20 @@ async def start_listening(
 ) -> dict[str, str]:
     await services.deepgram.start()
     return {"status": "starting"}
+
+
+@app.post("/api/v1/listening/once")
+async def listen_once(
+    services: Annotated[Services, Depends(require_token)],
+    mode: Annotated[
+        Literal["assistant", "note", "remember"],
+        Query(),
+    ] = "assistant",
+) -> dict[str, str]:
+    prompt, prefix = LISTEN_ONCE_MODES[mode]
+    await services.tts.speak(prompt)
+    await services.deepgram.start_once(prefix=prefix)
+    return {"status": "listening_once", "mode": mode}
 
 
 @app.post("/api/v1/listening/stop")

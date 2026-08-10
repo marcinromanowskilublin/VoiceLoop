@@ -7,7 +7,7 @@ from pywinauto import Desktop
 from pywinauto.keyboard import send_keys
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = ROOT / "voiceattack" / "VoiceLoop-profil.vap"
+PROFILE = ROOT / "voiceattack" / "VoiceLoop-v2.vap"
 OUT = ROOT / "logs" / "voiceattack-import-attempt.txt"
 lines: list[str] = []
 
@@ -105,8 +105,8 @@ def main() -> int:
     # Prefer typing into focused file dialog via keyboard
     try:
         dialog.set_focus()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"DIALOG_FOCUS_ERR|{exc}")
     time.sleep(0.2)
     send_keys("^l")  # focus address/filename area on modern dialogs
     time.sleep(0.2)
@@ -122,7 +122,8 @@ def main() -> int:
                 if control.element_info.automation_id == "cboProfile":
                     try:
                         control.expand()
-                    except Exception:
+                    except Exception as exc:  # noqa: BLE001
+                        lines.append(f"PROFILE_EXPAND_ERR|{exc}")
                         control.click_input()
                     time.sleep(0.7)
                     dump("PROFILE_COMBO", window)
