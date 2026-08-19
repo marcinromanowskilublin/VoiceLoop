@@ -8,7 +8,12 @@ from pathlib import Path
 import httpx
 
 from .memory import MemoryStore
-from .screenpipe import ScreenpipeAudioChunk, ScreenpipeClient, ScreenpipeMeeting
+from .models import (
+    TranscriptEnvelopeV1,
+    TranscriptWordV1,
+    normalize_transcript_text,
+)
+from .screenpipe import ScreenpipeAudioChunk, ScreenpipeClient, ScreenpipeError, ScreenpipeMeeting
 from .screenpipe_audio_policy import DeepgramAudioPolicy
 from .settings import Settings
 
@@ -37,11 +42,15 @@ class DeepgramFileTranscriber:
         return bool(self.api_key and self.api_key.get_secret_value().strip())
 
     async def transcribe(self, path: Path) -> str:
+        envelope = await self.transcribe_envelope(path)
+        return envelope.raw_text if envelope is not None else ""
+
+    async def transcribe_envelope(self, path: Path) -> TranscriptEnvelopeV1 | None:
         if not self.available:
             raise DeepgramFileError("Brak klucza DEEPGRAM_API_KEY.")
         size = path.stat().st_size
         if size <= 0:
-            return ""
+            return None
         if size > self.max_bytes:
             raise DeepgramFileError(f"Plik audio przekracza limit {self.max_bytes} bajtów.")
 
@@ -74,15 +83,84 @@ class DeepgramFileTranscriber:
                 )
                 response.raise_for_status()
                 payload = response.json()
-            return str(
-                payload["results"]["channels"][0]["alternatives"][0].get("transcript") or ""
-            ).strip()
+            return envelope_from_deepgram_payload(
+                payload,
+                language=self.language,
+                model=self.model,
+            )
         except httpx.HTTPStatusError as exc:
             raise DeepgramFileError(
                 f"Deepgram zwrócił HTTP {exc.response.status_code}."
             ) from exc
         except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
             raise DeepgramFileError("Deepgram nie zwrócił poprawnej transkrypcji.") from exc
+
+
+def envelope_from_deepgram_payload(
+    payload: dict,
+    *,
+    language: str,
+    model: str,
+) -> TranscriptEnvelopeV1 | None:
+    alternative = payload["results"]["channels"][0]["alternatives"][0]
+    transcript = str(alternative.get("transcript") or "").strip()
+    if not transcript:
+        return None
+    words = tuple(
+        TranscriptWordV1(
+            word=str(item.get("word") or item.get("punctuated_word") or "").strip(),
+            punctuated_word=(
+                str(item["punctuated_word"]).strip()
+                if item.get("punctuated_word")
+                else None
+            ),
+            start_seconds=float(item.get("start") or 0.0),
+            end_seconds=float(item.get("end") or item.get("start") or 0.0),
+            confidence=(
+                float(item["confidence"]) if item.get("confidence") is not None else None
+            ),
+            speaker_id=(int(item["speaker"]) if item.get("speaker") is not None else None),
+        )
+        for item in alternative.get("words") or []
+        if isinstance(item, dict)
+        and str(item.get("word") or item.get("punctuated_word") or "").strip()
+    )
+    confidences = [word.confidence for word in words if word.confidence is not None]
+    alternative_confidence = alternative.get("confidence")
+    confidence_mean = (
+        sum(confidences) / len(confidences)
+        if confidences
+        else (
+            float(alternative_confidence)
+            if alternative_confidence is not None
+            else None
+        )
+    )
+    speaker_ids = tuple(
+        sorted(
+            {
+                word.speaker_id
+                for word in words
+                if word.speaker_id is not None
+            }
+        )
+    )
+    starts = [word.start_seconds for word in words]
+    ends = [word.end_seconds for word in words]
+    return TranscriptEnvelopeV1(
+        raw_text=transcript,
+        normalized_text=normalize_transcript_text(transcript),
+        language=language,
+        confidence_mean=confidence_mean,
+        confidence_min=min(confidences) if confidences else confidence_mean,
+        words=words,
+        started_at_seconds=min(starts) if starts else None,
+        ended_at_seconds=max(ends) if ends else None,
+        speaker_ids=speaker_ids,
+        is_final=True,
+        speech_final=True,
+        model=model,
+    )
 
 
 class ScreenpipeMeetingTranscriber:
@@ -137,6 +215,7 @@ class ScreenpipeMeetingTranscriber:
         return running, self._last_status
 
     async def _run(self) -> None:
+        backoff_seconds = float(self.poll_seconds)
         while not self._stop.is_set():
             try:
                 processed = await self.process_once()
@@ -145,11 +224,22 @@ class ScreenpipeMeetingTranscriber:
                     if processed
                     else "działa; oczekuje na zakończone spotkanie"
                 )
+                backoff_seconds = float(self.poll_seconds)
+            except asyncio.CancelledError:
+                raise
+            except ScreenpipeError as exc:
+                self._last_status = f"Screenpipe niedostępny: {exc}"
+                LOGGER.warning(
+                    "Selective Screenpipe transcription paused: %s",
+                    exc,
+                )
+                backoff_seconds = min(max(backoff_seconds * 2, self.poll_seconds), 300.0)
             except Exception as exc:
                 self._last_status = f"błąd: {type(exc).__name__}"
                 LOGGER.exception("Selective Screenpipe transcription failed")
+                backoff_seconds = min(max(backoff_seconds * 2, self.poll_seconds), 300.0)
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.poll_seconds)
+                await asyncio.wait_for(self._stop.wait(), timeout=backoff_seconds)
             except TimeoutError:
                 pass
 

@@ -1,2 +1,5 @@
+azure-cognitiveservices-speech>=1.51.1
+numpy>=2.0
+SoundCard>=0.4.6
 sounddevice>=0.4.6
 websockets>=12

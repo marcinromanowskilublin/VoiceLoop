@@ -2,7 +2,7 @@
 
 **Wersja projektu:** 0.2.0  
 **Platforma:** Windows, uruchomienie lokalne  
-**Stan dokumentu:** 10 sierpnia 2026  
+**Stan dokumentu:** 11 sierpnia 2026
 **Repozytorium:** `C:\Users\marci\VoiceLoop`
 
 ---
@@ -32,7 +32,8 @@ Kontynuujesz projekt VoiceLoop znajdujący się w:
 C:\Users\marci\VoiceLoop
 
 VoiceLoop to lokalny asystent Windows z bezpiecznym rdzeniem FastAPI.
-Venice AI jest głównym planerem i mózgiem rozmowy.
+Gemini jest głównym mózgiem rozmowy. Venice pozostaje opcjonalnym providerem
+chmurowym, a zadania przechodzą przez typowany, walidowany planer.
 LM Studio pełni dwie lokalne role:
 1) Qwen 2.5 14B Instruct jest fallbackiem czatu,
 2) Nomic Embed generuje lokalne embeddingi.
@@ -40,7 +41,7 @@ LM Studio pełni dwie lokalne role:
 Screenpipe rejestruje lokalny kontekst aktywności. Worker VoiceLoop tworzy
 embeddingi metadanych aktywności i zapisuje je w SQLite. Przy nowym zapytaniu
 retriever wybiera podobne wpisy i przekazuje kilka trafnych fragmentów do
-Venice jako kontekst.
+aktywnego planera jako kontekst.
 
 n8n obsługuje prosty routing dokładnych intencji. UI.Vision wykonuje
 dozwolone makra ekranowe. VoiceAttack rozpoznaje stałe komendy i frazą
@@ -96,25 +97,27 @@ Stan zweryfikowany na żywym systemie:
 | Komponent | Stan | Rola |
 |---|---:|---|
 | VoiceLoop FastAPI `:8765` | OK | rdzeń, API, panel, kolejka |
-| Venice AI | OK | główny planer i mózg rozmowy |
+| Gemini | OK | główny model rozmowy |
+| Venice AI | OK | opcjonalny provider chmurowy |
 | LM Studio Qwen 2.5 14B | OK | fallback czatu i lokalna analiza aktywności |
 | LM Studio Nomic Embed | OK | lokalne embeddingi, 768 wymiarów |
 | Qdrant `:6333` | OK | pięć przestrzeni wektorowych pamięci lokalnej |
-| n8n `:5678` | OK | router prostych intencji |
+| n8n `:5678` | wyłączony | opcjonalny router prostych intencji |
 | Screenpipe `:3030` | OK | lokalne źródło aktywności i spotkań |
 | Screenpipe vector worker | OK | Qwen → Nomic → Qdrant + dual-write SQLite |
 | Screenpipe meeting worker | OK | oczekiwanie na zakończone spotkania |
 | UI.Vision | OK | dozwolone automatyzacje ekranowe |
 | VoiceAttack | OK | profil v2: 15 stałych komend i wyzwalanie one-shot Deepgram |
-| Deepgram live listener | zatrzymany | uruchamiany na żądanie |
+| Deepgram live listener | OK | Nova-3 PL, one-shot, streaming diarization |
 
 Aktualne modele:
 
-- główny planer: `venice-uncensored-1-2`,
+- główny model rozmowy: `gemini-3.5-flash`,
+- opcjonalny provider: `venice-uncensored-1-2`,
 - lokalny fallback: `qwen2.5-14b-instruct-1m-abliterated`,
 - embeddingi: `text-embedding-nomic-embed-text-v2-moe`.
 
-Smoke test oraz zestaw testów jednostkowych przechodziły po ostatnich zmianach.
+Po ostatnich zmianach pełny zestaw 200 testów i Ruff przechodzą bez błędów.
 
 ---
 
@@ -154,7 +157,7 @@ Smoke test oraz zestaw testów jednostkowych przechodziły po ostatnich zmianach
                          SQLite dual-write/fallback
                                   │ top-k kontekstu
                                   ▼
-                       Venice AI jako primary
+                       Gemini jako primary
                                   │ błąd / niska pewność
                                   ▼
                        Qwen w LM Studio jako fallback
@@ -238,7 +241,25 @@ STOP jest rozpoznawany przed zwykłym planowaniem. Powoduje:
 - zakończenie bieżącego procesu UI.Vision,
 - publikację zdarzenia `stop`.
 
-### 7.4. Routing n8n
+### 7.4. Potwierdzana przerwa czasowa
+
+`VoiceConversationCoordinator` rozpoznaje lokalnie frazę:
+
+```text
+Przerwij działanie na <liczba> <sekund|minut|godzin>
+```
+
+Komenda nie trafia do modelu ani executora. Koordynator zapisuje oczekującą
+wartość i zawsze pyta o potwierdzenie. Dopiero `potwierdzam` przełącza stan na
+`paused`; `anuluj` usuwa oczekującą przerwę. W stanie `paused` Deepgram pozostaje
+aktywny wyłącznie po to, aby rozpoznać `wznów działanie`/`włącz się`/`koniec
+przerwy`; wszystkie inne transkrypty są ignorowane i nie trafiają do LLM ani
+akcji. Osobny task wznawia sesję automatycznie po upływie czasu. Limit jednej
+przerwy wynosi 24 godziny. Parser przyjmuje cyfry i polskie liczebniki 1–99.
+Callback aplikacji przekazuje tę komendę do koordynatora również poza aktywną
+sesją managed conversation, dlatego zawsze przechodzi ona przez potwierdzenie.
+
+### 7.5. Routing n8n
 
 Pierwszą próbą dla zwykłej komendy jest webhook n8n:
 
@@ -257,7 +278,7 @@ Jeśli n8n odpowie `unknown`, `none` albo `no_action`, VoiceLoop przechodzi dale
 Jeśli n8n nie działa, błąd jest traktowany jako fallback, a nie awaria całego
 asystenta.
 
-### 7.5. Router deterministyczny
+### 7.6. Router deterministyczny
 
 `router.py` obsługuje bez modelu:
 
@@ -272,7 +293,7 @@ asystenta.
 
 Ta ścieżka jest szybka, tania i przewidywalna.
 
-### 7.6. Retrieval lokalnej pamięci wektorowej
+### 7.7. Retrieval lokalnej pamięci wektorowej
 
 Jeśli komenda wymaga modelu:
 
@@ -289,7 +310,7 @@ Jeśli Qdrant jest wyłączony, niedostępny albo nie zwróci trafień, asystent
 korzysta z wcześniejszego wyszukiwania cosine w SQLite. SQLite pozostaje więc
 lokalnym fallbackiem i celem opcjonalnego dual-write.
 
-### 7.7. Venice jako główny planer
+### 7.8. Venice jako opcjonalny planer chmurowy
 
 Przy `LLM_PRIMARY=cloud` lub `LLM_PRIMARY=venice`:
 
@@ -303,7 +324,7 @@ Przy `LLM_PRIMARY=cloud` lub `LLM_PRIMARY=venice`:
 Model nie może zwrócić dowolnej komendy systemowej. Kroki o nieznanym
 `action_id` są odrzucane podczas konwersji planu.
 
-### 7.8. Qwen jako lokalny fallback
+### 7.9. Qwen jako lokalny fallback
 
 Jeśli Venice:
 
@@ -315,7 +336,7 @@ router może użyć Qwen z LM Studio. Fallback dostaje pustą historię, pustą 
 i bez obrazu ekranu. Ogranicza to ilość prywatnego kontekstu przekazywanego do
 ścieżki awaryjnej i upraszcza zachowanie fallbacku.
 
-### 7.9. Egzekucja planu
+### 7.10. Egzekucja planu
 
 Przed kolejką każdy krok przechodzi przez `ActionRegistry.enforce_policy()`:
 
@@ -337,7 +358,7 @@ Executor:
 
 ## 8. Modele i podział odpowiedzialności
 
-### 8.1. Venice AI — główny mózg
+### 8.1. Gemini — główny model rozmowy
 
 Odpowiada za:
 
@@ -349,10 +370,16 @@ Odpowiada za:
 - decyzję o potrzebie doprecyzowania,
 - ocenę pewności i proponowanego ryzyka.
 
-Venice **nie wykonuje akcji bezpośrednio**. Jego wynik jest tylko propozycją
-planu, którą lokalny kod filtruje i waliduje.
+Rozmowa używa zwykłego tekstu z kontrolą `finish_reason`, długości i końcowej
+interpunkcji. Zadania używają osobnego kontraktu JSON Schema. Gemini **nie
+wykonuje akcji bezpośrednio**; lokalny kod filtruje i waliduje plan.
 
-### 8.2. Qwen 2.5 14B — lokalny fallback
+### 8.2. Venice AI — opcjonalny provider chmurowy
+
+Venice może przejąć planowanie po ustawieniu `LLM_PRIMARY=venice`/`cloud` oraz
+obsługiwać wyszukiwanie. Obowiązują go te same lokalne kontrakty i allowlista.
+
+### 8.3. Qwen 2.5 14B — lokalny fallback
 
 Model:
 
@@ -360,11 +387,11 @@ Model:
 qwen2.5-14b-instruct-1m-abliterated
 ```
 
-Odpowiada za awaryjne planowanie, gdy Venice nie może odpowiedzieć, oraz za
+Odpowiada za awaryjne planowanie, gdy provider główny nie może odpowiedzieć, oraz za
 lokalny `behavior digest` aktywności Screenpipe: streszczenie, temat, intencję,
 decyzje i kontekst osób. Nie powinien być mylony z modelem embeddingowym.
 
-### 8.3. Nomic Embed — lokalny model wektorowy
+### 8.4. Nomic Embed — lokalny model wektorowy
 
 Model:
 
@@ -536,7 +563,11 @@ jeszcze osobnego publicznego `action_id`.
 | GET | `/api/v1/commands/{id}` | token | stan komendy |
 | POST | `/api/v1/commands/{id}/confirm` | token | potwierdzenie |
 | POST | `/api/v1/commands/{id}/cancel` | token | anulowanie |
-| POST | `/api/v1/stop` | token | globalny STOP |
+| POST | `/api/v1/stop` | token | soft barge-in: ucina TTS i wraca do słuchania |
+| POST | `/api/v1/conversation/interrupt` | token | soft barge-in rozmowy |
+| POST | `/api/v1/conversation/start` | token | jedno powitanie TTS + Deepgram one-shot |
+| POST | `/api/v1/conversation/resume` | token | natychmiast kończy aktywną przerwę czasową |
+| POST | `/api/v1/conversation/stop` | token | twarde zakończenie sesji rozmowy |
 | POST | `/api/v1/listening/start` | token | start Deepgram live |
 | POST | `/api/v1/listening/once?mode=...` | token | jedna wypowiedź: assistant, note lub remember |
 | POST | `/api/v1/listening/stop` | token | stop Deepgram live |
@@ -643,19 +674,49 @@ klucza. Wyświetla komunikat migracyjny i przekierowuje do głównego panelu.
 - otwiera WebSocket do modelu z `DEEPGRAM_MODEL` (domyślnie `nova-3`),
 - używa języka z `DEEPGRAM_LANGUAGE` (domyślnie `pl`),
 - przesyła mono PCM 16 kHz,
-- publikuje interim i final transcripts,
+- publikuje interim i final transcripts wraz z `speaker_ids`,
 - agreguje finalne fragmenty wypowiedzi,
+- przetwarza zwykłe callbacki w ograniczonych, sekwencyjnych kolejkach,
+- kieruje STOP, pauzę, potwierdzenie i wznowienie osobną ścieżką priorytetową,
+  która nie czeka za odpowiedzią modelu i nie jest odrzucana przy przepełnieniu,
 - ma keepalive,
-- ponawia połączenie z backoffem.
+- ponawia połączenie z backoffem,
+- serializuje start/stop blokadą lifecycle, aby równoległe `start_once` nie
+  tworzyły osieroconych strumieni mikrofonu.
 
-Nasłuch jest domyślnie wyłączony i włączany przez panel lub API.
+Live STT domyślnie dodaje `diarize_model=latest` (obecnie streaming diarizer v1).
+Parametr `diarize=true` jest przestarzały i nie jest wysyłany.
 
-### 15.2. Spotkania Screenpipe
+### 15.2. Diaryzacja i ochrona przed rozmową w tle
+
+Diaryzacja Deepgram rozróżnia zmiany mówców przy małym koszcie opóźnienia, ale
+zwraca wyłącznie lokalne numery `speaker` — nie rozpoznaje właściciela głosu.
+Ponieważ half-duplex zestawia nowy WebSocket po TTS, identyfikatory nie są trwałe
+między turami.
+
+Zastosowane zabezpieczenia:
+
+- co najmniej dwa numery mówców w jednej wypowiedzi → ignorowanie bez zwrotu do
+  modelu, chyba że tekst zaczyna się od `Asystencie…`/`Venice…`,
+- po `CONVERSATION_DIRECT_ADDRESS_AFTER_SECONDS` (domyślnie 30 s) kończy się
+  okno swobodnego follow-upu i ponownie jest wymagany bezpośredni zwrot,
+- podczas potwierdzonej przerwy przechodzą wyłącznie frazy wznowienia,
+- echo aktualnego TTS jest porównywane z interim/final i nie uruchamia barge-in;
+  filtr obejmuje krótkie asymetryczne fragmenty 2–3 słów oraz końcówkę odebraną
+  do 2,5 s po zakończeniu TTS, a bezpośredni zwrot `Asystencie…` omija ten filtr,
+- po `CONVERSATION_BARGE_IN_AFTER_MS` dokładne STOP działa już na interim, a
+  pozostała mowa czeka na final Deepgram, aby sam szum lub niestabilny interim
+  nie uciął rozpoczętego zdania; VoiceAttack/API omijają okres ochronny.
+
+To jest filtr rozmowy w tle, nie speaker verification. Pewna identyfikacja
+konkretnej osoby wymaga enrollmentu i osobnego modelu embeddingów głosu.
+
+### 15.3. Spotkania Screenpipe
 
 Oddzielny worker używa Deepgram tylko dla zakończonych spotkań spełniających
 lokalną politykę. Nie należy łączyć tej funkcji z globalnym nagrywaniem audio.
 
-### 15.3. Sekret
+### 15.4. Sekret
 
 Klucz Deepgram należy przechowywać tylko w:
 
@@ -732,10 +793,11 @@ Runner:
 
 ## 18. VoiceAttack
 
-VoiceAttack jest warstwą szybkich, sztywnych komend głosowych i pewnym
-wyzwalaczem swobodnego asystenta. Profil v2 nie używa wildcardu VoiceAttack do
-dyktowania długich zdań. Po stałej frazie „Asystent” otwiera na jedną wypowiedź
-polski STT Deepgram.
+VoiceAttack jest warstwą szybkich, jawnych komend głosowych i pewnym
+wyzwalaczem swobodnego asystenta. Profil `VoiceLoop v2 PRO` ma 622 naturalne
+warianty 30 komend, ale nie używa wildcardu VoiceAttack do dyktowania długich
+zdań. Po stałej frazie „Asystent” otwiera na jedną wypowiedź polski STT
+Deepgram.
 
 Pliki:
 
@@ -747,16 +809,21 @@ scripts\va\*.vbs
 scripts\send-command.ps1
 ```
 
-Profil zawiera 17 komend:
+Profil zawiera 30 komend:
 
 - jednorazowy asystent: `Asystent`, `Hej asystent`,
 - przechwycenie treści: `Zapisz notatkę`, `Zapamiętaj`,
 - decyzje: `Potwierdź`, `Anuluj zadanie`,
 - kontekst lokalny: `Co robiłem ostatnio`, `Opisz aktywne okno`,
+  `Sprawdź pole tekstowe`,
 - okna: `Zminimalizuj okno`, `Zminimalizuj wszystkie` / `Pokaż pulpit`,
+  potwierdzane `WM_CLOSE` dla okna pod kursorem,
+- kursor i schowek: kopiowanie tekstu, zaznaczenia, e-maila, numeru i zdania
+  oraz zaznaczanie zdania lub akapitu przez UI Automation,
 - Deepgram: `Włącz nasłuch`, `Wyłącz nasłuch`,
 - diagnostyka: `Status Voice Loop`, `Test pętli`,
-- akcje: kalendarz, przeglądarka i czat,
+- akcje: kalendarz, przeglądarka, wyszukiwanie, zapamiętanie ostatniego źródła,
+  czat, GPT i Gemini,
 - panic button: `Stop teraz`, `Przerwij wszystko`.
 
 ### 18.1. Przebieg „Asystent”
@@ -785,6 +852,7 @@ Wszystkie wrappery VBS uruchamiają `scripts\send-command.ps1`. Dispatcher:
 
 - odczytuje lokalny token,
 - obsługuje zwykłe `command_id` i tekst,
+- przy aktywnym Deepgramie mapuje komendy VA na naturalny tekst,
 - uruchamia tryb one-shot lub ciągły Deepgram,
 - czyta krótki status usług,
 - potwierdza albo anuluje najnowszą oczekującą akcję,
@@ -794,8 +862,9 @@ STOP używa dedykowanego `/api/v1/stop` i nie czeka na n8n ani model.
 Potwierdzenie zachowuje się poprawnie po restarcie rdzenia, ponieważ executor
 może odtworzyć plan z SQLite, ale zgoda wygasa po 5 minutach. Dispatcher również
 ignoruje starsze wpisy `awaiting_confirmation`.
-Plik profilu jest generowany deterministycznie z istniejącego eksportu XML;
-po przeniesieniu repozytorium należy ponownie uruchomić
+Plik profilu jest generowany deterministycznie z istniejącego eksportu XML.
+Generator wykrywa kolizje fraz i brakujące wrappery VBS. Po przeniesieniu
+repozytorium należy ponownie uruchomić
 `scripts\build-voiceattack-profile.py`, ponieważ akcje VoiceAttack zawierają
 bezwzględne ścieżki.
 
@@ -811,7 +880,18 @@ bezwzględne ścieżki.
 - po potwierdzeniu `remember` wypowiada wynik „Zapamiętano”,
 - zwykłe odpowiedzi planu działają jako śledzone taski asyncio,
 - odczyt końcowego wyniku jest sekwencjonowany na końcu wykonania planu,
-- może zostać przerwany przez STOP.
+- może zostać przerwany przez STOP,
+- nie jest przerywany przez własne echo: barge-in odrzuca transkrypt podobny do
+  aktualnie czytanego tekstu, w tym krótkie fragmenty i końcówkę z bufora
+  Deepgram odebraną tuż po ponownym otwarciu mikrofonu,
+- oblicza timeout Azure SDK i fallbacku REST z długości pełnego tekstu oraz tempa
+  głosu zamiast ucinać odczyt po stałych 20 sekundach,
+- publikuje `conversation.tts_completed` z flagami `completed` i `interrupted`.
+
+Przed TTS odpowiedź rozmowy przechodzi kontrolę protokołu. `finish_reason=length`,
+niekońcowy status API, artefakt JSON albo brak `.`, `?`, `!` lub `…` na końcu
+powodują ponowne wygenerowanie całej odpowiedzi. Po dwóch nieudanych próbach tekst
+nie jest czytany jako pozornie poprawna odpowiedź.
 
 Plan ma wewnętrzną flagę `speak_result`. `AssistantService` ustawia ją wyłącznie
 dla żądań głosowych i wybranych akcji (`create_note`, `remember`, `recall`,
@@ -847,11 +927,19 @@ COMMAND_DEDUPE_SECONDS=2
 COMMAND_QUEUE_LIMIT=10
 ```
 
-### Venice jako primary
+### Gemini jako primary
 
 ```text
-LLM_PRIMARY=cloud
-CLOUD_LLM_ENABLED=true
+LLM_PRIMARY=gemini
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.5-flash
+```
+
+### Venice jako opcjonalny provider
+
+```text
+CLOUD_LLM_ENABLED=false
 CLOUD_LLM_BASE_URL=https://api.venice.ai/api/v1
 CLOUD_LLM_API_KEY=
 CLOUD_LLM_MODEL=venice-uncensored-1-2
@@ -890,8 +978,12 @@ SCREENPIPE_VECTOR_RECENT_MINUTES=60
 DEEPGRAM_API_KEY=
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_LANGUAGE=pl
+DEEPGRAM_DIARIZATION_ENABLED=true
+DEEPGRAM_DIARIZATION_MODEL=latest
 SAMPLE_RATE=16000
 AUTO_START_LISTENING=false
+CONVERSATION_DIRECT_ADDRESS_AFTER_SECONDS=30
+CONVERSATION_IGNORE_MULTI_SPEAKER=true
 # MICROPHONE_DEVICE=Microphone Array
 ```
 
@@ -1085,9 +1177,10 @@ VoiceLoop\
 
 ### Granice i świadome kompromisy
 
-1. Venice jest głównym planerem, więc wolny język trafia do chmury.
-2. Historia rozmowy i wybrany kontekst vector memory trafiają do Venice.
-3. `include_screen=true` może wysłać obraz aktywnego okna do Venice.
+1. Gemini jest głównym modelem, więc wolny język trafia do API Google.
+2. Historia rozmowy i wybrany kontekst vector memory trafiają do aktywnego
+   providera chmurowego.
+3. `include_screen=true` może wysłać obraz aktywnego okna do aktywnego providera.
 4. Screenpipe przechowuje bardzo szeroki lokalny kontekst.
 5. SSE nie ma osobnej autoryzacji i opiera się na loopback.
 6. Webhook n8n nie weryfikuje obecnie wysyłanego tokenu i opiera się na loopback.
@@ -1110,7 +1203,10 @@ VoiceLoop\
   `Asystent <polecenie>`,
 - VoiceAttack i Deepgram korzystają z tego samego urządzenia wejściowego; stałe
   komendy należy wypowiadać bez uruchamiania trybu „Asystent”,
-- nie ma natywnego barge-in dla TTS poza globalnym STOP,
+- light barge-in działa po okresie ochronnym i filtruje echo, ale nie jest pełnym
+  akustycznym echo cancellation,
+- diaryzacja Deepgram wykrywa numery mówców tylko w bieżącym strumieniu; nie
+  identyfikuje biometrycznie właściciela i nie zachowuje ID między połączeniami,
 - nie ma systemu wersjonowanych migracji SQLite.
 
 ### Skalowalność
@@ -1169,7 +1265,7 @@ VoiceLoop\
 2. Pokazywać provider i model przy każdej odpowiedzi.
 3. Dodać podgląd planu przed wykonaniem.
 4. Dodać panel vector memories.
-5. Dodać barge-in i lepsze przerwanie TTS.
+5. Rozważyć sprzętowe AEC lub push-to-talk jako uzupełnienie light barge-in.
 
 ### Priorytet 4 — integracje
 

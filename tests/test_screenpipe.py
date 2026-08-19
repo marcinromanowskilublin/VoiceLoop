@@ -39,6 +39,40 @@ async def test_recent_context_uses_latest_window_metadata(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_audio_chunk_combines_absolute_timestamp_with_offsets(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    client = ScreenpipeClient(Settings(voiceloop_data_dir=str(tmp_path)))
+    search = AsyncMock(
+        return_value=[
+            {
+                "content": {
+                    "chunk_id": 10,
+                    "file_path": str(tmp_path / "audio.mp4"),
+                    "device_name": "Microphone",
+                    "device_type": "Input",
+                    "timestamp": "2026-08-07T21:38:50+02:00",
+                    "start_time": 29.0,
+                    "end_time": 30.5,
+                    "text": "test",
+                }
+            }
+        ]
+    )
+    monkeypatch.setattr(client, "_search", search)
+    start = datetime(2026, 8, 7, tzinfo=UTC)
+
+    chunks = await client.audio_chunks(start=start, end=start)
+
+    assert chunks[0].chunk_id == "10:29.000000:30.500000"
+    assert chunks[0].start_time == "2026-08-07T21:39:19+02:00"
+    assert chunks[0].end_time == "2026-08-07T21:39:20.500000+02:00"
+    assert chunks[0].start_offset_seconds == 29.0
+    assert chunks[0].end_offset_seconds == 30.5
+
+
+@pytest.mark.asyncio
 async def test_active_window_falls_back_to_screenpipe(monkeypatch, tmp_path) -> None:
     settings = Settings(voiceloop_data_dir=str(tmp_path))
     registry = ActionRegistry(settings, MemoryStore(tmp_path / "voice.db"), WindowsTTS())
@@ -124,7 +158,7 @@ async def test_screenpipe_vector_memory_indexes_recent_activity(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_vector_worker_writes_three_core_qdrant_vectors_for_activity(tmp_path) -> None:
+async def test_vector_worker_writes_any_nonempty_vector_subset_for_activity(tmp_path) -> None:
     settings = Settings(
         voiceloop_data_dir=str(tmp_path),
         behavior_digest_recent_minutes=30,
@@ -171,9 +205,9 @@ async def test_vector_worker_writes_three_core_qdrant_vectors_for_activity(tmp_p
             "digest": AsyncMock(
                 return_value=DigestedMemory(
                     summary="Praca nad pamięcią Qdrant.",
-                    topic="VoiceLoop",
+                    topic="",
                     intent="Wdrożenie pamięci",
-                    decision="Użyć pięciu named vectors.",
+                    decision="",
                     person_context="Indywidualny kontekst użytkownika.",
                     confidence=0.9,
                 )
@@ -195,10 +229,95 @@ async def test_vector_worker_writes_three_core_qdrant_vectors_for_activity(tmp_p
     assert indexed == 1
     assert set(call["vectors"]) == {"semantic", "intent", "person_context"}
     assert call["source"] == "screenpipe_behavior"
+    assert call["metadata"]["vector_profile"] == "dynamic_named_subset_v2"
+    assert call["metadata"]["provenance"]["source_id"] == call["source_id"]
+    assert call["expires_at"] is not None
+    assert call["metadata"]["expires_at"] == call["expires_at"].isoformat()
 
 
 @pytest.mark.asyncio
-async def test_vector_worker_writes_five_qdrant_vectors_for_meetings(tmp_path) -> None:
+async def test_vector_worker_skips_low_confidence_activity_digest(tmp_path) -> None:
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        behavior_digest_recent_minutes=10,
+    )
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    screenpipe = ScreenpipeClient(settings)
+    screenpipe.recent_text_activity = AsyncMock(
+        return_value=[
+            ScreenpipeTextItem(
+                app_name="Cursor.exe",
+                window_name="VoiceLoop - Cursor",
+                timestamp="2026-08-10T00:00:00Z",
+                browser_url="",
+                text="Minimize\nMaximize\nClose\nPraca nad ważną pamięcią.",
+                content_type="OCR",
+            )
+        ]
+    )
+
+    class FakeEmbeddings:
+        enabled = True
+
+        async def embed_query(self, text):
+            return [1.0, 0.0, 0.0]
+
+        async def embed_documents(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "search": AsyncMock(return_value=[]),
+            "upsert_memory": AsyncMock(),
+            "has_memory": AsyncMock(return_value=False),
+        },
+    )()
+    digester = type(
+        "FakeDigester",
+        (),
+        {
+            "digest": AsyncMock(
+                return_value=DigestedMemory(
+                    summary="Surowy OCR bez pewnej analizy.",
+                    topic="Niski confidence",
+                    intent="Nie zapisuj do Qdrant",
+                    confidence=0.25,
+                )
+            )
+        },
+    )()
+    worker = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=screenpipe,
+        memory=memory,
+        embeddings=FakeEmbeddings(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        digester=digester,  # type: ignore[arg-type]
+    )
+
+    indexed = await worker.index_recent_activity()
+
+    assert indexed == 0
+    qdrant.upsert_memory.assert_not_awaited()
+
+
+def test_screenpipe_memory_cleans_ocr_chrome() -> None:
+    cleaned = ScreenpipeVectorMemoryWorker._clean_ocr_text(
+        "Minimize\nMaximize\nClose\nFile\nEdit\nRealna treść projektu\n"
+        "vscode-file://ignored\nRealna treść projektu\n"
+    )
+
+    assert "Minimize" not in cleaned
+    assert "vscode-file" not in cleaned
+    assert cleaned == "Realna treść projektu"
+
+
+@pytest.mark.asyncio
+async def test_vector_worker_writes_any_nonempty_vector_subset_for_meetings(tmp_path) -> None:
     settings = Settings(
         voiceloop_data_dir=str(tmp_path),
         behavior_digest_recent_minutes=30,
@@ -242,9 +361,9 @@ async def test_vector_worker_writes_five_qdrant_vectors_for_meetings(tmp_path) -
                 return_value=DigestedMemory(
                     summary="Rozmowa o planie klienta.",
                     topic="Spotkanie klient",
-                    intent="Ustalenie planu",
+                    intent="",
                     decision="Potwierdzić następne kroki",
-                    person_context="Rozmowa z klientem",
+                    person_context="",
                     confidence=0.9,
                 )
             )
@@ -266,8 +385,258 @@ async def test_vector_worker_writes_five_qdrant_vectors_for_meetings(tmp_path) -
     assert set(call["vectors"]) == {
         "semantic",
         "topic",
-        "intent",
         "decision",
-        "person_context",
     }
     assert call["source"] == "screenpipe_meeting"
+    content_hash = call["content_hash"]
+    assert len(content_hash) == 64
+    assert call["metadata"]["content_hash"] == content_hash
+    assert qdrant.has_memory.await_args.kwargs["content_hash"] == content_hash
+    assert call["expires_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_vector_worker_redacts_before_digest_and_embedding(tmp_path) -> None:
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        behavior_digest_recent_minutes=10,
+    )
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    screenpipe = ScreenpipeClient(settings)
+    screenpipe.recent_text_activity = AsyncMock(
+        return_value=[
+            ScreenpipeTextItem(
+                app_name="Cursor.exe",
+                window_name="Sekrety - Cursor",
+                timestamp="2026-08-10T00:00:00Z",
+                browser_url="",
+                text="api_key=verysecretvalue kontakt anna@example.com",
+                content_type="OCR",
+            )
+        ]
+    )
+    embedded_documents: list[str] = []
+
+    class FakeEmbeddings:
+        enabled = True
+        configured_model = "nomic-test"
+
+        async def embed_query(self, text):
+            return [1.0, 0.0, 0.0]
+
+        async def embed_documents(self, texts):
+            embedded_documents.extend(texts)
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "search": AsyncMock(return_value=[]),
+            "upsert_memory": AsyncMock(),
+            "has_memory": AsyncMock(return_value=False),
+        },
+    )()
+    digester = type(
+        "FakeDigester",
+        (),
+        {
+            "configured_model": "qwen-test",
+            "digest": AsyncMock(
+                return_value=DigestedMemory(
+                    summary="api_key=verysecretvalue kontakt anna@example.com",
+                    observations=["anna@example.com"],
+                    confidence=0.9,
+                )
+            ),
+        },
+    )()
+    worker = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=screenpipe,
+        memory=memory,
+        embeddings=FakeEmbeddings(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        digester=digester,  # type: ignore[arg-type]
+    )
+
+    assert await worker.index_recent_activity() == 1
+
+    digest_call = digester.digest.await_args.kwargs
+    stored = qdrant.upsert_memory.await_args.kwargs
+    serialized_documents = "\n".join(embedded_documents)
+    assert "verysecretvalue" not in digest_call["content"]
+    assert "anna@example.com" not in digest_call["content"]
+    assert "[SECRET]" in digest_call["content"]
+    assert "verysecretvalue" not in serialized_documents
+    assert "anna@example.com" not in serialized_documents
+    assert "verysecretvalue" not in stored["content"]
+    assert {"secret", "email"} <= set(stored["metadata"]["privacy_redactions"])
+    assert stored["metadata"]["provenance"]["model"] == "qwen-test"
+    assert stored["metadata"]["provenance"]["schema"] == "memory-documents-v2"
+
+
+@pytest.mark.asyncio
+async def test_meeting_is_reindexed_only_after_content_hash_changes(tmp_path) -> None:
+    settings = Settings(voiceloop_data_dir=str(tmp_path))
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    await memory.save_screenpipe_transcript(
+        chunk_id="chunk-1",
+        meeting_id=7,
+        device_name="Mic",
+        device_type="Input",
+        start_time="2026-08-10T05:00:00Z",
+        end_time="2026-08-10T05:01:00Z",
+        text="Pierwsza część rozmowy.",
+        source="deepgram",
+    )
+
+    class FakeEmbeddings:
+        enabled = True
+
+        async def embed_documents(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    class FakeQdrant:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.hashes: dict[tuple[str, str], str] = {}
+            self.upserts: list[dict[str, object]] = []
+
+        async def has_memory(self, *, source, source_id, content_hash=None):
+            return self.hashes.get((source, source_id)) == content_hash
+
+        async def upsert_memory(self, **kwargs):
+            key = (str(kwargs["source"]), str(kwargs["source_id"]))
+            self.hashes[key] = str(kwargs["content_hash"])
+            self.upserts.append(kwargs)
+
+    qdrant = FakeQdrant()
+    digester = type(
+        "FakeDigester",
+        (),
+        {
+            "digest": AsyncMock(
+                return_value=DigestedMemory(
+                    summary="Digest spotkania.",
+                    decision="Kontynuować.",
+                    confidence=0.9,
+                )
+            )
+        },
+    )()
+    worker = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=ScreenpipeClient(settings),
+        memory=memory,
+        embeddings=FakeEmbeddings(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        digester=digester,  # type: ignore[arg-type]
+    )
+
+    first = await worker._index_meeting_transcripts()
+    unchanged = await worker._index_meeting_transcripts()
+    await memory.save_screenpipe_transcript(
+        chunk_id="chunk-2",
+        meeting_id=7,
+        device_name="Mic",
+        device_type="Input",
+        start_time="2026-08-10T05:01:00Z",
+        end_time="2026-08-10T05:02:00Z",
+        text="Nowa część rozmowy zmienia hash.",
+        source="deepgram",
+    )
+    changed = await worker._index_meeting_transcripts()
+
+    assert (first, unchanged, changed) == (1, 0, 1)
+    assert len(qdrant.upserts) == 2
+    assert qdrant.upserts[0]["content_hash"] != qdrant.upserts[1]["content_hash"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_writes_semantic_vector_only(tmp_path) -> None:
+    settings = Settings(voiceloop_data_dir=str(tmp_path))
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    await memory.upsert_vector_memory(
+        source="screenpipe_activity",
+        source_id="legacy-1",
+        title="Starsza pamięć",
+        content="Starszy wpis.",
+        embedding=[1.0, 0.0, 0.0],
+        metadata={},
+    )
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "has_memory": AsyncMock(return_value=False),
+            "upsert_memory": AsyncMock(),
+        },
+    )()
+    embeddings = type("FakeEmbeddings", (), {"enabled": True})()
+    worker = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=ScreenpipeClient(settings),
+        memory=memory,
+        embeddings=embeddings,  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+    )
+
+    assert await worker.migrate_legacy_memories() == 1
+
+    call = qdrant.upsert_memory.await_args.kwargs
+    assert set(call["vectors"]) == {"semantic"}
+    assert call["metadata"]["vector_profile"] == "legacy_semantic_only_v2"
+    assert call["ttl_seconds"] == 14 * 86400
+    assert (
+        await memory.get_state("qdrant_legacy_migration_v2_semantic_only")
+        == "done"
+    )
+
+
+@pytest.mark.asyncio
+async def test_vector_worker_prunes_only_when_explicitly_enabled(tmp_path) -> None:
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        vector_memory_prune_enabled=True,
+    )
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    await memory.upsert_vector_memory(
+        source="screenpipe_behavior",
+        source_id="expired",
+        title="Expired",
+        content="Stary wpis.",
+        embedding=[1.0, 0.0],
+        metadata={"expires_at": "2020-01-01T00:00:00+00:00"},
+    )
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "prune_expired": AsyncMock(return_value=2),
+        },
+    )()
+    worker = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=ScreenpipeClient(settings),
+        memory=memory,
+        embeddings=type("FakeEmbeddings", (), {"enabled": True})(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+    )
+
+    removed = await worker.prune_expired_memories(force=True)
+
+    assert removed == 3
+    qdrant.prune_expired.assert_awaited_once_with(dry_run=False)
+    assert await memory.has_vector_memory(
+        source="screenpipe_behavior",
+        source_id="expired",
+    ) is False

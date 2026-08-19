@@ -73,39 +73,6 @@ function Speak-Text {
     }
 }
 
-function Get-VoiceLoopHealth {
-    try {
-        return Invoke-VoiceLoopRequest -Method Get -Path '/health'
-    } catch {
-        return $null
-    }
-}
-
-function Resolve-AutoRouteText {
-    param([string]$CommandId)
-
-    switch ($CommandId) {
-        'voice_test' { return 'test glosu' }
-        'open_calendar' { return 'otworz kalendarz' }
-        'open_browser' { return 'otworz przegladarke' }
-        'search_web' { return 'wyszukaj w internecie' }
-        'open_chat' { return 'otworz czat' }
-        'open_gpt_chat' { return 'otworz chat gpt' }
-        'open_gemini_chat' { return 'otworz gemini' }
-        'active_window' { return 'co mam otwarte' }
-        'recent_activity' { return 'co robilem ostatnio' }
-        'describe_active_window' { return 'co mam otwarte' }
-        'describe_recent_activity' { return 'co robilem ostatnio' }
-        'describe_text_target' { return 'gdzie teraz pisze' }
-        'minimize_active_window' { return 'zminimalizuj okno' }
-        'minimize_all_windows' { return 'zminimalizuj wszystkie okna' }
-        'copy_selected_text' { return 'kopiuj zaznaczony tekst' }
-        'copy_number_under_cursor' { return 'kopiuj numer pod kursorem' }
-        'copy_sentence_under_cursor' { return 'kopiuj cale zdanie pod kursorem' }
-        default { return '' }
-    }
-}
-
 try {
     if ($CommandId -eq 'stop') {
         Invoke-VoiceLoopRequest -Method Post -Path '/stop' | Out-Null
@@ -120,12 +87,21 @@ try {
             exit 0
         }
         'listen-start' {
-            Speak-Text 'Wlaczam nasluch.'
-            Invoke-VoiceLoopRequest -Method Post -Path '/listening/start' | Out-Null
+            # Serwer sam mówi przy conversation/start; tu bez lokalnego TTS.
+            try {
+                Invoke-VoiceLoopRequest -Method Post -Path '/conversation/start' | Out-Null
+            } catch {
+                Invoke-VoiceLoopRequest -Method Post -Path '/listening/start' | Out-Null
+                Speak-Text 'Wlaczam nasluch.'
+            }
             exit 0
         }
         'listen-stop' {
-            Invoke-VoiceLoopRequest -Method Post -Path '/listening/stop' | Out-Null
+            try {
+                Invoke-VoiceLoopRequest -Method Post -Path '/conversation/stop' | Out-Null
+            } catch {
+                Invoke-VoiceLoopRequest -Method Post -Path '/listening/stop' | Out-Null
+            }
             Speak-Text 'Nasluch wylaczony.'
             exit 0
         }
@@ -160,28 +136,34 @@ try {
             $commandResponse = Invoke-VoiceLoopRequest -Method Get -Path '/commands?limit=50'
             $commands = @($commandResponse)
             $cutoff = [DateTimeOffset]::UtcNow.AddMinutes(-5)
-            $pending = $commands |
-                Where-Object {
-                    if ($_.status -ne 'awaiting_confirmation') {
-                        return $false
+            $pendingList = @(
+                $commands |
+                    Where-Object {
+                        if ($_.status -ne 'awaiting_confirmation') {
+                            return $false
+                        }
+                        if (
+                            $Operation -eq 'confirm-last' -and
+                            ($null -eq $_.plan -or @($_.plan.steps).Count -eq 0)
+                        ) {
+                            return $false
+                        }
+                        try {
+                            return [DateTimeOffset]::Parse([string]$_.updated_at) -ge $cutoff
+                        } catch {
+                            return $false
+                        }
                     }
-                    if (
-                        $Operation -eq 'confirm-last' -and
-                        ($null -eq $_.plan -or @($_.plan.steps).Count -eq 0)
-                    ) {
-                        return $false
-                    }
-                    try {
-                        return [DateTimeOffset]::Parse([string]$_.updated_at) -ge $cutoff
-                    } catch {
-                        return $false
-                    }
-                } |
-                Select-Object -First 1
-            if ($null -eq $pending) {
+            )
+            if ($pendingList.Count -eq 0) {
                 Speak-Text 'Nie ma polecenia oczekujacego na decyzje.'
                 exit 0
             }
+            if ($pendingList.Count -gt 1) {
+                Speak-Text 'Jest kilka oczekujacych potwierdzen. Potwierdz konkretne zadanie z panelu.'
+                exit 0
+            }
+            $pending = $pendingList[0]
             $decision = if ($Operation -eq 'confirm-last') { 'confirm' } else { 'cancel' }
             $requestId = [uri]::EscapeDataString([string]$pending.request_id)
             $decisionResult = Invoke-VoiceLoopRequest -Method Post `
@@ -201,30 +183,6 @@ try {
 
     if (-not $CommandId -and -not $Text) {
         throw 'Podaj -CommandId albo -Text.'
-    }
-
-    if (-not $Text -and $CommandId -and $Operation -eq 'command') {
-        $health = Get-VoiceLoopHealth
-        $conversationMode = $false
-        if ($health -and $health.components -and $health.components.deepgram) {
-            $conversationMode = ($health.components.deepgram.status -eq 'ok')
-        }
-
-        $mappedText = Resolve-AutoRouteText -CommandId $CommandId
-        if ($conversationMode) {
-            if ($mappedText) {
-                # W trybie rozmowy zawsze idziemy ścieżką tekstową.
-                $Text = $mappedText
-                $CommandId = $null
-            } else {
-                Invoke-VoiceLoopRequest -Method Post -Path '/listening/once?mode=assistant' | Out-Null
-                exit 0
-            }
-        } elseif (-not $mappedText) {
-            # Poza trybem rozmowy nieznane polecenie przełączamy na pojedynczy nasłuch.
-            Invoke-VoiceLoopRequest -Method Post -Path '/listening/once?mode=assistant' | Out-Null
-            exit 0
-        }
     }
 
     $body = @{

@@ -1,6 +1,9 @@
 param(
     [int]$RetentionDays = 14,
-    [int]$AudioChunkSeconds = 60,
+    [int]$AudioChunkSeconds = 15,
+    [int]$IdleCaptureIntervalMs = 5000,
+    [int]$VisualCheckIntervalMs = 1000,
+    [int]$MinCaptureIntervalMs = 1500,
     [switch]$Restart
 )
 
@@ -57,12 +60,15 @@ function Set-UnfilteredCaptureSettings([string]$StorePath) {
         disableClipboardCapture = $false
         disableKeyboardCapture = $false
         enhancedIncognitoDetection = $false
+        idleCaptureIntervalMs = $IdleCaptureIntervalMs
         ignoreIncognitoWindows = $false
+        minCaptureIntervalMs = $MinCaptureIntervalMs
         pauseOnDrmContent = $false
         piiRedactionPseudonyms = $false
         redactAgentSessionSecrets = $false
         scheduleEnabled = $false
         usePiiRemoval = $false
+        visualCheckIntervalMs = $VisualCheckIntervalMs
     }
     foreach ($entry in $values.GetEnumerator()) {
         $store.settings |
@@ -92,8 +98,12 @@ $recorders = @(
         Where-Object { $_.CommandLine -match '\brecord\b' }
 )
 if ($recorders.Count -gt 0 -and -not $Restart) {
-    Write-Output 'Screenpipe juz dziala.'
-    exit 0
+    if (Test-Port 3030) {
+        Write-Output 'Screenpipe juz dziala.'
+        exit 0
+    }
+    Write-Warning 'Screenpipe dziala, ale port 3030 nie nasluchuje. Restartuje.'
+    $Restart = $true
 }
 if ($Restart) {
     foreach ($recorder in $recorders) {
@@ -119,9 +129,23 @@ $devices = @(
         Where-Object { $_ -match '^\s{2,}\S' } |
         ForEach-Object { $_.Trim() }
 )
-$preferredInput = $devices |
-    Where-Object { $_ -match 'G733' -and $_ -match '\(input\)$' } |
-    Select-Object -First 1
+$preferredInput = $null
+$audioProbe = Join-Path $projectRoot 'listener\.venv\Scripts\python.exe'
+if (Test-Path -LiteralPath $audioProbe) {
+    $env:PYTHONIOENCODING = 'utf-8'
+    $probeCode = (
+        'import soundcard as sc; m=sc.default_microphone(); ' +
+        'print(m.name if m else None)'
+    )
+    $defaultInput = (
+        & $audioProbe -c $probeCode 2>$null | Out-String
+    ).Trim()
+    if ($defaultInput) {
+        $preferredInput = $devices |
+            Where-Object { $_ -eq "$defaultInput (input)" } |
+            Select-Object -First 1
+    }
+}
 if (-not $preferredInput) {
     $preferredInput = $devices |
         Where-Object { $_ -match '\(input\)$' -and $_ -notmatch 'Steam Streaming' } |
@@ -156,7 +180,10 @@ $arguments = @(
     '--retention-mode', 'all',
     '--capture-on-keystroke', 'true',
     '--capture-on-clipboard', 'true',
-    '--capture-scroll', 'true'
+    '--capture-scroll', 'true',
+    '--idle-capture-interval-ms', [string][Math]::Max(1000, $IdleCaptureIntervalMs),
+    '--visual-check-interval-ms', [string][Math]::Max(250, $VisualCheckIntervalMs),
+    '--min-capture-interval-ms', [string][Math]::Max(500, $MinCaptureIntervalMs)
 )
 foreach ($device in $audioDevices) {
     $arguments += @('--audio-device', $device)
@@ -165,8 +192,9 @@ foreach ($device in $audioDevices) {
 Write-Output (
     (
         "Uruchamiam Screenpipe: 2 monitory, mikrofon i {0} wyjsc audio, " +
-        "pelne zdarzenia wejscia, retencja {1} dni. Transkrypcja globalna wylaczona."
-    ) -f $physicalOutputs.Count, $RetentionDays
+        "pelne zdarzenia wejscia, OCR co najmniej co {1}s, retencja {2} dni. " +
+        "Transkrypcja globalna wylaczona."
+    ) -f $physicalOutputs.Count, [Math]::Round($IdleCaptureIntervalMs / 1000, 1), $RetentionDays
 )
 
 & screenpipe @arguments

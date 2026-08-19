@@ -40,9 +40,10 @@ if (-not (Test-Port 3030)) {
     ) -WindowStyle Hidden
 }
 
-if (-not (Test-Port 5678)) {
-    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$PSScriptRoot\start-n8n.bat`""
-}
+# n8n jest wylaczone (N8N_ENABLED=false)
+# if (-not (Test-Port 5678)) {
+#     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$PSScriptRoot\start-n8n.bat`""
+# }
 
 if (-not (Test-Port 8765)) {
     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$projectRoot\listener\start-listener.bat`""
@@ -52,7 +53,6 @@ $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while ((Get-Date) -lt $deadline) {
     if (
         (Test-Port 3030) -and
-        (Test-Port 5678) -and
         (Test-Port 6333) -and
         (Test-Port 8765)
     ) {

@@ -51,6 +51,8 @@ class ScreenpipeAudioChunk:
     start_time: str
     end_time: str
     text: str
+    start_offset_seconds: float = 0.0
+    end_offset_seconds: float = 0.0
 
 
 class ScreenpipeClient:
@@ -315,8 +317,22 @@ class ScreenpipeClient:
             if not isinstance(content, dict):
                 continue
             path_text = str(content.get("file_path") or "").strip()
-            start_time = str(content.get("start_time") or content.get("timestamp") or "").strip()
-            chunk_id = str(content.get("chunk_id") or f"{path_text}:{start_time}").strip()
+            timestamp = str(content.get("timestamp") or "").strip()
+            raw_start = content.get("start_time")
+            raw_end = content.get("end_time")
+            start_time, end_time, start_offset, end_offset = _audio_times(
+                timestamp,
+                raw_start,
+                raw_end,
+            )
+            raw_chunk_id = str(
+                content.get("chunk_id") or f"{path_text}:{timestamp}"
+            ).strip()
+            chunk_id = (
+                f"{raw_chunk_id}:{start_offset:.6f}:{end_offset:.6f}"
+                if end_offset > start_offset
+                else raw_chunk_id
+            )
             if not path_text or not chunk_id or chunk_id in seen:
                 continue
             seen.add(chunk_id)
@@ -327,8 +343,10 @@ class ScreenpipeClient:
                     device_name=str(content.get("device_name") or "").strip(),
                     device_type=str(content.get("device_type") or "").strip(),
                     start_time=start_time,
-                    end_time=str(content.get("end_time") or "").strip(),
+                    end_time=end_time,
                     text=str(content.get("transcription") or content.get("text") or "").strip(),
+                    start_offset_seconds=start_offset,
+                    end_offset_seconds=end_offset,
                 )
             )
         return chunks
@@ -379,3 +397,34 @@ class ScreenpipeClient:
         except ValueError as exc:
             raise ScreenpipeError("Screenpipe zwrócił nieprawidłową odpowiedź.") from exc
         return payload
+
+
+def _audio_times(
+    timestamp: str,
+    raw_start: Any,
+    raw_end: Any,
+) -> tuple[str, str, float, float]:
+    try:
+        start_offset = float(raw_start)
+        end_offset = float(raw_end)
+    except (TypeError, ValueError):
+        start_offset = 0.0
+        end_offset = 0.0
+    if timestamp and end_offset >= start_offset >= 0.0:
+        try:
+            base = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if base.tzinfo is None:
+                base = base.replace(tzinfo=UTC)
+            start = base + timedelta(seconds=start_offset)
+            end = base + timedelta(seconds=end_offset)
+            return (
+                start.isoformat(),
+                end.isoformat(),
+                start_offset,
+                end_offset,
+            )
+        except ValueError:
+            pass
+    start_text = str(raw_start or timestamp or "").strip()
+    end_text = str(raw_end or timestamp or "").strip()
+    return start_text, end_text, start_offset, end_offset

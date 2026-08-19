@@ -1,10 +1,13 @@
+azure-cognitiveservices-speech
 fastapi
 httpx
+numpy
 pillow
 pydantic-settings
 pywin32
 pywinauto
 qdrant-client
+SoundCard
 sounddevice
 uvicorn[standard]
 websockets

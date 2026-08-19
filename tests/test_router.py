@@ -1,6 +1,6 @@
 import pytest
 
-from voiceloop.models import CommandRequest, CommandSource
+from voiceloop.models import CommandRequest, CommandSource, RiskLevel
 from voiceloop.router import deterministic_plan, normalize_text
 
 
@@ -15,6 +15,66 @@ def test_calendar_command_is_deterministic() -> None:
     assert plan is not None
     assert plan.intent == "open_calendar"
     assert [step.action_id for step in plan.steps] == ["open_calendar"]
+
+
+def test_this_pc_command_is_deterministic() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.PANEL, text="Otwórz mój komputer.")
+    )
+
+    assert plan is not None
+    assert plan.intent == "open_folder"
+    assert [step.action_id for step in plan.steps] == ["open_folder"]
+    assert plan.steps[0].args == {"folder_id": "this_pc"}
+
+
+def test_whatsapp_stt_variant_is_deterministic() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.PANEL, text="Otwórz Whatsap.")
+    )
+
+    assert plan is not None
+    assert plan.intent == "open_app"
+    assert [step.action_id for step in plan.steps] == ["open_app"]
+    assert plan.steps[0].args == {"app_id": "whatsapp"}
+
+
+def test_spaced_polish_domain_is_deterministic() -> None:
+    plan = deterministic_plan(
+        CommandRequest(
+            source=CommandSource.PANEL,
+            text="Otwórz stronę devilpage. Pl",
+        )
+    )
+
+    assert plan is not None
+    assert plan.intent == "open_url"
+    assert [step.action_id for step in plan.steps] == ["open_url"]
+    assert plan.steps[0].args == {"url": "https://devilpage.pl"}
+
+
+def test_unknown_app_is_not_open_app() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.PANEL, text="Otwórz Autodesk Key.")
+    )
+
+    assert plan is None or not plan.steps or plan.steps[0].action_id != "open_app"
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "Czy potrafisz otworzyć WhatsApp?",
+        "Jak mam powiedzieć, żeby otworzyć Ten komputer?",
+    ),
+)
+def test_capability_questions_describe_action_without_executing_it(text: str) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.intent == "list_capabilities"
+    assert [step.action_id for step in plan.steps] == ["list_capabilities"]
+    assert plan.steps[0].args == {"query": text}
 
 
 def test_short_test_alias_is_deterministic() -> None:
@@ -52,6 +112,19 @@ def test_minimize_window_commands_are_deterministic() -> None:
     assert [step.action_id for step in all_windows.steps] == ["minimize_all_windows"]
 
 
+def test_minimize_window_under_cursor_from_deepgram_is_deterministic() -> None:
+    plan = deterministic_plan(
+        CommandRequest(
+            source=CommandSource.DEEPGRAM,
+            text="Zminimalizuj aplikację pod kursorem.",
+        )
+    )
+
+    assert plan is not None
+    assert plan.intent == "minimize_window_under_cursor"
+    assert [step.action_id for step in plan.steps] == ["minimize_window_under_cursor"]
+
+
 def test_recent_activity_question_extracts_hours() -> None:
     request = CommandRequest(
         source=CommandSource.DEEPGRAM,
@@ -74,6 +147,12 @@ def test_copy_commands_are_deterministic() -> None:
     number = deterministic_plan(
         CommandRequest(source=CommandSource.DEEPGRAM, text="Skopiuj numer pod kursorem")
     )
+    email = deterministic_plan(
+        CommandRequest(
+            source=CommandSource.DEEPGRAM,
+            text="Skopiuj mi ten mail gdzie mam kursor do schowka",
+        )
+    )
     sentence = deterministic_plan(
         CommandRequest(
             source=CommandSource.VOICEATTACK,
@@ -89,9 +168,46 @@ def test_copy_commands_are_deterministic() -> None:
     assert number.intent == "copy_number_under_cursor"
     assert [step.action_id for step in number.steps] == ["copy_number_under_cursor"]
 
+    assert email is not None
+    assert email.intent == "copy_email_under_cursor"
+    assert [step.action_id for step in email.steps] == ["copy_email_under_cursor"]
+
     assert sentence is not None
     assert sentence.intent == "copy_sentence_under_cursor"
     assert [step.action_id for step in sentence.steps] == ["copy_sentence_under_cursor"]
+
+
+def test_cursor_text_selection_commands_are_deterministic() -> None:
+    copied = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Skopiuj tekst pod kursorem")
+    )
+    sentence = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Zaznacz to zdanie pod kursorem")
+    )
+    paragraph = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Zaznacz akapit")
+    )
+
+    assert copied is not None
+    assert [step.action_id for step in copied.steps] == ["copy_text_under_cursor"]
+    assert sentence is not None
+    assert [step.action_id for step in sentence.steps] == ["select_sentence_under_cursor"]
+    assert paragraph is not None
+    assert [step.action_id for step in paragraph.steps] == ["select_paragraph_under_cursor"]
+
+
+def test_close_window_under_cursor_is_medium_risk() -> None:
+    plan = deterministic_plan(
+        CommandRequest(
+            source=CommandSource.DEEPGRAM,
+            text="Wyłącz aplikację którą wskazuję kursorem",
+        )
+    )
+
+    assert plan is not None
+    assert plan.intent == "close_window_under_cursor"
+    assert [step.action_id for step in plan.steps] == ["close_window_under_cursor"]
+    assert plan.steps[0].risk is RiskLevel.MEDIUM
 
 
 def test_web_search_command_is_deterministic() -> None:
@@ -106,6 +222,23 @@ def test_web_search_command_is_deterministic() -> None:
     assert plan.intent == "search_web"
     assert [step.action_id for step in plan.steps] == ["search_web"]
     assert "Python 3.13" in str(plan.steps[0].args["query"])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Jaka jest pogoda",
+        "Powiedz jak dziś akcje wybranej spółki",
+        "Jak dzisiaj akcje wybranej spółki",
+    ],
+)
+def test_current_info_questions_use_web_search(text: str) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.intent == "search_web"
+    assert [step.action_id for step in plan.steps] == ["search_web"]
+    assert text.split()[0] in str(plan.steps[0].args["query"])
 
 
 def test_web_search_command_id_without_query_requires_clarification() -> None:
@@ -168,6 +301,20 @@ def test_chat_split_commands_are_deterministic() -> None:
     assert [step.action_id for step in gemini.steps] == ["open_gemini_chat"]
 
 
+def test_rename_under_cursor_is_deterministic_with_confirmation() -> None:
+    plan = deterministic_plan(
+        CommandRequest(
+            source=CommandSource.DEEPGRAM,
+            text="Zmień nazwę pod kursorem na Raport Q2",
+        )
+    )
+    assert plan is not None
+    assert plan.intent == "rename_under_cursor"
+    assert plan.steps[0].action_id == "rename_under_cursor"
+    assert plan.steps[0].confirmation_required is True
+    assert plan.steps[0].args["new_name"] == "raport q2"
+
+
 def test_text_target_check_command_is_deterministic() -> None:
     plan = deterministic_plan(
         CommandRequest(source=CommandSource.DEEPGRAM, text="Czy to pasek adresu?")
@@ -200,9 +347,13 @@ def test_safe_paste_command_extracts_target_and_text() -> None:
         ("Kalendarz", "open_calendar"),
         ("Odpal przeglądarkę", "open_browser"),
         ("Przeglądarka", "open_browser"),
+        ("Otwórz mój komputer", "open_folder"),
+        ("Otwórz Whatsap", "open_app"),
+        ("Otwórz YouTube", "open_url"),
         ("Otwórz chat gpt", "open_gpt_chat"),
         ("ChatGPT", "open_chat"),
         ("Otwórz Gemini", "open_gemini_chat"),
+        ("Jakie okno jest aktywne", "describe_active_window"),
         ("Jakie mam teraz okno aktywne?", "describe_active_window"),
         ("Czy to dobre pole do pisania", "describe_text_target"),
         ("Aktywne okno", "describe_active_window"),
@@ -214,7 +365,7 @@ def test_safe_paste_command_extracts_target_and_text() -> None:
         ("Kopiuj zaznaczenie", "copy_selected_text"),
         ("Skopiuj telefon pod myszką", "copy_number_under_cursor"),
         ("Kopiuj numer", "copy_number_under_cursor"),
-        ("Skopiuj tekst pod kursorem", "copy_sentence_under_cursor"),
+        ("Skopiuj tekst pod kursorem", "copy_text_under_cursor"),
         ("Kopiuj zdanie", "copy_sentence_under_cursor"),
         ("Aktywność", "describe_recent_activity"),
     ],

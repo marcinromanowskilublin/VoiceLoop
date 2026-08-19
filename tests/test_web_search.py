@@ -196,6 +196,36 @@ async def test_web_search_uses_venice_with_cloud_key(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_web_search_falls_back_from_venice_quota_to_gemini(tmp_path) -> None:
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        web_search_provider="venice",
+        web_search_fallback_provider="duckduckgo",
+        cloud_llm_api_key="venice-key",
+        gemini_api_key="gemini-key",
+    )
+    client = WebSearchClient(settings)
+    client._search_venice = AsyncMock(side_effect=WebSearchError("HTTP 402"))
+    client._search_gemini = AsyncMock(
+        return_value=[
+            WebSearchResult(
+                title="Gemini source",
+                url="https://example.com/current",
+                snippet="Aktualne dane.",
+                provider="gemini",
+            )
+        ]
+    )
+    client._search_duckduckgo = AsyncMock(return_value=[])
+
+    results = await client.search("aktualne informacje", limit=1)
+
+    assert results[0].provider == "gemini"
+    client._search_gemini.assert_awaited_once()
+    client._search_duckduckgo.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_web_search_falls_back_when_venice_key_missing(tmp_path) -> None:
     settings = Settings(
         voiceloop_data_dir=str(tmp_path),
@@ -203,6 +233,7 @@ async def test_web_search_falls_back_when_venice_key_missing(tmp_path) -> None:
         web_search_fallback_provider="duckduckgo",
         cloud_llm_api_key="",
         web_search_api_key="",
+        gemini_api_key="",
     )
     client = WebSearchClient(settings)
     client._search_duckduckgo = AsyncMock(

@@ -60,6 +60,14 @@
     .message.user { margin-left: 11%; background: #152440; }
     .message.assistant { margin-right: 11%; background: var(--panel2); }
     .message.system { color: var(--muted); font-size: 13px; border-style: dashed; }
+    .message.input { margin-left: 11%; background: #152440; border-color: #315687; }
+    .message.output { margin-right: 11%; background: #1b2330; border-color: #43536a; }
+    .message.unknown { background: #302714; border-color: #6d5827; }
+    .speaker { display: block; margin-bottom: 5px; color: var(--accent); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .emotions { display: block; margin-top: 7px; color: #90d8b2; font-size: 12px; }
+    .meeting-bar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 9px 11px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
+    .meeting-bar.active { border-color: var(--bad); color: var(--text); }
+    .recording-dot { color: var(--bad); font-size: 18px; line-height: 0; }
     .composer { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
     textarea {
       width: 100%;
@@ -95,6 +103,12 @@
     }
     .memory-item { display: flex; gap: 8px; justify-content: space-between; border-top: 1px solid var(--line); padding: 8px 0; font-size: 13px; }
     .memory-item button { padding: 3px 7px; }
+    .trace-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .trace-metric { background: #0b0f16; border: 1px solid var(--line); border-radius: 8px; padding: 7px; }
+    .trace-metric b { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .trace-metric span { display: block; margin-top: 3px; font-size: 13px; }
+    .trace-meta { color: var(--muted); font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }
+    .source-link { display: block; color: #b8d1ff; font-size: 13px; margin: 7px 0; overflow-wrap: anywhere; }
     #interim { min-height: 22px; color: var(--accent); font-style: italic; font-size: 14px; padding: 4px 0; }
     .empty { color: var(--muted); font-size: 13px; }
     @media (max-width: 950px) {
@@ -113,9 +127,11 @@
 <body>
   <div class="layout">
     <header>
-      <h1>VoiceLoop <span>Venice · Qwen · Nomic · Deepgram · n8n</span></h1>
+      <h1>VoiceLoop <span id="model-badge">lokalny panel</span></h1>
       <div class="actions">
-        <button id="listen">Start nasłuchu</button>
+        <button id="conversation">Rozpocznij rozmowę</button>
+        <button id="meeting" class="primary">Rozpocznij nagranie</button>
+        <button id="listen">Włącz Deepgram</button>
         <button id="refresh">Odśwież</button>
         <button id="stop" class="danger">STOP</button>
       </div>
@@ -125,6 +141,10 @@
 
     <main>
       <section class="card conversation">
+        <div id="meeting-bar" class="meeting-bar">
+          <span><span class="recording-dot">●</span> <b id="meeting-status">Brak aktywnego nagrania</b></span>
+          <span id="meeting-detail">Asystent dostępny</span>
+        </div>
         <div id="messages"></div>
         <div id="interim"></div>
         <div class="composer">
@@ -143,6 +163,18 @@
       </section>
 
       <aside class="side">
+        <section class="card">
+          <h2>Ostatnia tura</h2>
+          <div id="turn-trace"><span class="empty">Brak pomiaru.</span></div>
+        </section>
+        <section class="card">
+          <h2>Źródła odpowiedzi</h2>
+          <div id="answer-sources"><span class="empty">Brak źródeł.</span></div>
+        </section>
+        <section class="card">
+          <h2>Możliwości</h2>
+          <div id="capabilities"><span class="empty">Ładowanie katalogu…</span></div>
+        </section>
         <section class="card">
           <h2>Ostatnie zadania</h2>
           <div id="tasks"><span class="empty">Brak zadań.</span></div>
@@ -164,9 +196,65 @@
       token: "",
       llmPrimary: "local",
       listening: false,
+      meetingActive: false,
+      meetingStatus: "idle",
+      meetingSessionId: "",
+      transcriptKeys: new Set(),
+      transcriptGroups: [],
+      transcriptGroupByKey: new Map(),
       commandIds: new Set()
     };
     const $ = id => document.getElementById(id);
+    const emotionLabels = {
+      Admiration: "podziw",
+      Adoration: "uwielbienie",
+      "Aesthetic Appreciation": "zachwyt",
+      Amusement: "rozbawienie",
+      Anger: "złość",
+      Anxiety: "niepokój",
+      Awe: "zdumienie",
+      Awkwardness: "niezręczność",
+      Boredom: "znudzenie",
+      Calmness: "spokój",
+      Concentration: "koncentracja",
+      Confusion: "dezorientacja",
+      Contemplation: "zamyślenie",
+      Contempt: "pogarda",
+      Contentment: "zadowolenie",
+      Craving: "pragnienie",
+      Desire: "chęć",
+      Determination: "determinacja",
+      Disappointment: "rozczarowanie",
+      Disgust: "wstręt",
+      Distress: "napięcie",
+      Doubt: "wątpliwość",
+      Ecstasy: "euforia",
+      Embarrassment: "zakłopotanie",
+      "Empathic Pain": "współodczuwanie bólu",
+      Entrancement: "zafascynowanie",
+      Envy: "zazdrość",
+      Excitement: "pobudzenie",
+      Fear: "strach",
+      Guilt: "poczucie winy",
+      Horror: "przerażenie",
+      Interest: "zainteresowanie",
+      Joy: "radość",
+      Love: "miłość",
+      Nostalgia: "nostalgia",
+      Pain: "ból",
+      Pride: "duma",
+      Realization: "olśnienie",
+      Relief: "ulga",
+      Romance: "romantyczność",
+      Sadness: "smutek",
+      Satisfaction: "satysfakcja",
+      Shame: "wstyd",
+      "Surprise (negative)": "negatywne zaskoczenie",
+      "Surprise (positive)": "pozytywne zaskoczenie",
+      Sympathy: "sympatia",
+      Tiredness: "zmęczenie",
+      Triumph: "triumf"
+    };
 
     async function api(path, options = {}) {
       const headers = Object.assign({}, options.headers || {});
@@ -192,9 +280,209 @@
       $("messages").scrollTop = $("messages").scrollHeight;
     }
 
+    function transcriptKey(item) {
+      return item.segment_key || [
+        item.session_id || state.meetingSessionId,
+        item.channel || "unknown",
+        item.speaker_label || "",
+        item.start_time || "",
+        item.text || ""
+      ].join("|");
+    }
+
+    function parseTranscriptTime(item) {
+      if (!item || !item.start_time) return null;
+      const date = new Date(item.start_time);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function hasSentenceEnd(text) {
+      return /[.!?…]["')\]]?\s*$/.test((text || "").trim());
+    }
+
+    function beginsAsContinuation(text) {
+      const cleaned = (text || "").trim();
+      if (!cleaned) return false;
+      return /^[a-ząćęłńóśźż]/.test(cleaned)
+        || /^(?:a|ale|bo|czyli|więc|oraz|i|lub|natomiast|potem|więc|zatem)\b/i.test(cleaned);
+    }
+
+    function shouldMergeTranscriptSegment(group, item) {
+      if (!group || !item) return false;
+      const channel = ["input", "output"].includes(item.channel) ? item.channel : "unknown";
+      const speakerLabel = item.speaker_label || (channel === "input" ? "Ty" : "Rozmówca");
+      if (group.channel !== channel || group.speakerLabel !== speakerLabel) return false;
+      const previousText = group.text || "";
+      const nextText = item.text || "";
+      const previousIsOpen = !hasSentenceEnd(previousText);
+      const nextContinues = beginsAsContinuation(nextText);
+      const shortTail = nextText.trim().split(/\s+/).filter(Boolean).length <= 4;
+      return previousIsOpen || nextContinues || shortTail;
+    }
+
+    function joinTranscriptText(previous, next) {
+      const left = (previous || "").trim();
+      const right = (next || "").trim();
+      if (!left) return right;
+      if (!right) return left;
+      if (/[-–—(„"']$/.test(left) || /^[,.;:!?…)]/.test(right)) return left + right;
+      return left + " " + right;
+    }
+
+    function updateTranscriptGroupNode(group) {
+      group.textNode.textContent = group.text;
+      group.node.dataset.segmentKeys = group.keys.join(",");
+      group.node.title = `Scalone z ${group.keys.length} fragmentów źródłowych`;
+      renderGroupEmotions(group);
+    }
+
+    function normalizeEmotions(emotions) {
+      if (!Array.isArray(emotions)) return [];
+      return emotions
+        .map(item => ({
+          name: String(item && item.name ? item.name : "").trim(),
+          score: Number(item && item.score)
+        }))
+        .filter(item => item.name && Number.isFinite(item.score))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+    }
+
+    function polishEmotionName(name) {
+      return emotionLabels[name] || name.toLowerCase();
+    }
+
+    function mergeGroupEmotions(group) {
+      const totals = new Map();
+      const counts = new Map();
+      for (const emotions of group.emotionsByKey.values()) {
+        for (const emotion of normalizeEmotions(emotions)) {
+          totals.set(emotion.name, (totals.get(emotion.name) || 0) + emotion.score);
+          counts.set(emotion.name, (counts.get(emotion.name) || 0) + 1);
+        }
+      }
+      return [...totals.entries()]
+        .map(([name, total]) => ({ name, score: total / counts.get(name) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+    }
+
+    function emotionText(emotions) {
+      const safe = normalizeEmotions(emotions);
+      if (!safe.length) return "";
+      return "emocje: " + safe
+        .map(item => `${polishEmotionName(item.name)} ${Math.round(item.score * 100)}%`)
+        .join(", ");
+    }
+
+    function renderGroupEmotions(group) {
+      const text = emotionText(mergeGroupEmotions(group));
+      group.emotionNode.textContent = text;
+      group.emotionNode.hidden = !text;
+    }
+
+    function setGroupSegmentEmotions(group, key, emotions) {
+      const safe = normalizeEmotions(emotions);
+      if (safe.length) {
+        group.emotionsByKey.set(key, safe);
+      } else {
+        group.emotionsByKey.delete(key);
+      }
+      renderGroupEmotions(group);
+    }
+
+    function updateTranscriptEmotions(item) {
+      if (!item || !item.segment_key) return;
+      const group = state.transcriptGroupByKey.get(item.segment_key);
+      if (!group) return;
+      setGroupSegmentEmotions(group, item.segment_key, item.emotions || []);
+    }
+
+    function addTranscriptSegment(item) {
+      if (!item || !item.text) return;
+      const key = transcriptKey(item);
+      if (state.transcriptKeys.has(key)) return;
+      state.transcriptKeys.add(key);
+      const channel = ["input", "output"].includes(item.channel) ? item.channel : "unknown";
+      const speakerLabel = item.speaker_label || (channel === "input" ? "Ty" : "Rozmówca");
+      const lastGroup = state.transcriptGroups[state.transcriptGroups.length - 1];
+      if (shouldMergeTranscriptSegment(lastGroup, item)) {
+        lastGroup.text = joinTranscriptText(lastGroup.text, item.text);
+        lastGroup.keys.push(key);
+        state.transcriptGroupByKey.set(key, lastGroup);
+        setGroupSegmentEmotions(lastGroup, key, item.emotions || []);
+        updateTranscriptGroupNode(lastGroup);
+        $("messages").scrollTop = $("messages").scrollHeight;
+        return;
+      }
+      const node = document.createElement("div");
+      node.className = "message " + channel;
+      node.dataset.segmentKey = key;
+      const speaker = document.createElement("span");
+      speaker.className = "speaker";
+      let time = "";
+      const date = parseTranscriptTime(item);
+      if (date) {
+        time = " · " + date.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+      speaker.textContent = speakerLabel + time;
+      const text = document.createElement("span");
+      text.textContent = item.text;
+      const emotionNode = document.createElement("span");
+      emotionNode.className = "emotions";
+      emotionNode.hidden = true;
+      node.append(speaker, text, emotionNode);
+      $("messages").appendChild(node);
+      const group = {
+        channel,
+        speakerLabel,
+        text: item.text,
+        keys: [key],
+        node,
+        textNode: text,
+        emotionNode,
+        emotionsByKey: new Map()
+      };
+      state.transcriptGroups.push(group);
+      state.transcriptGroupByKey.set(key, group);
+      setGroupSegmentEmotions(group, key, item.emotions || []);
+      updateTranscriptGroupNode(group);
+      $("messages").scrollTop = $("messages").scrollHeight;
+    }
+
+    function updateMeetingUi(meeting) {
+      const active = Boolean(meeting && meeting.active);
+      const status = meeting && meeting.status ? meeting.status : "idle";
+      state.meetingActive = active;
+      state.meetingStatus = status;
+      state.meetingSessionId = meeting && meeting.session_id ? meeting.session_id : "";
+      const bar = $("meeting-bar");
+      bar.classList.toggle("active", active);
+      $("meeting-status").textContent = active
+        ? "Nagrywanie trwa"
+        : status === "finalizing"
+        ? "Finalizowanie transkryptu"
+        : status === "completed"
+        ? "Nagranie zakończone"
+        : "Brak aktywnego nagrania";
+      $("meeting-detail").textContent = active
+        ? "Asystent wyłączony · input/output zapisywane osobno"
+        : status === "finalizing"
+        ? "Deepgram kończy kanały wyjściowe"
+        : "Asystent dostępny";
+      $("meeting").textContent = active ? "Zakończ nagranie" : "Rozpocznij nagranie";
+      $("meeting").classList.toggle("danger", active);
+      $("meeting").classList.toggle("primary", !active);
+      $("conversation").disabled = active;
+      $("send").disabled = active;
+    }
+
     async function loadHealth() {
       try {
         const data = await api("/api/v1/health");
+        const deepgram = data.components.deepgram || {};
+        state.listening = deepgram.status === "ok";
+        $("listen").textContent = state.listening ? "Wyłącz Deepgram" : "Włącz Deepgram";
         $("health").replaceChildren(...Object.entries(data.components).map(([name, item]) => {
           const card = document.createElement("div");
           card.className = "health-card";
@@ -256,6 +544,111 @@
       try { renderTasks(await api("/api/v1/commands?limit=20")); } catch (_) {}
     }
 
+    function renderTrace(trace, aggregates = {}) {
+      const root = $("turn-trace");
+      if (!trace) {
+        root.innerHTML = '<span class="empty">Brak pomiaru.</span>';
+        return;
+      }
+      const labels = {
+        stt_ms: "STT",
+        context_ms: "Kontekst",
+        model_ms: "Model",
+        tool_ms: "Narzędzie",
+        speech_to_first_audio_ms: "Do pierwszego audio",
+        listening_resume_ms: "Powrót nasłuchu",
+        barge_stop_ms: "Przerwanie TTS"
+      };
+      const summary = document.createElement("div");
+      summary.className = "trace-summary";
+      const metrics = trace.metrics_ms || {};
+      Object.entries(labels).forEach(([key, label]) => {
+        const value = metrics[key];
+        if (value === undefined) return;
+        const card = document.createElement("div");
+        card.className = "trace-metric";
+        const title = document.createElement("b");
+        title.textContent = label;
+        const text = document.createElement("span");
+        const aggregate = aggregates[key] || {};
+        text.textContent = `${value} ms` + (aggregate.count ? ` · p95 ${aggregate.p95} ms` : "");
+        card.append(title, text);
+        summary.appendChild(card);
+      });
+      const meta = document.createElement("p");
+      meta.className = "trace-meta";
+      meta.textContent = `sesja ${trace.session_id} · tura ${trace.turn_id} · ${trace.status}`;
+      root.replaceChildren(summary, meta);
+      if (trace.metadata && Array.isArray(trace.metadata.sources)) {
+        renderSources(trace.metadata.sources);
+      }
+    }
+
+    function renderSources(sources) {
+      const root = $("answer-sources");
+      const safeSources = (sources || []).filter(item => item && item.url).slice(0, 3);
+      if (!safeSources.length) {
+        root.innerHTML = '<span class="empty">Brak źródeł.</span>';
+        return;
+      }
+      root.replaceChildren(...safeSources.map(item => {
+        const link = document.createElement("a");
+        link.className = "source-link";
+        link.href = item.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = item.title || item.url;
+        link.title = `${item.provider || "web"} · ${item.url}`;
+        return link;
+      }));
+    }
+
+    function renderSourceError(message) {
+      const root = $("answer-sources");
+      const item = document.createElement("span");
+      item.className = "empty";
+      item.textContent = message || "Nie udało się pobrać aktualnych źródeł.";
+      root.replaceChildren(item);
+    }
+
+    async function loadCapabilities() {
+      const root = $("capabilities");
+      try {
+        const catalog = await api("/api/v1/capabilities");
+        const grouped = new Map();
+        for (const action of catalog.voiceloop_actions || []) {
+          const category = action.category || "inne";
+          if (!grouped.has(category)) grouped.set(category, []);
+          grouped.get(category).push(action);
+        }
+        const groups = [...grouped.entries()].map(([category, actions]) => {
+          const details = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = `${category} (${actions.length})`;
+          details.appendChild(summary);
+          const list = document.createElement("ul");
+          for (const action of actions) {
+            const item = document.createElement("li");
+            const examples = action.positive_examples || [];
+            item.textContent = `${action.spoken_name || action.id}${examples[0] ? ` — „${examples[0]}”` : ""}`;
+            list.appendChild(item);
+          }
+          details.appendChild(list);
+          return details;
+        });
+        root.replaceChildren(...groups);
+      } catch (error) {
+        root.innerHTML = '<span class="empty">Katalog chwilowo niedostępny.</span>';
+      }
+    }
+
+    async function loadTraces() {
+      try {
+        const data = await api("/api/v1/conversation/traces?limit=20");
+        renderTrace((data.traces || [])[0], data.aggregates || {});
+      } catch (_) {}
+    }
+
     async function actOnTask(id, action) {
       await api(`/api/v1/commands/${encodeURIComponent(id)}/${action}`, { method: "POST" });
       await loadTasks();
@@ -314,12 +707,60 @@
       }
     }
 
+    async function startConversation() {
+      try {
+        await api("/api/v1/conversation/start", { method: "POST" });
+        addMessage("system", "Rozpoczynam rozmowę: jedno powitanie, potem Deepgram one-shot.");
+      } catch (error) {
+        addMessage("system", "Rozmowa: " + error.message);
+      }
+    }
+
+    async function loadMeeting() {
+      try {
+        const meeting = await api("/api/v1/meetings/current");
+        updateMeetingUi(meeting);
+        (meeting.segments || []).forEach(addTranscriptSegment);
+        return meeting;
+      } catch (error) {
+        addMessage("system", "Nagranie: " + error.message);
+        return null;
+      }
+    }
+
+    async function toggleMeeting() {
+      $("meeting").disabled = true;
+      try {
+        if (state.meetingActive) {
+          const meeting = await api("/api/v1/meetings/stop", { method: "POST" });
+          state.listening = false;
+          $("listen").textContent = "Włącz Deepgram";
+          updateMeetingUi(meeting);
+          addMessage("system", "Nagrywanie zakończone. Kanały output są finalizowane i zapisane lokalnie.");
+        } else {
+          state.transcriptKeys.clear();
+          state.transcriptGroups = [];
+          state.transcriptGroupByKey.clear();
+          $("messages").replaceChildren();
+          const meeting = await api("/api/v1/meetings/start", { method: "POST" });
+          updateMeetingUi(meeting);
+          state.listening = true;
+          $("listen").textContent = "Wyłącz Deepgram";
+          addMessage("system", "Asystent wyłączony. Deepgram działa, a input/output są nagrywane osobno.");
+        }
+      } catch (error) {
+        addMessage("system", "Nagranie: " + error.message);
+      } finally {
+        $("meeting").disabled = false;
+      }
+    }
+
     async function toggleListening() {
       const endpoint = state.listening ? "stop" : "start";
       try {
         await api(`/api/v1/listening/${endpoint}`, { method: "POST" });
         state.listening = !state.listening;
-        $("listen").textContent = state.listening ? "Zatrzymaj nasłuch" : "Start nasłuchu";
+        $("listen").textContent = state.listening ? "Wyłącz Deepgram" : "Włącz Deepgram";
       } catch (error) {
         addMessage("system", "Deepgram: " + error.message);
       }
@@ -328,8 +769,9 @@
     async function stopAll() {
       await api("/api/v1/stop", { method: "POST" });
       state.listening = false;
-      $("listen").textContent = "Start nasłuchu";
-      addMessage("system", "Wszystkie zadania i nasłuch zostały zatrzymane.");
+      $("listen").textContent = "Włącz Deepgram";
+      addMessage("system", "Nasłuch został zatrzymany.");
+      await loadMeeting();
       await loadTasks();
     }
 
@@ -339,18 +781,46 @@
         const data = JSON.parse(event.data);
         const type = data.type;
         const payload = data.payload || {};
-        if (type === "transcript.interim") $("interim").textContent = payload.text || "";
+        if (type === "transcript.interim") {
+          $("interim").textContent = state.meetingActive && payload.text
+            ? "Ty (na żywo): " + payload.text
+            : payload.text || "";
+        }
         if (type === "transcript.final") {
           $("interim").textContent = "";
-          addMessage("user", payload.text || "");
+          if (!state.meetingActive) addMessage("user", payload.text || "");
+        }
+        if (type === "meeting.transcript.final") {
+          $("interim").textContent = "";
+          addTranscriptSegment(payload);
+        }
+        if (type === "meeting.segment.emotions") {
+          updateTranscriptEmotions(payload);
+        }
+        if (type === "meeting.started" || type === "meeting.stopped" || type === "meeting.completed") {
+          updateMeetingUi(payload);
+        }
+        if (type === "conversation.transcribe_only" && payload.enabled) {
+          if (!state.meetingActive) {
+            addMessage("system", "Asystent milczy. Transkrypcja na żywo i nagrywanie działają.");
+          }
         }
         if (type === "listening.connected") {
           state.listening = true;
-          $("listen").textContent = "Zatrzymaj nasłuch";
+          $("listen").textContent = "Wyłącz Deepgram";
         }
         if (type === "listening.stopped") {
           state.listening = false;
-          $("listen").textContent = "Start nasłuchu";
+          $("listen").textContent = "Włącz Deepgram";
+        }
+        if (type === "conversation.trace") {
+          renderTrace(payload);
+        }
+        if (type === "knowledge.search.completed") {
+          renderSources(payload.sources || []);
+        }
+        if (type === "knowledge.search.failed") {
+          renderSourceError(payload.error);
         }
         if (type.startsWith("command.") || type === "action.completed") loadTasks();
       };
@@ -366,11 +836,22 @@
         return;
       }
       const cloudPrimary = ["cloud", "venice"].includes(state.llmPrimary);
-      $("cloud").disabled = cloudPrimary;
+      const geminiPrimary = state.llmPrimary === "gemini";
+      $("cloud").disabled = cloudPrimary || geminiPrimary;
       $("cloud").checked = false;
-      $("cloud-label").textContent = cloudPrimary
+      $("cloud-label").textContent = geminiPrimary
+        ? "Gemini jest modelem głównym (ustawienie serwera)"
+        : cloudPrimary
         ? "Venice jest modelem głównym (ustawienie serwera)"
         : "zezwól na chmurowy fallback";
+      const badge = $("model-badge");
+      if (badge) {
+        badge.textContent = geminiPrimary
+          ? "Gemini · Qwen fallback · Deepgram · VA"
+          : cloudPrimary
+          ? "Venice · Qwen · Deepgram · VA"
+          : "Qwen · Deepgram · VA";
+      }
       $("send").onclick = sendCommand;
       $("prompt").onkeydown = event => {
         if (event.key === "Enter" && !event.shiftKey) {
@@ -378,9 +859,11 @@
           sendCommand();
         }
       };
+      $("conversation").onclick = startConversation;
+      $("meeting").onclick = toggleMeeting;
       $("listen").onclick = toggleListening;
       $("stop").onclick = stopAll;
-      $("refresh").onclick = () => Promise.all([loadHealth(), loadTasks(), loadMemories()]);
+      $("refresh").onclick = () => Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities()]);
       $("remember").onclick = async () => {
         const content = $("memoryText").value.trim();
         if (!content) return;
@@ -392,11 +875,15 @@
         await loadMemories();
       };
       connectEvents();
-      await Promise.all([loadHealth(), loadTasks(), loadMemories()]);
+      await Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities()]);
       setInterval(loadHealth, 8000);
       addMessage(
         "system",
-        cloudPrimary
+        state.meetingActive
+          ? "Nagrywanie trwa. Asystent jest wyłączony; Deepgram zapisuje transkrypt."
+          : geminiPrimary
+          ? "VoiceLoop gotowy. Gemini prowadzi rozmowę, Qwen jest fallbackiem; zadania idą Deepgram → VA/akcje."
+          : cloudPrimary
           ? "VoiceLoop gotowy. Venice jest głównym modelem, Qwen lokalnym fallbackiem."
           : "VoiceLoop gotowy. Qwen jest głównym modelem lokalnym."
       );

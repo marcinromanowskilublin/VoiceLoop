@@ -10,7 +10,10 @@ from voiceloop.screenpipe import (
     ScreenpipeContext,
     ScreenpipeMeeting,
 )
-from voiceloop.screenpipe_deepgram import ScreenpipeMeetingTranscriber
+from voiceloop.screenpipe_deepgram import (
+    ScreenpipeMeetingTranscriber,
+    envelope_from_deepgram_payload,
+)
 from voiceloop.settings import Settings
 
 
@@ -19,6 +22,52 @@ class FakeFileTranscriber:
 
     def __init__(self, text: str = "Rozmowa testowa.") -> None:
         self.transcribe = AsyncMock(return_value=text)
+
+
+def test_file_payload_preserves_words_confidence_time_and_speakers() -> None:
+    envelope = envelope_from_deepgram_payload(
+        {
+            "results": {
+                "channels": [
+                    {
+                        "alternatives": [
+                            {
+                                "transcript": "Otwórz VoiceLoop.",
+                                "confidence": 0.90,
+                                "words": [
+                                    {
+                                        "word": "otwórz",
+                                        "punctuated_word": "Otwórz",
+                                        "start": 0.1,
+                                        "end": 0.5,
+                                        "confidence": 0.95,
+                                        "speaker": 0,
+                                    },
+                                    {
+                                        "word": "voiceloop",
+                                        "punctuated_word": "VoiceLoop.",
+                                        "start": 0.6,
+                                        "end": 1.2,
+                                        "confidence": 0.85,
+                                        "speaker": 0,
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        language="pl",
+        model="nova-3",
+    )
+
+    assert envelope is not None
+    assert envelope.confidence_mean == pytest.approx(0.90)
+    assert envelope.confidence_min == pytest.approx(0.85)
+    assert envelope.started_at_seconds == pytest.approx(0.1)
+    assert envelope.ended_at_seconds == pytest.approx(1.2)
+    assert envelope.speaker_ids == (0,)
 
 
 def meeting(*, title: str = "Google Meet") -> ScreenpipeMeeting:

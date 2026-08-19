@@ -5,6 +5,8 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
+from .corpus.local_only import LocalOnlyViolation, require_loopback_url
+
 
 class EmbeddingUnavailableError(RuntimeError):
     pass
@@ -26,6 +28,15 @@ class OpenAICompatibleEmbeddingClient:
         self.timeout_seconds = timeout_seconds
         self.enabled = enabled
         self._resolved_model: str | None = None
+
+    def accepts_private_text(self) -> bool:
+        if not self.enabled:
+            return False
+        try:
+            require_loopback_url(self.base_url)
+        except LocalOnlyViolation:
+            return False
+        return True
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -75,10 +86,16 @@ class OpenAICompatibleEmbeddingClient:
         return vectors[0] if vectors else []
 
     async def embed_query(self, text: str) -> list[float]:
-        value = text.strip()
-        if value and not value.casefold().startswith("search_query:"):
-            value = f"search_query: {value}"
-        return await self.embed_text(value)
+        vectors = await self.embed_queries([text])
+        return vectors[0] if vectors else []
+
+    async def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        queries = [
+            text if text.casefold().startswith("search_query:") else f"search_query: {text}"
+            for text in texts
+            if text.strip()
+        ]
+        return await self.embed_texts(queries)
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         documents = [

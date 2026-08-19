@@ -82,6 +82,7 @@ class WebSearchClient:
             settings.web_search_fallback_provider or "duckduckgo"
         )
         self.api_key = settings.web_search_api_key
+        self.gemini_api_key = settings.gemini_api_key or settings.web_search_api_key
         self.venice_api_key = settings.cloud_llm_api_key or settings.web_search_api_key
         self.venice_base_url = (
             (settings.cloud_llm_base_url or "https://api.venice.ai/api/v1")
@@ -196,9 +197,24 @@ class WebSearchClient:
         return aliases.get(normalized, normalized)
 
     def _provider_chain(self) -> list[str]:
-        chain = [self.provider]
+        chain: list[str] = []
+        if self.provider == "duckduckgo":
+            if self._gemini_api_key_value():
+                chain.append("gemini")
+            elif self._venice_api_key_value():
+                chain.append("venice")
+        if self.provider not in chain:
+            chain.append(self.provider)
+        if (
+            self.provider == "venice"
+            and self._gemini_api_key_value()
+            and "gemini" not in chain
+        ):
+            chain.append("gemini")
         if self.fallback_provider and self.fallback_provider not in chain:
             chain.append(self.fallback_provider)
+        if "duckduckgo" not in chain:
+            chain.append("duckduckgo")
         return chain
 
     async def _search_with_provider(
@@ -223,6 +239,9 @@ class WebSearchClient:
 
     def _venice_api_key_value(self) -> str:
         return self._secret_value(self.venice_api_key)
+
+    def _gemini_api_key_value(self) -> str:
+        return self._secret_value(self.gemini_api_key)
 
     @staticmethod
     def _secret_value(secret: Any) -> str:
@@ -572,9 +591,9 @@ class WebSearchClient:
         return results
 
     async def _search_gemini(self, query: str, *, limit: int) -> list[WebSearchResult]:
-        token = self._api_key_value()
+        token = self._gemini_api_key_value()
         if not token:
-            raise WebSearchError("Gemini wymaga WEB_SEARCH_API_KEY.")
+            raise WebSearchError("Gemini wymaga GEMINI_API_KEY lub WEB_SEARCH_API_KEY.")
         payload = await self._post_json(
             (
                 "https://generativelanguage.googleapis.com/v1beta/models/"

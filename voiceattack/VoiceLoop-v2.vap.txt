@@ -1,11 +1,11 @@
 <?xml version='1.0' encoding='utf-8'?>
 <Profile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <Id>40125479-3df4-4d50-a0cb-1f9450b8fc6b</Id>
-  <Name>VoiceLoop v2</Name>
+  <Name>VoiceLoop v2 PRO</Name>
   <Commands>
     <Command>
       <Id>a190b03e-7d8b-541a-be37-b2110ea43096</Id>
-      <CommandString>asystent;hej asystent;voice loop;sluchaj asystencie;mam polecenie;posluchaj;asys</CommandString>
+      <CommandString>asystent;asystencie;hej asystent;hej asystencie;halo asystent;halo asystencie;voice loop;voiceloop;słuchaj asystencie;sluchaj asystencie;posłuchaj asystencie;posluchaj asystencie;mam polecenie;mam pytanie;chcę o coś zapytać;chce o cos zapytac;uruchom asystenta;włącz asystenta;wlacz asystenta;asys</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -42,8 +42,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Jednorazowy nasłuch Deepgram i przekazanie wypowiedzi do asystenta.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Jednorazowy nasłuch Deepgram i przekazanie wypowiedzi do asystenta.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -57,8 +57,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -103,7 +103,7 @@
     </Command>
     <Command>
       <Id>205c025c-3fde-5aa2-a648-a92e11de661f</Id>
-      <CommandString>zapisz notatkę;nowa notatka;utworz notatke;dodaj notatke;zanotuj to;notatka;notka</CommandString>
+      <CommandString>zapisz notatkę;zapisz notatke;zapisz mi notatkę;zapisz mi notatke;nowa notatka;utwórz notatkę;utworz notatke;dodaj notatkę;dodaj notatke;zrób notatkę;zrob notatke;stwórz notatkę;stworz notatke;zanotuj to;zanotuj;dopisz notatkę;dopisz notatke;zapisz to jako notatkę;zapisz to jako notatke;notatka;notka</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -140,8 +140,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Pyta o treść i zapisuje notatkę przez kontrolowaną akcję.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Pyta o treść i zapisuje notatkę przez kontrolowaną akcję.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -155,8 +155,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -201,7 +201,7 @@
     </Command>
     <Command>
       <Id>4065dc6e-8aa0-5c8d-8289-223ccf2d02e8</Id>
-      <CommandString>zapamiętaj;zapamiętaj to;zapamietaj to prosze;pamietaj to;zapisz to w pamieci;pamietaj</CommandString>
+      <CommandString>zapamiętaj;zapamietaj;zapamiętaj to;zapamietaj to;zapamiętaj to proszę;zapamietaj to prosze;pamiętaj to;pamietaj to;zapisz to w pamięci;zapisz to w pamieci;dodaj to do pamięci;dodaj to do pamieci;zachowaj to w pamięci;zachowaj to w pamieci;nie zapomnij tego;chcę żebyś to pamiętał;chce zebys to pamietal;pamiętaj;pamietaj</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -238,8 +238,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Pyta o fakt, a zapis wykonuje dopiero po potwierdzeniu.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Pyta o fakt, a zapis wykonuje dopiero po potwierdzeniu.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -253,8 +253,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -299,7 +299,7 @@
     </Command>
     <Command>
       <Id>cf1bf9b1-f8dc-593a-9459-69241d405300</Id>
-      <CommandString>co robiłem ostatnio;co robiłam ostatnio;ostatnia aktywność;co się działo na ekranie;pokaz historie ekranu;podsumuj ostatnia aktywnosc;aktywnosc;historia</CommandString>
+      <CommandString>co robiłem ostatnio;co robilem ostatnio;co robiłam ostatnio;co robilam ostatnio;co ostatnio robiłem;co ostatnio robilem;ostatnia aktywność;ostatnia aktywnosc;moja ostatnia aktywność;moja ostatnia aktywnosc;co się działo na ekranie;co sie dzialo na ekranie;pokaż historię ekranu;pokaz historie ekranu;pokaż historię aktywności;pokaz historie aktywnosci;podsumuj ostatnią aktywność;podsumuj ostatnia aktywnosc;podsumuj co robiłem;podsumuj co robilem;co było na ekranie;co bylo na ekranie;aktywność;aktywnosc;historia</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -336,8 +336,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Czyta lokalne podsumowanie ostatniej aktywności Screenpipe.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Czyta lokalne podsumowanie ostatniej aktywności Screenpipe.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -351,8 +351,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -397,7 +397,7 @@
     </Command>
     <Command>
       <Id>dafff2b4-846e-5a1b-a4a0-2da760537a56</Id>
-      <CommandString>opisz aktywne okno;co mam otwarte;jakie okno jest aktywne;na jakim oknie jestem;podaj aktywne okno;aktywne okno</CommandString>
+      <CommandString>opisz aktywne okno;opisz bieżące okno;opisz biezace okno;co mam otwarte;co jest teraz otwarte;jakie okno jest aktywne;które okno jest aktywne;ktore okno jest aktywne;na jakim oknie jestem;w jakim oknie jestem;gdzie teraz jestem;podaj aktywne okno;sprawdź aktywne okno;sprawdz aktywne okno;jaki program jest aktywny;co jest na wierzchu;aktywne okno</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -434,8 +434,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Czyta tytuł aktywnego okna i nazwę programu.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Czyta tytuł aktywnego okna i nazwę programu.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -449,8 +449,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -495,7 +495,7 @@
     </Command>
     <Command>
       <Id>d01b02d7-acdf-59fb-baf4-eb6b8ae20509</Id>
-      <CommandString>gdzie teraz pisze;sprawdz pole tekstowe;czy to pasek adresu;gdzie trafi tekst</CommandString>
+      <CommandString>gdzie teraz piszę;gdzie teraz pisze;sprawdź pole tekstowe;sprawdz pole tekstowe;sprawdź gdzie piszę;sprawdz gdzie pisze;gdzie trafi tekst;gdzie wpisze się tekst;gdzie wpisze sie tekst;do jakiego pola trafi tekst;czy to dobre pole;czy mogę tu pisać;czy moge tu pisac;czy to pasek adresu;sprawdź kursor tekstowy;sprawdz kursor tekstowy;sprawdź miejsce wpisywania;sprawdz miejsce wpisywania;pole tekstowe</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -532,8 +532,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Sprawdza, czy wpisywanie trafi do właściwego pola tekstowego.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Sprawdza, czy wpisywanie trafi do właściwego pola tekstowego.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -547,8 +547,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -593,7 +593,7 @@
     </Command>
     <Command>
       <Id>6c6384f8-43ee-548b-beab-b29b0aafbf75</Id>
-      <CommandString>zminimalizuj okno;schowaj okno;ukryj okno;zwin okno;schowaj aktywne okno;zwin</CommandString>
+      <CommandString>zminimalizuj okno;minimalizuj okno;zminimalizuj aktywne okno;minimalizuj aktywne okno;schowaj okno;schowaj aktywne okno;ukryj okno;ukryj aktywne okno;zwiń okno;zwin okno;zwiń aktywne okno;zwin aktywne okno;opuść to okno;opusc to okno;minimalizuj to;schowaj to okno;zwiń;zwin</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -630,8 +630,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Minimalizuje aktualnie aktywne okno.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Minimalizuje aktualnie aktywne okno.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -645,8 +645,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -690,8 +690,106 @@
       <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
     </Command>
     <Command>
+      <Id>a7feed03-2df0-5443-a0d9-638b5e6d6b46</Id>
+      <CommandString>zminimalizuj okno pod kursorem;minimalizuj okno pod kursorem;zminimalizuj aplikację pod kursorem;zminimalizuj aplikacje pod kursorem;minimalizuj aplikację pod kursorem;minimalizuj aplikacje pod kursorem;schowaj okno pod kursorem;ukryj okno pod kursorem;zwiń okno pod kursorem;zwin okno pod kursorem;zminimalizuj okno pod myszką;zminimalizuj okno pod myszka</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>110310ce-ded0-5f80-976e-482af50f58e0</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\minimize-window-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Minimalizuje okno aplikacji wskazywane kursorem.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>110310ce-ded0-5f80-976e-482af50f58e0</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
       <Id>91766316-9d63-59a6-86f8-9e78e6de9016</Id>
-      <CommandString>zminimalizuj wszystkie;pokaż pulpit;schowaj wszystkie okna;minimalizuj wszystko;zwin wszystkie okna;pulpit</CommandString>
+      <CommandString>zminimalizuj wszystkie;zminimalizuj wszystkie okna;minimalizuj wszystkie okna;minimalizuj wszystko;schowaj wszystkie okna;ukryj wszystkie okna;zwiń wszystkie okna;zwin wszystkie okna;zwiń wszystko;zwin wszystko;pokaż pulpit;pokaz pulpit;przejdź do pulpitu;przejdz do pulpitu;odsłoń pulpit;odslon pulpit;wyczyść ekran;wyczysc ekran;pulpit</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -728,8 +826,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Minimalizuje wszystkie okna i pokazuje pulpit.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Minimalizuje wszystkie okna i pokazuje pulpit.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -743,8 +841,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -788,8 +886,106 @@
       <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
     </Command>
     <Command>
+      <Id>d2a03387-5267-5943-8e4b-19458a3cf979</Id>
+      <CommandString>zamknij okno pod kursorem;zamknij wskazane okno;zamknij okno które wskazuję;zamknij okno ktore wskazuje;zamknij okno pod myszką;zamknij okno pod myszka;zamknij aplikację pod kursorem;zamknij aplikacje pod kursorem;wyłącz aplikację pod kursorem;wylacz aplikacje pod kursorem;zamknij aplikację pod myszką;zamknij aplikacje pod myszka;wyłącz aplikację pod myszką;wylacz aplikacje pod myszka;zamknij wskazaną aplikację;zamknij wskazana aplikacje;wyłącz wskazaną aplikację;wylacz wskazana aplikacje;zamknij program pod kursorem;wyłącz program pod kursorem;wylacz program pod kursorem;zamknij wskazany program;zamknij program który wskazuję;zamknij program ktory wskazuje;zamknij to okno;wyłącz tę aplikację;wylacz te aplikacje;zamknij tę aplikację;zamknij te aplikacje</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>c05d899c-9dfb-573d-bfb0-c362162df0d1</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\close-window-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Prosi wskazane okno o zamknięcie po potwierdzeniu głosowym.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>c05d899c-9dfb-573d-bfb0-c362162df0d1</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
       <Id>7fb70095-c61a-5c74-a388-0ad10368fa8a</Id>
-      <CommandString>kopiuj zaznaczony tekst;skopiuj zaznaczony tekst;kopiuj zaznaczony fragment;przepisz zaznaczenie do schowka;kopiuj zaznaczenie</CommandString>
+      <CommandString>kopiuj zaznaczony tekst;skopiuj zaznaczony tekst;kopiuj zaznaczony fragment;skopiuj zaznaczony fragment;kopiuj to co zaznaczyłem;kopiuj to co zaznaczylem;skopiuj to co zaznaczyłem;skopiuj to co zaznaczylem;wrzuć zaznaczenie do schowka;wrzuc zaznaczenie do schowka;przenieś zaznaczenie do schowka;przenies zaznaczenie do schowka;przepisz zaznaczenie do schowka;zaznaczony tekst do schowka;zaznaczenie do schowka;kopiuj zaznaczenie;skopiuj zaznaczenie</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -826,8 +1022,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Kopiuje bieżący zaznaczony tekst do schowka.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Kopiuje bieżący zaznaczony tekst do schowka.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -841,8 +1037,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -886,8 +1082,204 @@
       <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
     </Command>
     <Command>
+      <Id>4f6580d2-8bfa-5547-ade3-55ef457c61e8</Id>
+      <CommandString>kopiuj tekst pod kursorem;skopiuj tekst pod kursorem;kopiuj tekst pod myszką;kopiuj tekst pod myszka;skopiuj tekst pod myszką;skopiuj tekst pod myszka;kopiuj spod kursora;skopiuj spod kursora;kopiuj pod kursorem;skopiuj pod kursorem;kopiuj to pod kursorem;skopiuj to pod kursorem;kopiuj element pod kursorem;skopiuj element pod kursorem;kopiuj wskazany tekst;skopiuj wskazany tekst;kopiuj tekst który wskazuję;kopiuj tekst ktory wskazuje;skopiuj tekst który wskazuję;skopiuj tekst ktory wskazuje;kopiuj to co wskazuje myszka;skopiuj to co wskazuje myszka;tekst pod kursorem do schowka;tekst pod myszką do schowka;tekst pod myszka do schowka;wskazany tekst do schowka</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>38e675f2-e98e-5ad4-a62f-92d7e67a93dd</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-text-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Kopiuje dostępny tekst elementu wskazywanego kursorem.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>38e675f2-e98e-5ad4-a62f-92d7e67a93dd</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
+      <Id>b7268c65-9e97-56f4-a2f2-4ab319304b50</Id>
+      <CommandString>kopiuj email pod kursorem;skopiuj email pod kursorem;kopiuj e-mail pod kursorem;skopiuj e-mail pod kursorem;kopiuj mail pod kursorem;skopiuj mail pod kursorem;kopiuj adres email pod kursorem;skopiuj adres email pod kursorem;kopiuj adres e-mail pod kursorem;skopiuj adres e-mail pod kursorem;kopiuj adres mailowy pod kursorem;skopiuj adres mailowy pod kursorem;kopiuj maila pod kursorem;skopiuj maila pod kursorem;kopiuj email pod myszką;kopiuj email pod myszka;skopiuj email pod myszką;skopiuj email pod myszka;kopiuj mail pod myszką;kopiuj mail pod myszka;skopiuj mail pod myszką;skopiuj mail pod myszka;skopiuj mail który wskazuję;skopiuj mail ktory wskazuje;skopiuj email który wskazuję;skopiuj email ktory wskazuje;skopiuj mi ten mail gdzie mam kursor do schowka;skopiuj ten email gdzie jest kursor;adres email do schowka;adres e-mail do schowka;mail do schowka;email do schowka;kopiuj email;skopiuj email;kopiuj mail;skopiuj mail</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>c8e30d4f-7444-56c2-a855-3c80b6d57c06</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-email-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Kopiuje pojedynczy adres e-mail wykryty pod kursorem.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>c8e30d4f-7444-56c2-a855-3c80b6d57c06</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
       <Id>85eb9da6-7d93-5412-a138-2ed65fd0672a</Id>
-      <CommandString>kopiuj numer pod kursorem;skopiuj numer pod kursorem;kopiuj liczbe pod kursorem;skopiuj telefon pod kursorem;kopiuj numer</CommandString>
+      <CommandString>kopiuj numer pod kursorem;skopiuj numer pod kursorem;kopiuj liczbę pod kursorem;kopiuj liczbe pod kursorem;skopiuj liczbę pod kursorem;skopiuj liczbe pod kursorem;kopiuj telefon pod kursorem;skopiuj telefon pod kursorem;kopiuj numer telefonu pod kursorem;skopiuj numer telefonu pod kursorem;kopiuj numer pod myszką;kopiuj numer pod myszka;skopiuj numer pod myszką;skopiuj numer pod myszka;kopiuj liczbę którą wskazuję;kopiuj liczbe ktora wskazuje;skopiuj numer który wskazuję;skopiuj numer ktory wskazuje;numer pod kursorem do schowka;telefon pod kursorem do schowka;numer do schowka;kopiuj numer;skopiuj numer</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -924,8 +1316,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Kopiuje numer wykryty pod kursorem.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Kopiuje numer wykryty pod kursorem.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -939,8 +1331,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -985,7 +1377,7 @@
     </Command>
     <Command>
       <Id>a91e0127-4f9e-5bd9-9ad7-5af5ff85eea6</Id>
-      <CommandString>kopiuj cale zdanie pod kursorem;skopiuj cale zdanie pod kursorem;kopiuj tekst pod kursorem;skopiuj zdanie pod myszka;kopiuj zdanie</CommandString>
+      <CommandString>kopiuj całe zdanie pod kursorem;kopiuj cale zdanie pod kursorem;skopiuj całe zdanie pod kursorem;skopiuj cale zdanie pod kursorem;kopiuj zdanie pod kursorem;skopiuj zdanie pod kursorem;kopiuj całe zdanie pod myszką;kopiuj cale zdanie pod myszka;skopiuj zdanie pod myszką;skopiuj zdanie pod myszka;kopiuj zdanie które wskazuję;kopiuj zdanie ktore wskazuje;zdanie pod kursorem do schowka;całe zdanie do schowka;cale zdanie do schowka;kopiuj zdanie;skopiuj zdanie</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1022,8 +1414,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Kopiuje całe zdanie wykryte pod kursorem.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Kopiuje całe zdanie wykryte pod kursorem.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1037,8 +1429,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1082,8 +1474,204 @@
       <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
     </Command>
     <Command>
+      <Id>ba5d4ee9-1fb9-5274-8787-50c28651f3ac</Id>
+      <CommandString>zaznacz zdanie;zaznacz całe zdanie;zaznacz cale zdanie;zaznacz zdanie pod kursorem;zaznacz całe zdanie pod kursorem;zaznacz cale zdanie pod kursorem;zaznacz zdanie pod myszką;zaznacz zdanie pod myszka;zaznacz całe zdanie pod myszką;zaznacz cale zdanie pod myszka;zaznacz wskazane zdanie;zaznacz to zdanie;zaznacz zdanie które wskazuję;zaznacz zdanie ktore wskazuje;wybierz zdanie pod kursorem;wybierz całe zdanie;wybierz cale zdanie;wybierz wskazane zdanie;podświetl zdanie pod kursorem;podswietl zdanie pod kursorem;podświetl całe zdanie;podswietl cale zdanie</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>1ac026a0-217c-587b-988a-2104fa03ee7f</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\select-sentence-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Zaznacza zdanie pod kursorem przez Windows UI Automation.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>1ac026a0-217c-587b-988a-2104fa03ee7f</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
+      <Id>985792ff-33cd-5b63-a15b-4c933d3708b6</Id>
+      <CommandString>zaznacz akapit;zaznacz cały akapit;zaznacz caly akapit;zaznacz akapit pod kursorem;zaznacz cały akapit pod kursorem;zaznacz caly akapit pod kursorem;zaznacz akapit pod myszką;zaznacz akapit pod myszka;zaznacz cały akapit pod myszką;zaznacz caly akapit pod myszka;zaznacz wskazany akapit;zaznacz ten akapit;zaznacz akapit który wskazuję;zaznacz akapit ktory wskazuje;wybierz akapit pod kursorem;wybierz cały akapit;wybierz caly akapit;wybierz wskazany akapit;podświetl akapit pod kursorem;podswietl akapit pod kursorem;podświetl cały akapit;podswietl caly akapit;zaznacz paragraf;zaznacz paragraf pod kursorem</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>e20787f2-4ad8-5e3c-9463-07692e9f8fd8</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\select-paragraph-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Zaznacza akapit pod kursorem przez Windows UI Automation.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>e20787f2-4ad8-5e3c-9463-07692e9f8fd8</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
       <Id>089906a8-8496-58ba-b00a-afb6476429e7</Id>
-      <CommandString>włącz nasłuch;zacznij nasłuch;wlacz rozmowe;start nasluchu;sluchaj ciagle;nasluch on</CommandString>
+      <CommandString>włącz nasłuch;wlacz nasluch;uruchom nasłuch;uruchom nasluch;zacznij nasłuch;zacznij nasluch;start nasłuchu;start nasluchu;słuchaj ciągle;sluchaj ciagle;słuchaj cały czas;sluchaj caly czas;włącz mikrofon asystenta;wlacz mikrofon asystenta;włącz tryb rozmowy;wlacz tryb rozmowy;włącz rozmowę;wlacz rozmowe;nasłuch włączony;nasluch wlaczony;nasłuch on</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1120,8 +1708,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Włącza ciągły nasłuch Deepgram.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Włącza ciągły nasłuch Deepgram.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1135,8 +1723,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1181,7 +1769,7 @@
     </Command>
     <Command>
       <Id>2b8c9694-a7bb-566d-8d80-2cce89b01ce1</Id>
-      <CommandString>wyłącz nasłuch;zatrzymaj nasłuch;wylacz rozmowe;stop nasluchu;przestan sluchac;nasluch off</CommandString>
+      <CommandString>wyłącz nasłuch;wylacz nasluch;zatrzymaj nasłuch;zatrzymaj nasluch;przerwij nasłuch;przerwij nasluch;stop nasłuchu;stop nasluchu;przestań słuchać;przestan sluchac;wyłącz mikrofon asystenta;wylacz mikrofon asystenta;wyłącz tryb rozmowy;wylacz tryb rozmowy;wyłącz rozmowę;wylacz rozmowe;nasłuch wyłączony;nasluch wylaczony;nasłuch off;nie słuchaj;nie sluchaj</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1218,8 +1806,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Wyłącza Deepgram bez anulowania wykonywanych akcji.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Wyłącza Deepgram bez anulowania wykonywanych akcji.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1233,8 +1821,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1279,7 +1867,7 @@
     </Command>
     <Command>
       <Id>4224618c-b3de-51e8-bcfa-d5d9c7434133</Id>
-      <CommandString>status voice loop;czy działasz;jaki jest status;podaj status systemu;jak stoisz;status</CommandString>
+      <CommandString>status voice loop;status voiceloop;status asystenta;czy działasz;czy dzialasz;czy voice loop działa;czy voice loop dziala;jaki jest status;jaki masz status;podaj status systemu;podaj status asystenta;sprawdź status;sprawdz status;sprawdź czy wszystko działa;sprawdz czy wszystko dziala;czy system jest gotowy;czy asystent jest gotowy;jak stoisz;stan systemu;stan asystenta;status</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1316,8 +1904,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Czyta krótki stan rdzenia, modelu i nasłuchu.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Czyta krótki stan rdzenia, modelu i nasłuchu.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1331,8 +1919,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1377,7 +1965,7 @@
     </Command>
     <Command>
       <Id>54336884-6018-5eb0-a22c-ad6e20fdedf8</Id>
-      <CommandString>potwierdź;tak potwierdzam;wykonaj to;zatwierdz;potwierdz wykonanie;potwierdz</CommandString>
+      <CommandString>potwierdź;potwierdz;tak potwierdzam;tak potwierdź;tak potwierdz;zatwierdź;zatwierdz;zatwierdź zadanie;zatwierdz zadanie;potwierdź wykonanie;potwierdz wykonanie;wykonaj to;możesz wykonać;mozesz wykonac;zgadzam się;zgadzam sie;masz zgodę;masz zgode;tak zrób to;tak zrob to;kontynuuj wykonanie;uruchom zadanie</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1414,8 +2002,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Potwierdza najnowsze polecenie oczekujące na zgodę.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Potwierdza najnowsze polecenie oczekujące na zgodę.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1429,8 +2017,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1475,7 +2063,7 @@
     </Command>
     <Command>
       <Id>a0892900-f660-55e7-a981-0c2ae2254c4f</Id>
-      <CommandString>anuluj zadanie;nie rób tego;przerwij to;odrzuc polecenie;anuluj wykonanie;anuluj</CommandString>
+      <CommandString>anuluj zadanie;anuluj polecenie;anuluj wykonanie;nie rób tego;nie rob tego;jednak nie;wycofaj polecenie;wycofaj zadanie;odrzuć polecenie;odrzuc polecenie;odrzuć zadanie;odrzuc zadanie;przerwij zadanie;nie wykonuj tego;nie wykonuj zadania;cofnij polecenie;rezygnuję z zadania;rezygnuje z zadania;anuluj</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1512,8 +2100,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Anuluje najnowsze polecenie oczekujące na zgodę.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Anuluje najnowsze polecenie oczekujące na zgodę.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1527,8 +2115,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1573,7 +2161,7 @@
     </Command>
     <Command>
       <Id>8abe1174-6c6a-5897-862f-7f06cfdf114d</Id>
-      <CommandString>test pętli;test głosu;voice test;test voiceloop;sprawdz glos;test</CommandString>
+      <CommandString>test pętli;test petli;test głosu;test glosu;voice test;test voice loop;test voiceloop;sprawdź głos;sprawdz glos;sprawdź pętlę;sprawdz petle;przetestuj asystenta;test asystenta;czy mnie słyszysz;czy mnie slyszysz;test</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1610,8 +2198,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Sprawdza pełną lokalną pętlę VoiceLoop.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Sprawdza pełną lokalną pętlę VoiceLoop.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1625,8 +2213,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1671,7 +2259,7 @@
     </Command>
     <Command>
       <Id>727b533d-c0e0-54f4-b1fa-16ef5a543c9c</Id>
-      <CommandString>otwórz kalendarz;open calendar;uruchom kalendarz;pokaz kalendarz;wlacz kalendarz;kalendarz</CommandString>
+      <CommandString>otwórz kalendarz;otworz kalendarz;open calendar;uruchom kalendarz;włącz kalendarz;wlacz kalendarz;pokaż kalendarz;pokaz kalendarz;przejdź do kalendarza;przejdz do kalendarza;chcę zobaczyć kalendarz;chce zobaczyc kalendarz;wyświetl kalendarz;wyswietl kalendarz;odpal kalendarz;otwórz mój kalendarz;otworz moj kalendarz;kalendarz</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1708,8 +2296,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Otwiera kalendarz przez dozwoloną akcję.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Otwiera kalendarz przez dozwoloną akcję.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1723,8 +2311,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1769,7 +2357,7 @@
     </Command>
     <Command>
       <Id>38112d46-3610-5959-ba28-e1d21855f081</Id>
-      <CommandString>otwórz przeglądarkę;open browser;uruchom przegladarke;otworz internet;odpal przegladarke;przegladarka</CommandString>
+      <CommandString>otwórz przeglądarkę;otworz przegladarke;open browser;uruchom przeglądarkę;uruchom przegladarke;włącz przeglądarkę;wlacz przegladarke;pokaż przeglądarkę;pokaz przegladarke;przejdź do przeglądarki;przejdz do przegladarki;otwórz internet;otworz internet;odpal przeglądarkę;odpal przegladarke;nowe okno przeglądarki;nowe okno przegladarki;przeglądarka;przegladarka</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1806,8 +2394,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Otwiera przeglądarkę przez dozwoloną akcję.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Otwiera przeglądarkę przez dozwoloną akcję.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1821,8 +2409,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1867,7 +2455,7 @@
     </Command>
     <Command>
       <Id>e3ad36fd-eb40-526b-9a30-57e5c9ae713c</Id>
-      <CommandString>wyszukaj w internecie;sprawdz w necie;szukaj online</CommandString>
+      <CommandString>wyszukaj w internecie;wyszukaj w necie;poszukaj w internecie;poszukaj w necie;sprawdź w internecie;sprawdz w internecie;sprawdź w necie;sprawdz w necie;szukaj online;wyszukaj online;zrób wyszukiwanie;zrob wyszukiwanie;przeszukaj internet;przeszukaj sieć;przeszukaj siec;znajdź w internecie;znajdz w internecie;sprawdź to online;sprawdz to online;wyszukiwanie internetowe</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -1904,8 +2492,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Uruchamia szybkie wyszukiwanie informacji w internecie.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Uruchamia szybkie wyszukiwanie informacji w internecie.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -1919,8 +2507,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -1965,7 +2553,7 @@
     </Command>
     <Command>
       <Id>8c3e0ed6-13b0-51f4-8c3a-d85ebaa36010</Id>
-      <CommandString>otwórz czat;open chat;otworz chatgpt;nowy chat gpt;uruchom chat;chatgpt</CommandString>
+      <CommandString>otwórz czat;otworz czat;open chat;uruchom czat;włącz czat;wlacz czat;pokaż czat;pokaz czat;przejdź do czatu;przejdz do czatu;nowy czat;czat</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -2002,8 +2590,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Otwiera czat przez dozwoloną akcję.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Otwiera czat przez dozwoloną akcję.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -2017,8 +2605,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -2063,7 +2651,7 @@
     </Command>
     <Command>
       <Id>8ed4c743-8b3c-5fbb-91ed-1c07ca80edec</Id>
-      <CommandString>otworz gpt;open gpt;otworz chat gpt;uruchom gpt</CommandString>
+      <CommandString>otwórz gpt;otworz gpt;open gpt;uruchom gpt;włącz gpt;wlacz gpt;pokaż gpt;pokaz gpt;otwórz chat gpt;otworz chat gpt;otwórz chatgpt;otworz chatgpt;uruchom chat gpt;uruchom chatgpt;nowy chat gpt;nowy chatgpt;nowy czat gpt;przejdź do chat gpt;przejdz do chat gpt;chatgpt</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -2100,8 +2688,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Otwiera osobno czat GPT.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Otwiera osobno czat GPT.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -2115,8 +2703,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -2161,7 +2749,7 @@
     </Command>
     <Command>
       <Id>c84ed7c9-2f8c-57a3-8063-ec2141636854</Id>
-      <CommandString>otworz gemini;open gemini;czat gemini;uruchom gemini</CommandString>
+      <CommandString>otwórz gemini;otworz gemini;open gemini;uruchom gemini;włącz gemini;wlacz gemini;pokaż gemini;pokaz gemini;otwórz czat gemini;otworz czat gemini;czat gemini;nowy czat gemini;nowy chat gemini;przejdź do gemini;przejdz do gemini;uruchom czat gemini;gemini chat;gemini</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -2198,8 +2786,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Otwiera osobno czat Gemini.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Otwiera osobno czat Gemini.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -2213,8 +2801,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>
@@ -2258,8 +2846,302 @@
       <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
     </Command>
     <Command>
+      <Id>eddc58cc-3ba0-5478-9c55-82eeac93750d</Id>
+      <CommandString>zapamiętaj ostatnie źródło;zapamietaj ostatnie zrodlo;zapisz ostatnie źródło;zapisz ostatnie zrodlo;zachowaj ostatnie źródło;zachowaj ostatnie zrodlo;zapamiętaj ostatni link;zapamietaj ostatni link;zapisz ostatni link;zachowaj ostatni link;zapamiętaj wynik wyszukiwania;zapamietaj wynik wyszukiwania;zapisz wynik wyszukiwania;zachowaj wynik wyszukiwania;zapamiętaj ostatni wynik;zapamietaj ostatni wynik;zapisz ostatni wynik;zachowaj ostatni wynik;dodaj źródło do pamięci;dodaj zrodlo do pamieci;zapamiętaj to źródło;zapamietaj to zrodlo;zapisz to źródło;zapisz to zrodlo</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>284a8fc5-2ffb-54b8-8011-016419c97259</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\remember-last-source.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Zapisuje ostatnie źródło internetowe po potwierdzeniu.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>284a8fc5-2ffb-54b8-8011-016419c97259</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
+      <Id>3eaa15ca-43cf-5806-87ce-e50e4287eede</Id>
+      <CommandString>co potrafisz;co umiesz;jakie masz komendy;jakie znasz komendy;jakie masz akcje;pokaż możliwości;pokaz mozliwosci;wymień możliwości;wymien mozliwosci;pomoc głosowa;pomoc glosowa</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>55b6c427-25cf-5292-bded-5cea2ea5f910</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\capabilities.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Czyta możliwości VoiceAttack i dodatkowe własne akcje VoiceLoop.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>55b6c427-25cf-5292-bded-5cea2ea5f910</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
+      <Id>135df767-c3e6-5beb-8df6-a58ce107a256</Id>
+      <CommandString>zmień nazwę;zmien nazwe;zmień nazwę pod kursorem;zmien nazwe pod kursorem;przemianuj;przemianuj pod kursorem;zmień nazwę ikony;zmien nazwe ikony;rename under cursor;zmień nazwę pliku;zmien nazwe pliku</CommandString>
+      <ActionSequence>
+        <CommandAction>
+          <PairingSet>false</PairingSet>
+          <PairingSetElse>false</PairingSetElse>
+          <Ordinal>0</Ordinal>
+          <ConditionMet xsi:nil="true" />
+          <IndentLevel>0</IndentLevel>
+          <ConditionSkip>false</ConditionSkip>
+          <Id>c9bf1554-216f-5e24-b0b1-dfe962c314d2</Id>
+          <ActionType>Launch</ActionType>
+          <Duration>0</Duration>
+          <Delay>0</Delay>
+          <KeyCodes />
+          <Context>C:\Users\marci\VoiceLoop\scripts\va\rename-under-cursor.vbs</Context>
+          <X>0</X>
+          <Y>0</Y>
+          <Z>0</Z>
+          <InputMode>0</InputMode>
+          <ConditionPairing>0</ConditionPairing>
+          <ConditionGroup>0</ConditionGroup>
+          <ConditionStartOperator>0</ConditionStartOperator>
+          <ConditionStartValue>0</ConditionStartValue>
+          <ConditionStartValueType>0</ConditionStartValueType>
+          <ConditionStartType>0</ConditionStartType>
+          <DecimalContext1>0</DecimalContext1>
+          <DecimalContext2>0</DecimalContext2>
+          <DateContext1>0001-01-01T00:00:00</DateContext1>
+          <DateContext2>0001-01-01T00:00:00</DateContext2>
+          <Disabled>false</Disabled>
+          <RandomSounds />
+          <IsSuffixAction>false</IsSuffixAction>
+          <DecimalTransient1>0</DecimalTransient1>
+        </CommandAction>
+      </ActionSequence>
+      <Async>true</Async>
+      <Enabled>true</Enabled>
+      <Description>VoiceLoop v2 PRO: Zmienia nazwę elementu pod kursorem po potwierdzeniu (Deepgram/VA → VoiceLoop).</Description>
+      <Category>VoiceLoop v2 PRO</Category>
+      <UseShortcut>false</UseShortcut>
+      <keyValue>0</keyValue>
+      <keyShift>0</keyShift>
+      <keyAlt>0</keyAlt>
+      <keyCtrl>0</keyCtrl>
+      <keyWin>0</keyWin>
+      <keyPassthru>true</keyPassthru>
+      <UseSpokenPhrase>true</UseSpokenPhrase>
+      <onlyKeyUp>false</onlyKeyUp>
+      <RepeatNumber>0</RepeatNumber>
+      <RepeatType>0</RepeatType>
+      <CommandType>0</CommandType>
+      <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
+      <UseJoystick>false</UseJoystick>
+      <joystickNumber>0</joystickNumber>
+      <joystickButton>0</joystickButton>
+      <joystickNumber2>0</joystickNumber2>
+      <joystickButton2>0</joystickButton2>
+      <joystickUp>false</joystickUp>
+      <KeepRepeating>false</KeepRepeating>
+      <UseProcessOverride>false</UseProcessOverride>
+      <ProcessOverride />
+      <ProcessOverrideActiveWindow>false</ProcessOverrideActiveWindow>
+      <LostFocusStop>false</LostFocusStop>
+      <PauseLostFocus>false</PauseLostFocus>
+      <LostFocusBackCompat>true</LostFocusBackCompat>
+      <UseMouse>false</UseMouse>
+      <Mouse1>false</Mouse1>
+      <Mouse2>false</Mouse2>
+      <Mouse3>false</Mouse3>
+      <Mouse4>false</Mouse4>
+      <Mouse5>false</Mouse5>
+      <Mouse6>false</Mouse6>
+      <Mouse7>false</Mouse7>
+      <Mouse8>false</Mouse8>
+      <Mouse9>false</Mouse9>
+      <MouseUpOnly>false</MouseUpOnly>
+      <MousePassThru>true</MousePassThru>
+      <joystickExclusive>false</joystickExclusive>
+      <lastEditedAction>c9bf1554-216f-5e24-b0b1-dfe962c314d2</lastEditedAction>
+      <Referrer xsi:nil="true" />
+      <ExecType>0</ExecType>
+      <Confidence>0</Confidence>
+      <PrefixActionCount>0</PrefixActionCount>
+      <UseProfileProcessOverride>false</UseProfileProcessOverride>
+      <ProfileProcessOverrideActiveWindow>false</ProfileProcessOverrideActiveWindow>
+      <TargetProcessSet>false</TargetProcessSet>
+      <TargetProcessType>0</TargetProcessType>
+      <TargetProcessLevel>0</TargetProcessLevel>
+      <CompareType>0</CompareType>
+      <ExecFromWildcard>false</ExecFromWildcard>
+      <IsSubCommand>false</IsSubCommand>
+      <IsOverride>false</IsOverride>
+      <BaseId>00000000-0000-0000-0000-000000000000</BaseId>
+    </Command>
+    <Command>
       <Id>87df881b-9483-5be4-a4ef-0d5f44b0abcc</Id>
-      <CommandString>stop teraz;przerwij wszystko;natychmiastowy stop;abort;awaryjnie stop;panic stop;stop</CommandString>
+      <CommandString>stop teraz;zatrzymaj wszystko;przerwij wszystko;natychmiastowy stop;natychmiast zatrzymaj;awaryjnie stop;awaryjne zatrzymanie;panic stop;panic button;abort;anuluj wszystko;wyłącz wszystko;wylacz wszystko;zatrzymaj voice loop;zatrzymaj voiceloop;przerwij voice loop;przerwij voiceloop;stop wszystko;stop</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
@@ -2296,8 +3178,8 @@
       </ActionSequence>
       <Async>true</Async>
       <Enabled>true</Enabled>
-      <Description>VoiceLoop v2: Natychmiast zatrzymuje nasłuch, kolejkę, TTS i bieżącą akcję.</Description>
-      <Category>VoiceLoop v2</Category>
+      <Description>VoiceLoop v2 PRO: Natychmiast zatrzymuje nasłuch, kolejkę, TTS i bieżącą akcję.</Description>
+      <Category>VoiceLoop v2 PRO</Category>
       <UseShortcut>false</UseShortcut>
       <keyValue>0</keyValue>
       <keyShift>0</keyShift>
@@ -2311,8 +3193,8 @@
       <RepeatType>0</RepeatType>
       <CommandType>0</CommandType>
       <SourceProfile>00000000-0000-0000-0000-000000000000</SourceProfile>
-      <UseConfidence>false</UseConfidence>
-      <minimumConfidenceLevel>0</minimumConfidenceLevel>
+      <UseConfidence>true</UseConfidence>
+      <minimumConfidenceLevel>65</minimumConfidenceLevel>
       <UseJoystick>false</UseJoystick>
       <joystickNumber>0</joystickNumber>
       <joystickButton>0</joystickButton>

@@ -76,90 +76,12 @@
     </style>
 </head>
 <body>
-  <article><h1 id="voiceloop-dokumentacja-architektury-i-handoff-dla-kolejnego-ai">VoiceLoop — dokumentacja architektury i handoff dla kolejnego AI</h1>
-<p><strong>Wersja projektu:</strong> 0.2.0 <strong>Platforma:</strong> Windows, uruchomienie lokalne <strong>Stan dokumentu:</strong> 10 sierpnia 2026 <strong>Repozytorium:</strong> <code>C:\Users\marci\VoiceLoop</code></p>
-<hr><section class="toc"><h2>Spis treści</h2><ul><li class="level-2"><a href="#1-po-co-istnieje-ten-dokument">1. Po co istnieje ten dokument</a></li>
-<li class="level-2"><a href="#2-prompt-startowy-dla-kolejnego-chatu-lub-agenta">2. Prompt startowy dla kolejnego chatu lub agenta</a></li>
-<li class="level-2"><a href="#3-cel-produktu">3. Cel produktu</a></li>
-<li class="level-2"><a href="#4-aktualny-stan-operacyjny">4. Aktualny stan operacyjny</a></li>
-<li class="level-2"><a href="#5-architektura-wysokiego-poziomu">5. Architektura wysokiego poziomu</a></li>
-<li class="level-2"><a href="#6-porty-i-procesy">6. Porty i procesy</a></li>
-<li class="level-2"><a href="#7-pelny-przebieg-polecenia">7. Pełny przebieg polecenia</a></li>
-<li class="level-3"><a href="#7-1-przyj-cie-wej-cia">7.1. Przyjęcie wejścia</a></li>
-<li class="level-3"><a href="#7-2-zapis-i-deduplikacja">7.2. Zapis i deduplikacja</a></li>
-<li class="level-3"><a href="#7-3-priorytet-stop">7.3. Priorytet STOP</a></li>
-<li class="level-3"><a href="#7-4-routing-n8n">7.4. Routing n8n</a></li>
-<li class="level-3"><a href="#7-5-router-deterministyczny">7.5. Router deterministyczny</a></li>
-<li class="level-3"><a href="#7-6-retrieval-lokalnej-pami-ci-wektorowej">7.6. Retrieval lokalnej pamięci wektorowej</a></li>
-<li class="level-3"><a href="#7-7-venice-jako-gl-wny-planer">7.7. Venice jako główny planer</a></li>
-<li class="level-3"><a href="#7-8-qwen-jako-lokalny-fallback">7.8. Qwen jako lokalny fallback</a></li>
-<li class="level-3"><a href="#7-9-egzekucja-planu">7.9. Egzekucja planu</a></li>
-<li class="level-2"><a href="#8-modele-i-podzial-odpowiedzialno-ci">8. Modele i podział odpowiedzialności</a></li>
-<li class="level-3"><a href="#8-1-venice-ai-gl-wny-m-zg">8.1. Venice AI — główny mózg</a></li>
-<li class="level-3"><a href="#8-2-qwen-2-5-14b-lokalny-fallback">8.2. Qwen 2.5 14B — lokalny fallback</a></li>
-<li class="level-3"><a href="#8-3-nomic-embed-lokalny-model-wektorowy">8.3. Nomic Embed — lokalny model wektorowy</a></li>
-<li class="level-2"><a href="#9-screenpipe-i-pami-kontekstowa">9. Screenpipe i pamięć kontekstowa</a></li>
-<li class="level-3"><a href="#9-1-co-rejestruje-screenpipe">9.1. Co rejestruje Screenpipe</a></li>
-<li class="level-3"><a href="#9-2-wa-na-uwaga-prywatno-ci">9.2. Ważna uwaga prywatności</a></li>
-<li class="level-3"><a href="#9-3-vector-memory-worker">9.3. Vector memory worker</a></li>
-<li class="level-3"><a href="#9-4-selektywna-transkrypcja-spotka">9.4. Selektywna transkrypcja spotkań</a></li>
-<li class="level-2"><a href="#10-pami-sqlite-i-qdrant">10. Pamięć: SQLite i Qdrant</a></li>
-<li class="level-3"><a href="#10-1-tabele">10.1. Tabele</a></li>
-<li class="level-3"><a href="#10-2-qdrant-gl-wny-retrieval">10.2. Qdrant — główny retrieval</a></li>
-<li class="level-3"><a href="#10-3-sqlite-vectormemories">10.3. SQLite <code>vector_memories</code></a></li>
-<li class="level-2"><a href="#11-dozwolone-akcje">11. Dozwolone akcje</a></li>
-<li class="level-2"><a href="#12-api-voiceloop">12. API VoiceLoop</a></li>
-<li class="level-3"><a href="#12-1-endpointy">12.1. Endpointy</a></li>
-<li class="level-3"><a href="#12-2-token-lokalny">12.2. Token lokalny</a></li>
-<li class="level-2"><a href="#13-statusy-komend">13. Statusy komend</a></li>
-<li class="level-2"><a href="#14-panel-www">14. Panel WWW</a></li>
-<li class="level-2"><a href="#15-deepgram">15. Deepgram</a></li>
-<li class="level-3"><a href="#15-1-nasluch-mikrofonu">15.1. Nasłuch mikrofonu</a></li>
-<li class="level-3"><a href="#15-2-spotkania-screenpipe">15.2. Spotkania Screenpipe</a></li>
-<li class="level-3"><a href="#15-3-sekret">15.3. Sekret</a></li>
-<li class="level-2"><a href="#16-n8n">16. n8n</a></li>
-<li class="level-2"><a href="#17-ui-vision">17. UI.Vision</a></li>
-<li class="level-2"><a href="#18-voiceattack">18. VoiceAttack</a></li>
-<li class="level-3"><a href="#18-1-przebieg-asystent">18.1. Przebieg „Asystent”</a></li>
-<li class="level-3"><a href="#18-2-dispatcher">18.2. Dispatcher</a></li>
-<li class="level-2"><a href="#19-tts">19. TTS</a></li>
-<li class="level-2"><a href="#20-konfiguracja">20. Konfiguracja</a></li>
-<li class="level-3"><a href="#rdze">Rdzeń</a></li>
-<li class="level-3"><a href="#venice-jako-primary">Venice jako primary</a></li>
-<li class="level-3"><a href="#qwen-jako-fallback">Qwen jako fallback</a></li>
-<li class="level-3"><a href="#embeddingi">Embeddingi</a></li>
-<li class="level-3"><a href="#screenpipe">Screenpipe</a></li>
-<li class="level-3"><a href="#deepgram">Deepgram</a></li>
-<li class="level-2"><a href="#21-uruchamianie">21. Uruchamianie</a></li>
-<li class="level-3"><a href="#21-1-lm-studio">21.1. LM Studio</a></li>
-<li class="level-3"><a href="#21-2-caly-stack">21.2. Cały stack</a></li>
-<li class="level-3"><a href="#21-3-osobno">21.3. Osobno</a></li>
-<li class="level-2"><a href="#22-diagnostyka">22. Diagnostyka</a></li>
-<li class="level-3"><a href="#health">Health</a></li>
-<li class="level-3"><a href="#porty">Porty</a></li>
-<li class="level-3"><a href="#smoke-test">Smoke test</a></li>
-<li class="level-3"><a href="#testy-python">Testy Python</a></li>
-<li class="level-3"><a href="#logi">Logi</a></li>
-<li class="level-2"><a href="#23-mapa-modul-w-python">23. Mapa modułów Python</a></li>
-<li class="level-2"><a href="#24-struktura-repozytorium">24. Struktura repozytorium</a></li>
-<li class="level-2"><a href="#25-model-bezpiecze-stwa">25. Model bezpieczeństwa</a></li>
-<li class="level-3"><a href="#gl-wne-zabezpieczenia">Główne zabezpieczenia</a></li>
-<li class="level-3"><a href="#granice-i-wiadome-kompromisy">Granice i świadome kompromisy</a></li>
-<li class="level-2"><a href="#26-znane-ograniczenia">26. Znane ograniczenia</a></li>
-<li class="level-3"><a href="#funkcjonalne">Funkcjonalne</a></li>
-<li class="level-3"><a href="#skalowalno">Skalowalność</a></li>
-<li class="level-3"><a href="#operacyjne">Operacyjne</a></li>
-<li class="level-2"><a href="#27-rekomendowany-backlog">27. Rekomendowany backlog</a></li>
-<li class="level-3"><a href="#priorytet-0-hardening-lokalnego-api">Priorytet 0 — hardening lokalnego API</a></li>
-<li class="level-3"><a href="#priorytet-1-prywatno-i-kontrola-kontekstu">Priorytet 1 — prywatność i kontrola kontekstu</a></li>
-<li class="level-3"><a href="#priorytet-2-lepszy-rag">Priorytet 2 — lepszy RAG</a></li>
-<li class="level-3"><a href="#priorytet-3-ux">Priorytet 3 — UX</a></li>
-<li class="level-3"><a href="#priorytet-4-integracje">Priorytet 4 — integracje</a></li>
-<li class="level-2"><a href="#28-jak-bezpiecznie-doda-now-akcj">28. Jak bezpiecznie dodać nową akcję</a></li>
-<li class="level-2"><a href="#29-kryteria-akceptacji-zmian">29. Kryteria akceptacji zmian</a></li>
-<li class="level-2"><a href="#30-skr-cona-checklista-dla-nast-pnego-agenta">30. Skrócona checklista dla następnego agenta</a></li>
-<li class="level-2"><a href="#31-najwa-niejsza-zasada-architektoniczna">31. Najważniejsza zasada architektoniczna</a></li></ul></section>
-<h2 id="1-po-co-istnieje-ten-dokument">1. Po co istnieje ten dokument</h2>
+  <article>
+<h1>VoiceLoop — dokumentacja architektury i handoff dla kolejnego AI</h1>
+<p><strong>Wersja projektu:</strong> 0.2.0<br><strong>Platforma:</strong> Windows, uruchomienie lokalne<br><strong>Stan dokumentu:</strong> 11 sierpnia 2026
+<strong>Repozytorium:</strong> <code>C:\Users\marci\VoiceLoop</code></p>
+<hr>
+<h2>1. Po co istnieje ten dokument</h2>
 <p>Ten plik jest jednocześnie:</p>
 <ol>
 <li>szczegółowym README technicznym,</li>
@@ -169,15 +91,17 @@
 <li>handoffem, który można przekazać kolejnemu agentowi AI,</li>
 <li>listą ograniczeń oraz logicznych następnych kroków.</li>
 </ol>
-<p>Dokument opisuje <strong>rzeczywisty stan kodu</strong>, a nie wyłącznie wizję produktu. Nie zawiera wartości kluczy API, tokenów ani klucza licencji VoiceAttack.</p>
+<p>Dokument opisuje <strong>rzeczywisty stan kodu</strong>, a nie wyłącznie wizję produktu.
+Nie zawiera wartości kluczy API, tokenów ani klucza licencji VoiceAttack.</p>
 <hr>
-<h2 id="2-prompt-startowy-dla-kolejnego-chatu-lub-agenta">2. Prompt startowy dla kolejnego chatu lub agenta</h2>
+<h2>2. Prompt startowy dla kolejnego chatu lub agenta</h2>
 <p>Poniższy blok można wkleić jako pierwszą wiadomość do innego AI:</p>
 <pre><code class="language-text">Kontynuujesz projekt VoiceLoop znajdujący się w:
 C:\Users\marci\VoiceLoop
 
 VoiceLoop to lokalny asystent Windows z bezpiecznym rdzeniem FastAPI.
-Venice AI jest głównym planerem i mózgiem rozmowy.
+Gemini jest głównym mózgiem rozmowy. Venice pozostaje opcjonalnym providerem
+chmurowym, a zadania przechodzą przez typowany, walidowany planer.
 LM Studio pełni dwie lokalne role:
 1) Qwen 2.5 14B Instruct jest fallbackiem czatu,
 2) Nomic Embed generuje lokalne embeddingi.
@@ -185,7 +109,7 @@ LM Studio pełni dwie lokalne role:
 Screenpipe rejestruje lokalny kontekst aktywności. Worker VoiceLoop tworzy
 embeddingi metadanych aktywności i zapisuje je w SQLite. Przy nowym zapytaniu
 retriever wybiera podobne wpisy i przekazuje kilka trafnych fragmentów do
-Venice jako kontekst.
+aktywnego planera jako kontekst.
 
 n8n obsługuje prosty routing dokładnych intencji. UI.Vision wykonuje
 dozwolone makra ekranowe. VoiceAttack rozpoznaje stałe komendy i frazą
@@ -208,9 +132,10 @@ Najważniejsze reguły:
 Najpierw sprawdź:
 GET http://127.0.0.1:8765/api/v1/health
 
-Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
+Następnie opisz, które pliki zamierzasz zmienić i dlaczego.
+</code></pre>
 <hr>
-<h2 id="3-cel-produktu">3. Cel produktu</h2>
+<h2>3. Cel produktu</h2>
 <p>VoiceLoop ma być osobistym asystentem Windows, który:</p>
 <ul>
 <li>rozumie polecenia po polsku,</li>
@@ -222,88 +147,98 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>pyta o potwierdzenie przed operacjami ryzykownymi,</li>
 <li>daje się natychmiast zatrzymać,</li>
 <li>zachowuje możliwie dużo danych lokalnie,</li>
-<li>używa chmurowego modelu do rozumowania, ale nie daje mu dowolnego dostępu</li>
+<li>używa chmurowego modelu do rozumowania, ale nie daje mu dowolnego dostępu
+do systemu.</li>
 </ul>
-<p>do systemu.</p>
-<p>Projekt nie jest ogólnym agentem shell. Jego główną granicą bezpieczeństwa jest lokalna allowlista akcji oraz walidowany format planu.</p>
+<p>Projekt nie jest ogólnym agentem shell. Jego główną granicą bezpieczeństwa jest
+lokalna allowlista akcji oraz walidowany format planu.</p>
 <hr>
-<h2 id="4-aktualny-stan-operacyjny">4. Aktualny stan operacyjny</h2>
+<h2>4. Aktualny stan operacyjny</h2>
 <p>Stan zweryfikowany na żywym systemie:</p>
-<table><thead><tr>
-<th>Komponent</th>
-<th>Stan</th>
-<th>Rola</th>
-</tr></thead><tbody>
+<table>
+<thead>
 <tr>
+<th>Komponent</th>
+<th align="right">Stan</th>
+<th>Rola</th>
+</tr>
+</thead>
+<tbody><tr>
 <td>VoiceLoop FastAPI <code>:8765</code></td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>rdzeń, API, panel, kolejka</td>
 </tr>
 <tr>
+<td>Gemini</td>
+<td align="right">OK</td>
+<td>główny model rozmowy</td>
+</tr>
+<tr>
 <td>Venice AI</td>
-<td>OK</td>
-<td>główny planer i mózg rozmowy</td>
+<td align="right">OK</td>
+<td>opcjonalny provider chmurowy</td>
 </tr>
 <tr>
 <td>LM Studio Qwen 2.5 14B</td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>fallback czatu i lokalna analiza aktywności</td>
 </tr>
 <tr>
 <td>LM Studio Nomic Embed</td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>lokalne embeddingi, 768 wymiarów</td>
 </tr>
 <tr>
 <td>Qdrant <code>:6333</code></td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>pięć przestrzeni wektorowych pamięci lokalnej</td>
 </tr>
 <tr>
 <td>n8n <code>:5678</code></td>
-<td>OK</td>
-<td>router prostych intencji</td>
+<td align="right">wyłączony</td>
+<td>opcjonalny router prostych intencji</td>
 </tr>
 <tr>
 <td>Screenpipe <code>:3030</code></td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>lokalne źródło aktywności i spotkań</td>
 </tr>
 <tr>
 <td>Screenpipe vector worker</td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>Qwen → Nomic → Qdrant + dual-write SQLite</td>
 </tr>
 <tr>
 <td>Screenpipe meeting worker</td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>oczekiwanie na zakończone spotkania</td>
 </tr>
 <tr>
 <td>UI.Vision</td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>dozwolone automatyzacje ekranowe</td>
 </tr>
 <tr>
 <td>VoiceAttack</td>
-<td>OK</td>
+<td align="right">OK</td>
 <td>profil v2: 15 stałych komend i wyzwalanie one-shot Deepgram</td>
 </tr>
 <tr>
 <td>Deepgram live listener</td>
-<td>zatrzymany</td>
-<td>uruchamiany na żądanie</td>
+<td align="right">OK</td>
+<td>Nova-3 PL, one-shot, streaming diarization</td>
 </tr>
 </tbody></table>
 <p>Aktualne modele:</p>
 <ul>
-<li>główny planer: <code>venice-uncensored-1-2</code>,</li>
+<li>główny model rozmowy: <code>gemini-3.5-flash</code>,</li>
+<li>opcjonalny provider: <code>venice-uncensored-1-2</code>,</li>
 <li>lokalny fallback: <code>qwen2.5-14b-instruct-1m-abliterated</code>,</li>
 <li>embeddingi: <code>text-embedding-nomic-embed-text-v2-moe</code>.</li>
 </ul>
-<p>Smoke test oraz zestaw testów jednostkowych przechodziły po ostatnich zmianach.</p>
+<p>Po ostatnich zmianach pełny zestaw 200 testów i Ruff przechodzą bez błędów.</p>
 <hr>
-<h2 id="5-architektura-wysokiego-poziomu">5. Architektura wysokiego poziomu</h2>
+<h2>5. Architektura wysokiego poziomu</h2>
 <pre><code class="language-text">                         WEJŚCIA
         ┌──────────────────┼────────────────────┐
         │                  │                    │
@@ -337,7 +272,7 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
                          SQLite dual-write/fallback
                                   │ top-k kontekstu
                                   ▼
-                       Venice AI jako primary
+                       Gemini jako primary
                                   │ błąd / niska pewność
                                   ▼
                        Qwen w LM Studio jako fallback
@@ -352,56 +287,61 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
                                   │
                 ┌─────────────────┼──────────────────┐
                 ▼                 ▼                  ▼
-          Windows API        UI.Vision          TTS/pamięć</code></pre>
+          Windows API        UI.Vision          TTS/pamięć
+</code></pre>
 <hr>
-<h2 id="6-porty-i-procesy">6. Porty i procesy</h2>
-<table><thead><tr>
-<th>Port</th>
+<h2>6. Porty i procesy</h2>
+<table>
+<thead>
+<tr>
+<th align="right">Port</th>
 <th>Usługa</th>
 <th>Dostęp</th>
 <th>Przeznaczenie</th>
-</tr></thead><tbody>
-<tr>
-<td><code>1234</code></td>
+</tr>
+</thead>
+<tbody><tr>
+<td align="right"><code>1234</code></td>
 <td>LM Studio</td>
 <td><code>127.0.0.1</code></td>
 <td>chat fallback i embeddings</td>
 </tr>
 <tr>
-<td><code>3030</code></td>
+<td align="right"><code>3030</code></td>
 <td>Screenpipe</td>
 <td><code>127.0.0.1</code></td>
 <td>lokalne API historii aktywności</td>
 </tr>
 <tr>
-<td><code>6333</code></td>
+<td align="right"><code>6333</code></td>
 <td>Qdrant</td>
 <td><code>127.0.0.1</code></td>
 <td>lokalna pamięć named vectors</td>
 </tr>
 <tr>
-<td><code>5678</code></td>
+<td align="right"><code>5678</code></td>
 <td>n8n</td>
 <td><code>127.0.0.1</code></td>
 <td>edytor, health i webhook</td>
 </tr>
 <tr>
-<td><code>5679</code></td>
+<td align="right"><code>5679</code></td>
 <td>n8n task broker</td>
 <td><code>127.0.0.1</code></td>
 <td>proces pomocniczy n8n</td>
 </tr>
 <tr>
-<td><code>8765</code></td>
+<td align="right"><code>8765</code></td>
 <td>VoiceLoop</td>
 <td><code>127.0.0.1</code></td>
 <td>panel, REST API i SSE</td>
 </tr>
 </tbody></table>
-<p>Usługi mają działać wyłącznie na loopback. Projekt nie jest przygotowany do bezpośredniego wystawienia tych portów do sieci LAN ani Internetu.</p>
+<p>Usługi mają działać wyłącznie na loopback. Projekt nie jest przygotowany do
+bezpośredniego wystawienia tych portów do sieci LAN ani Internetu.</p>
 <hr>
-<h2 id="7-pelny-przebieg-polecenia">7. Pełny przebieg polecenia</h2>
-<h3 id="7-1-przyj-cie-wej-cia">7.1. Przyjęcie wejścia</h3>
+<h2>7. Pełny przebieg polecenia</h2>
+<h3>7.1. Przyjęcie wejścia</h3>
 <p>Każde polecenie jest normalizowane do <code>CommandRequest</code>:</p>
 <ul>
 <li><code>schema_version</code>,</li>
@@ -420,7 +360,7 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li><code>api</code>,</li>
 <li><code>n8n</code>.</li>
 </ul>
-<h3 id="7-2-zapis-i-deduplikacja">7.2. Zapis i deduplikacja</h3>
+<h3>7.2. Zapis i deduplikacja</h3>
 <p><code>AssistantService</code>:</p>
 <ol>
 <li>tworzy fingerprint z unormowanego tekstu,</li>
@@ -430,8 +370,9 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>ustawia status <code>planning</code>,</li>
 <li>publikuje zdarzenie SSE.</li>
 </ol>
-<p>Powtórzenie identycznej komendy w oknie deduplikacji zwraca istniejący <code>request_id</code> zamiast wykonywać zadanie drugi raz.</p>
-<h3 id="7-3-priorytet-stop">7.3. Priorytet STOP</h3>
+<p>Powtórzenie identycznej komendy w oknie deduplikacji zwraca istniejący
+<code>request_id</code> zamiast wykonywać zadanie drugi raz.</p>
+<h3>7.3. Priorytet STOP</h3>
 <p>STOP jest rozpoznawany przed zwykłym planowaniem. Powoduje:</p>
 <ul>
 <li>zatrzymanie Deepgram live,</li>
@@ -442,9 +383,22 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>zakończenie bieżącego procesu UI.Vision,</li>
 <li>publikację zdarzenia <code>stop</code>.</li>
 </ul>
-<h3 id="7-4-routing-n8n">7.4. Routing n8n</h3>
+<h3>7.4. Potwierdzana przerwa czasowa</h3>
+<p><code>VoiceConversationCoordinator</code> rozpoznaje lokalnie frazę:</p>
+<pre><code class="language-text">Przerwij działanie na &lt;liczba&gt; &lt;sekund|minut|godzin&gt;
+</code></pre>
+<p>Komenda nie trafia do modelu ani executora. Koordynator zapisuje oczekującą
+wartość i zawsze pyta o potwierdzenie. Dopiero <code>potwierdzam</code> przełącza stan na
+<code>paused</code>; <code>anuluj</code> usuwa oczekującą przerwę. W stanie <code>paused</code> Deepgram pozostaje
+aktywny wyłącznie po to, aby rozpoznać <code>wznów działanie</code>/<code>włącz się</code>/<code>koniec przerwy</code>; wszystkie inne transkrypty są ignorowane i nie trafiają do LLM ani
+akcji. Osobny task wznawia sesję automatycznie po upływie czasu. Limit jednej
+przerwy wynosi 24 godziny. Parser przyjmuje cyfry i polskie liczebniki 1–99.
+Callback aplikacji przekazuje tę komendę do koordynatora również poza aktywną
+sesją managed conversation, dlatego zawsze przechodzi ona przez potwierdzenie.</p>
+<h3>7.5. Routing n8n</h3>
 <p>Pierwszą próbą dla zwykłej komendy jest webhook n8n:</p>
-<pre><code class="language-text">POST http://127.0.0.1:5678/webhook/voice-command-v1</code></pre>
+<pre><code class="language-text">POST http://127.0.0.1:5678/webhook/voice-command-v1
+</code></pre>
 <p>Workflow <code>n8n/voice-loop.json</code> rozpoznaje dokładne, proste intencje:</p>
 <ul>
 <li>test pętli,</li>
@@ -452,8 +406,10 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>otwarcie przeglądarki,</li>
 <li>otwarcie czatu.</li>
 </ul>
-<p>Jeśli n8n odpowie <code>unknown</code>, <code>none</code> albo <code>no_action</code>, VoiceLoop przechodzi dalej. Jeśli n8n nie działa, błąd jest traktowany jako fallback, a nie awaria całego asystenta.</p>
-<h3 id="7-5-router-deterministyczny">7.5. Router deterministyczny</h3>
+<p>Jeśli n8n odpowie <code>unknown</code>, <code>none</code> albo <code>no_action</code>, VoiceLoop przechodzi dalej.
+Jeśli n8n nie działa, błąd jest traktowany jako fallback, a nie awaria całego
+asystenta.</p>
+<h3>7.6. Router deterministyczny</h3>
 <p><code>router.py</code> obsługuje bez modelu:</p>
 <ul>
 <li><code>voice_test</code>,</li>
@@ -466,24 +422,22 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>proste tworzenie notatki.</li>
 </ul>
 <p>Ta ścieżka jest szybka, tania i przewidywalna.</p>
-<h3 id="7-6-retrieval-lokalnej-pami-ci-wektorowej">7.6. Retrieval lokalnej pamięci wektorowej</h3>
+<h3>7.7. Retrieval lokalnej pamięci wektorowej</h3>
 <p>Jeśli komenda wymaga modelu:</p>
 <ol>
 <li>aktualne zapytanie jest wysyłane do lokalnego endpointu embeddings,</li>
 <li>powstaje wektor 768-wymiarowy,</li>
-<li>Qdrant odpytuje pięć przestrzeni: <code>semantic</code>, <code>topic</code>, <code>intent</code>, <code>decision</code></li>
-</ol>
-<p>i <code>person_context</code>,</p>
-<ol>
+<li>Qdrant odpytuje pięć przestrzeni: <code>semantic</code>, <code>topic</code>, <code>intent</code>, <code>decision</code>
+i <code>person_context</code>,</li>
 <li>wyniki są łączone wagami <code>0.40/0.20/0.15/0.15/0.10</code>,</li>
-<li>do pamięci kontekstowej dodawanych jest maksymalnie</li>
-</ol>
-<p><code>VECTOR_MEMORY_CONTEXT_LIMIT</code> fragmentów,</p>
-<ol>
+<li>do pamięci kontekstowej dodawanych jest maksymalnie
+<code>VECTOR_MEMORY_CONTEXT_LIMIT</code> fragmentów,</li>
 <li>fragmenty są przekazywane do głównego planera.</li>
 </ol>
-<p>Jeśli Qdrant jest wyłączony, niedostępny albo nie zwróci trafień, asystent korzysta z wcześniejszego wyszukiwania cosine w SQLite. SQLite pozostaje więc lokalnym fallbackiem i celem opcjonalnego dual-write.</p>
-<h3 id="7-7-venice-jako-gl-wny-planer">7.7. Venice jako główny planer</h3>
+<p>Jeśli Qdrant jest wyłączony, niedostępny albo nie zwróci trafień, asystent
+korzysta z wcześniejszego wyszukiwania cosine w SQLite. SQLite pozostaje więc
+lokalnym fallbackiem i celem opcjonalnego dual-write.</p>
+<h3>7.8. Venice jako opcjonalny planer chmurowy</h3>
 <p>Przy <code>LLM_PRIMARY=cloud</code> lub <code>LLM_PRIMARY=venice</code>:</p>
 <ul>
 <li>Venice otrzymuje aktualne polecenie,</li>
@@ -493,16 +447,19 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>przy <code>include_screen=true</code> może otrzymać metadane aktywnego okna oraz obraz,</li>
 <li>zwraca ustrukturyzowany JSON zgodny ze schematem <code>ProposedPlan</code>.</li>
 </ul>
-<p>Model nie może zwrócić dowolnej komendy systemowej. Kroki o nieznanym <code>action_id</code> są odrzucane podczas konwersji planu.</p>
-<h3 id="7-8-qwen-jako-lokalny-fallback">7.8. Qwen jako lokalny fallback</h3>
+<p>Model nie może zwrócić dowolnej komendy systemowej. Kroki o nieznanym
+<code>action_id</code> są odrzucane podczas konwersji planu.</p>
+<h3>7.9. Qwen jako lokalny fallback</h3>
 <p>Jeśli Venice:</p>
 <ul>
 <li>jest niedostępne,</li>
 <li>zwróci błąd,</li>
 <li>albo zwróci plan o zbyt niskiej pewności,</li>
 </ul>
-<p>router może użyć Qwen z LM Studio. Fallback dostaje pustą historię, pustą pamięć i bez obrazu ekranu. Ogranicza to ilość prywatnego kontekstu przekazywanego do ścieżki awaryjnej i upraszcza zachowanie fallbacku.</p>
-<h3 id="7-9-egzekucja-planu">7.9. Egzekucja planu</h3>
+<p>router może użyć Qwen z LM Studio. Fallback dostaje pustą historię, pustą pamięć
+i bez obrazu ekranu. Ogranicza to ilość prywatnego kontekstu przekazywanego do
+ścieżki awaryjnej i upraszcza zachowanie fallbacku.</p>
+<h3>7.10. Egzekucja planu</h3>
 <p>Przed kolejką każdy krok przechodzi przez <code>ActionRegistry.enforce_policy()</code>:</p>
 <ul>
 <li>nieznane akcje są odrzucane,</li>
@@ -520,8 +477,8 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>publikuje zdarzenia do panelu.</li>
 </ul>
 <hr>
-<h2 id="8-modele-i-podzial-odpowiedzialno-ci">8. Modele i podział odpowiedzialności</h2>
-<h3 id="8-1-venice-ai-gl-wny-m-zg">8.1. Venice AI — główny mózg</h3>
+<h2>8. Modele i podział odpowiedzialności</h2>
+<h3>8.1. Gemini — główny model rozmowy</h3>
 <p>Odpowiada za:</p>
 <ul>
 <li>rozumienie wolnego języka,</li>
@@ -532,24 +489,34 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>decyzję o potrzebie doprecyzowania,</li>
 <li>ocenę pewności i proponowanego ryzyka.</li>
 </ul>
-<p>Venice <strong>nie wykonuje akcji bezpośrednio</strong>. Jego wynik jest tylko propozycją planu, którą lokalny kod filtruje i waliduje.</p>
-<h3 id="8-2-qwen-2-5-14b-lokalny-fallback">8.2. Qwen 2.5 14B — lokalny fallback</h3>
+<p>Rozmowa używa zwykłego tekstu z kontrolą <code>finish_reason</code>, długości i końcowej
+interpunkcji. Zadania używają osobnego kontraktu JSON Schema. Gemini <strong>nie
+wykonuje akcji bezpośrednio</strong>; lokalny kod filtruje i waliduje plan.</p>
+<h3>8.2. Venice AI — opcjonalny provider chmurowy</h3>
+<p>Venice może przejąć planowanie po ustawieniu <code>LLM_PRIMARY=venice</code>/<code>cloud</code> oraz
+obsługiwać wyszukiwanie. Obowiązują go te same lokalne kontrakty i allowlista.</p>
+<h3>8.3. Qwen 2.5 14B — lokalny fallback</h3>
 <p>Model:</p>
-<pre><code class="language-text">qwen2.5-14b-instruct-1m-abliterated</code></pre>
-<p>Odpowiada za awaryjne planowanie, gdy Venice nie może odpowiedzieć, oraz za lokalny <code>behavior digest</code> aktywności Screenpipe: streszczenie, temat, intencję, decyzje i kontekst osób. Nie powinien być mylony z modelem embeddingowym.</p>
-<h3 id="8-3-nomic-embed-lokalny-model-wektorowy">8.3. Nomic Embed — lokalny model wektorowy</h3>
+<pre><code class="language-text">qwen2.5-14b-instruct-1m-abliterated
+</code></pre>
+<p>Odpowiada za awaryjne planowanie, gdy provider główny nie może odpowiedzieć, oraz za
+lokalny <code>behavior digest</code> aktywności Screenpipe: streszczenie, temat, intencję,
+decyzje i kontekst osób. Nie powinien być mylony z modelem embeddingowym.</p>
+<h3>8.4. Nomic Embed — lokalny model wektorowy</h3>
 <p>Model:</p>
-<pre><code class="language-text">text-embedding-nomic-embed-text-v2-moe</code></pre>
+<pre><code class="language-text">text-embedding-nomic-embed-text-v2-moe
+</code></pre>
 <p>Odpowiada za:</p>
 <ul>
 <li>zamianę tekstu aktywności Screenpipe na wektory,</li>
 <li>zamianę pytania użytkownika na wektor zapytania,</li>
 <li>umożliwienie wyszukiwania semantycznego.</li>
 </ul>
-<p>Nie odpowiada za rozmowę ani planowanie. Zwracany wektor ma obecnie 768 wymiarów.</p>
+<p>Nie odpowiada za rozmowę ani planowanie. Zwracany wektor ma obecnie
+768 wymiarów.</p>
 <hr>
-<h2 id="9-screenpipe-i-pami-kontekstowa">9. Screenpipe i pamięć kontekstowa</h2>
-<h3 id="9-1-co-rejestruje-screenpipe">9.1. Co rejestruje Screenpipe</h3>
+<h2>9. Screenpipe i pamięć kontekstowa</h2>
+<h3>9.1. Co rejestruje Screenpipe</h3>
 <p>Skrypt <code>scripts/start-screenpipe.ps1</code> uruchamia Screenpipe z:</p>
 <ul>
 <li>wszystkimi monitorami,</li>
@@ -563,7 +530,7 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>lokalnym API chronionym tokenem.</li>
 </ul>
 <p>Globalna transkrypcja Screenpipe jest wyłączona.</p>
-<h3 id="9-2-wa-na-uwaga-prywatno-ci">9.2. Ważna uwaga prywatności</h3>
+<h3>9.2. Ważna uwaga prywatności</h3>
 <p>Konfiguracja Screenpipe jest szeroka:</p>
 <ul>
 <li><code>ignore-incognito-windows=false</code>,</li>
@@ -571,8 +538,10 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li><code>capture-on-keystroke=true</code>,</li>
 <li><code>capture-on-clipboard=true</code>.</li>
 </ul>
-<p>To oznacza, że lokalny magazyn Screenpipe może zawierać bardzo wrażliwe dane. Nie wolno kopiować katalogu <code>%USERPROFILE%\.screenpipe</code> do repozytorium ani udostępniać go bez świadomej decyzji użytkownika.</p>
-<h3 id="9-3-vector-memory-worker">9.3. Vector memory worker</h3>
+<p>To oznacza, że lokalny magazyn Screenpipe może zawierać bardzo wrażliwe dane.
+Nie wolno kopiować katalogu <code>%USERPROFILE%\.screenpipe</code> do repozytorium ani
+udostępniać go bez świadomej decyzji użytkownika.</p>
+<h3>9.3. Vector memory worker</h3>
 <p><code>ScreenpipeVectorMemoryWorker</code>:</p>
 <ol>
 <li>uruchamia się razem z FastAPI,</li>
@@ -583,8 +552,10 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>przy <code>QDRANT_DUAL_WRITE=true</code> zapisuje także wektor <code>semantic</code> w SQLite,</li>
 <li>przy indeksowaniu wiąże nowy materiał z podobną wcześniejszą historią.</li>
 </ol>
-<p>Worker nie zapisuje zrzutów obrazu w Qdrant. Zapisuje tekst/digest, metadane oraz embeddingi. Gdy Qdrant lub digester nie są skonfigurowane, używa starszej ścieżki metadanych i SQLite.</p>
-<h3 id="9-4-selektywna-transkrypcja-spotka">9.4. Selektywna transkrypcja spotkań</h3>
+<p>Worker nie zapisuje zrzutów obrazu w Qdrant. Zapisuje tekst/digest, metadane
+oraz embeddingi. Gdy Qdrant lub digester nie są skonfigurowane, używa starszej
+ścieżki metadanych i SQLite.</p>
+<h3>9.4. Selektywna transkrypcja spotkań</h3>
 <p><code>ScreenpipeMeetingTranscriber</code>:</p>
 <ul>
 <li>wykrywa zakończone spotkania,</li>
@@ -595,18 +566,23 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>zapisuje transkrypcje do SQLite,</li>
 <li>nie uruchamia globalnej transkrypcji każdego dźwięku.</li>
 </ul>
-<p>Zapisane transkrypcje są grupowane per spotkanie, analizowane lokalnie przez Qwen i dodawane do Qdrant jako <code>screenpipe_meeting</code>.</p>
+<p>Zapisane transkrypcje są grupowane per spotkanie, analizowane lokalnie przez
+Qwen i dodawane do Qdrant jako <code>screenpipe_meeting</code>.</p>
 <hr>
-<h2 id="10-pami-sqlite-i-qdrant">10. Pamięć: SQLite i Qdrant</h2>
+<h2>10. Pamięć: SQLite i Qdrant</h2>
 <p>Plik:</p>
-<pre><code class="language-text">data\voiceloop.db</code></pre>
+<pre><code class="language-text">data\voiceloop.db
+</code></pre>
 <p>SQLite działa w trybie WAL z <code>busy_timeout=10000</code>.</p>
-<h3 id="10-1-tabele">10.1. Tabele</h3>
-<table><thead><tr>
+<h3>10.1. Tabele</h3>
+<table>
+<thead>
+<tr>
 <th>Tabela</th>
 <th>Przeznaczenie</th>
-</tr></thead><tbody>
-<tr>
+</tr>
+</thead>
+<tbody><tr>
 <td><code>commands</code></td>
 <td>request, status, plan, provider, model, wyniki, błędy</td>
 </tr>
@@ -635,10 +611,14 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <td>tekst, metadata i embeddingi Screenpipe</td>
 </tr>
 </tbody></table>
-<h3 id="10-2-qdrant-gl-wny-retrieval">10.2. Qdrant — główny retrieval</h3>
-<p>Kolekcja <code>voiceloop_memory</code> używa pięciu named vectors i cosine distance. Payload zawiera m.in. źródło, stabilny <code>source_id</code>, typ pamięci, treść digestu, metadata oraz opcjonalne identyfikatory osoby, wizyty lub spotkania.</p>
-<p>Qdrant działa lokalnie w trwałym kontenerze Docker. Pierwszy zapis tworzy kolekcję i indeksy payloadu. Migrator kopiuje istniejące rekordy SQLite bez usuwania starej bazy.</p>
-<h3 id="10-3-sqlite-vectormemories">10.3. SQLite <code>vector_memories</code></h3>
+<h3>10.2. Qdrant — główny retrieval</h3>
+<p>Kolekcja <code>voiceloop_memory</code> używa pięciu named vectors i cosine distance.
+Payload zawiera m.in. źródło, stabilny <code>source_id</code>, typ pamięci, treść digestu,
+metadata oraz opcjonalne identyfikatory osoby, wizyty lub spotkania.</p>
+<p>Qdrant działa lokalnie w trwałym kontenerze Docker. Pierwszy zapis tworzy
+kolekcję i indeksy payloadu. Migrator kopiuje istniejące rekordy SQLite bez
+usuwania starej bazy.</p>
+<h3>10.3. SQLite <code>vector_memories</code></h3>
 <p>Rekord zawiera:</p>
 <ul>
 <li>źródło,</li>
@@ -650,200 +630,251 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <li>wymiar wektora,</li>
 <li>czas utworzenia i aktualizacji.</li>
 </ul>
-<p>Wektory są zapisane jako JSON, nie jako natywny typ wektorowy SQLite. Tabela pełni rolę dual-write, źródła migracji i fallbacku, gdy Qdrant nie zwróci wyników. Fallback SQLite nadal wyszukuje liniowo w ograniczonej puli rekordów.</p>
+<p>Wektory są zapisane jako JSON, nie jako natywny typ wektorowy SQLite. Tabela
+pełni rolę dual-write, źródła migracji i fallbacku, gdy Qdrant nie zwróci
+wyników. Fallback SQLite nadal wyszukuje liniowo w ograniczonej puli rekordów.</p>
 <hr>
-<h2 id="11-dozwolone-akcje">11. Dozwolone akcje</h2>
-<table><thead><tr>
-<th><code>action_id</code></th>
-<th>Ryzyko</th>
-<th>Potwierdzenie</th>
-<th>Funkcja</th>
-</tr></thead><tbody>
+<h2>11. Dozwolone akcje</h2>
+<table>
+<thead>
 <tr>
+<th><code>action_id</code></th>
+<th align="right">Ryzyko</th>
+<th align="right">Potwierdzenie</th>
+<th>Funkcja</th>
+</tr>
+</thead>
+<tbody><tr>
 <td><code>open_calendar</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>otwiera kalendarz Windows</td>
 </tr>
 <tr>
 <td><code>open_browser</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>otwiera pustą kartę przeglądarki</td>
 </tr>
 <tr>
 <td><code>open_url</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>otwiera poprawny URL HTTP/HTTPS</td>
 </tr>
 <tr>
 <td><code>open_chat</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>otwiera ChatGPT</td>
 </tr>
 <tr>
 <td><code>describe_active_window</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>odczytuje tytuł i proces aktywnego okna</td>
 </tr>
 <tr>
+<td><code>minimize_active_window</code></td>
+<td align="right">low</td>
+<td align="right">nie</td>
+<td>minimalizuje aktywne okno</td>
+</tr>
+<tr>
+<td><code>minimize_all_windows</code></td>
+<td align="right">low</td>
+<td align="right">nie</td>
+<td>minimalizuje wszystkie okna / pokazuje pulpit</td>
+</tr>
+<tr>
 <td><code>describe_recent_activity</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>odczytuje metadane aktywności Screenpipe</td>
 </tr>
 <tr>
 <td><code>create_note</code></td>
-<td>medium</td>
-<td>nie</td>
+<td align="right">medium</td>
+<td align="right">nie</td>
 <td>tworzy notatkę przez ustalone makro</td>
 </tr>
 <tr>
 <td><code>run_uivision_macro</code></td>
-<td>medium</td>
-<td>tak</td>
+<td align="right">medium</td>
+<td align="right">tak</td>
 <td>uruchamia istniejące makro z allowlisty</td>
 </tr>
 <tr>
 <td><code>remember</code></td>
-<td>medium</td>
-<td>tak</td>
+<td align="right">medium</td>
+<td align="right">tak</td>
 <td>zapisuje fakt lub preferencję</td>
 </tr>
 <tr>
 <td><code>recall</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>tekstowo filtruje jawną pamięć</td>
 </tr>
 <tr>
 <td><code>speak_text</code></td>
-<td>low</td>
-<td>nie</td>
+<td align="right">low</td>
+<td align="right">nie</td>
 <td>uruchamia lokalny TTS Windows</td>
 </tr>
 </tbody></table>
-<p><code>recall</code> przeszukuje obecnie tabelę <code>memories</code> tekstowo. Semantyczny retrieval <code>vector_memories</code> jest wykonywany automatycznie przed planowaniem i nie ma jeszcze osobnego publicznego <code>action_id</code>.</p>
+<p><code>recall</code> przeszukuje obecnie tabelę <code>memories</code> tekstowo. Semantyczny retrieval
+<code>vector_memories</code> jest wykonywany automatycznie przed planowaniem i nie ma
+jeszcze osobnego publicznego <code>action_id</code>.</p>
 <hr>
-<h2 id="12-api-voiceloop">12. API VoiceLoop</h2>
-<h3 id="12-1-endpointy">12.1. Endpointy</h3>
-<table><thead><tr>
+<h2>12. API VoiceLoop</h2>
+<h3>12.1. Endpointy</h3>
+<table>
+<thead>
+<tr>
 <th>Metoda</th>
 <th>Ścieżka</th>
-<th>Autoryzacja</th>
+<th align="right">Autoryzacja</th>
 <th>Cel</th>
-</tr></thead><tbody>
-<tr>
+</tr>
+</thead>
+<tbody><tr>
 <td>GET</td>
 <td><code>/</code></td>
-<td>lokalna sesja</td>
+<td align="right">lokalna sesja</td>
 <td>panel WWW</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/v1/session</code></td>
-<td>tylko loopback</td>
+<td align="right">tylko loopback</td>
 <td>token i aktywny tryb LLM dla panelu</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/v1/health</code></td>
-<td>brak</td>
+<td align="right">brak</td>
 <td>status komponentów</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/commands</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>utworzenie komendy</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/v1/commands</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>lista komend</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/v1/commands/{id}</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>stan komendy</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/commands/{id}/confirm</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>potwierdzenie</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/commands/{id}/cancel</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>anulowanie</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/stop</code></td>
-<td>token</td>
-<td>globalny STOP</td>
+<td align="right">token</td>
+<td>soft barge-in: ucina TTS i wraca do słuchania</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/conversation/interrupt</code></td>
+<td align="right">token</td>
+<td>soft barge-in rozmowy</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/conversation/start</code></td>
+<td align="right">token</td>
+<td>jedno powitanie TTS + Deepgram one-shot</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/conversation/resume</code></td>
+<td align="right">token</td>
+<td>natychmiast kończy aktywną przerwę czasową</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/v1/conversation/stop</code></td>
+<td align="right">token</td>
+<td>twarde zakończenie sesji rozmowy</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/listening/start</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>start Deepgram live</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/listening/once?mode=...</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>jedna wypowiedź: assistant, note lub remember</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/listening/stop</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>stop Deepgram live</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/v1/memories</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>jawna pamięć</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/v1/memories</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>dodanie pamięci</td>
 </tr>
 <tr>
 <td>DELETE</td>
 <td><code>/api/v1/memories/{id}</code></td>
-<td>token</td>
+<td align="right">token</td>
 <td>usunięcie pamięci</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/api/v1/events</code></td>
-<td>brak</td>
+<td align="right">brak</td>
 <td>lokalny stream SSE</td>
 </tr>
 </tbody></table>
 <p>OpenAPI:</p>
-<pre><code class="language-text">http://127.0.0.1:8765/api/docs</code></pre>
-<h3 id="12-2-token-lokalny">12.2. Token lokalny</h3>
+<pre><code class="language-text">http://127.0.0.1:8765/api/docs
+</code></pre>
+<h3>12.2. Token lokalny</h3>
 <p>Token jest generowany przy pierwszym starcie:</p>
-<pre><code class="language-text">data\voiceloop.token</code></pre>
+<pre><code class="language-text">data\voiceloop.token
+</code></pre>
 <p>Mutujące i wrażliwe endpointy wymagają:</p>
-<pre><code class="language-text">X-VoiceLoop-Token: &lt;token&gt;</code></pre>
-<p><code>/api/v1/session</code> wydaje token tylko klientowi z loopback. SSE nie ma osobnego sprawdzenia tokenu, dlatego port <code>8765</code> nie może być wystawiony do sieci.</p>
-<p><code>N8nClient</code> może wysłać ten token do webhooka, ale aktualny workflow n8n nie weryfikuje nagłówka. Ochroną webhooka n8n jest obecnie wyłącznie bind loopback.</p>
+<pre><code class="language-text">X-VoiceLoop-Token: &lt;token&gt;
+</code></pre>
+<p><code>/api/v1/session</code> wydaje token tylko klientowi z loopback. SSE nie ma osobnego
+sprawdzenia tokenu, dlatego port <code>8765</code> nie może być wystawiony do sieci.</p>
+<p><code>N8nClient</code> może wysłać ten token do webhooka, ale aktualny workflow n8n nie
+weryfikuje nagłówka. Ochroną webhooka n8n jest obecnie wyłącznie bind loopback.</p>
 <hr>
-<h2 id="13-statusy-komend">13. Statusy komend</h2>
+<h2>13. Statusy komend</h2>
 <p>Cykl życia:</p>
 <pre><code class="language-text">received
   → planning
@@ -853,7 +884,8 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
   → succeeded
 
 Ścieżki końcowe:
-failed | cancelled | rejected</code></pre>
+failed | cancelled | rejected
+</code></pre>
 <p>Znaczenie:</p>
 <ul>
 <li><code>received</code> — zapisano wejście,</li>
@@ -867,9 +899,10 @@ failed | cancelled | rejected</code></pre>
 <li><code>rejected</code> — np. pełna kolejka.</li>
 </ul>
 <hr>
-<h2 id="14-panel-www">14. Panel WWW</h2>
+<h2>14. Panel WWW</h2>
 <p>Plik:</p>
-<pre><code class="language-text">panel\index.html</code></pre>
+<pre><code class="language-text">panel\index.html
+</code></pre>
 <p>Funkcje:</p>
 <ul>
 <li>pole rozmowy,</li>
@@ -885,33 +918,66 @@ failed | cancelled | rejected</code></pre>
 <li>lista jawnych wspomnień,</li>
 <li>SSE do aktualizacji w czasie rzeczywistym.</li>
 </ul>
-<p>Przy <code>LLM_PRIMARY=cloud</code> lub <code>venice</code> checkbox jest wyłączony, a panel jawnie pokazuje, że Venice jest modelem głównym ustawionym po stronie serwera.</p>
-<p>Stary adres <code>panel\deepgram.html</code> nie zawiera już klienta Deepgram ani pola klucza. Wyświetla komunikat migracyjny i przekierowuje do głównego panelu.</p>
+<p>Przy <code>LLM_PRIMARY=cloud</code> lub <code>venice</code> checkbox jest wyłączony, a panel jawnie
+pokazuje, że Venice jest modelem głównym ustawionym po stronie serwera.</p>
+<p>Stary adres <code>panel\deepgram.html</code> nie zawiera już klienta Deepgram ani pola
+klucza. Wyświetla komunikat migracyjny i przekierowuje do głównego panelu.</p>
 <hr>
-<h2 id="15-deepgram">15. Deepgram</h2>
-<h3 id="15-1-nasluch-mikrofonu">15.1. Nasłuch mikrofonu</h3>
+<h2>15. Deepgram</h2>
+<h3>15.1. Nasłuch mikrofonu</h3>
 <p><code>DeepgramListener</code>:</p>
 <ul>
 <li>otwiera WebSocket do modelu z <code>DEEPGRAM_MODEL</code> (domyślnie <code>nova-3</code>),</li>
 <li>używa języka z <code>DEEPGRAM_LANGUAGE</code> (domyślnie <code>pl</code>),</li>
 <li>przesyła mono PCM 16 kHz,</li>
-<li>publikuje interim i final transcripts,</li>
+<li>publikuje interim i final transcripts wraz z <code>speaker_ids</code>,</li>
 <li>agreguje finalne fragmenty wypowiedzi,</li>
+<li>przetwarza zwykłe callbacki w ograniczonych, sekwencyjnych kolejkach,</li>
+<li>kieruje STOP, pauzę, potwierdzenie i wznowienie osobną ścieżką priorytetową,
+która nie czeka za odpowiedzią modelu i nie jest odrzucana przy przepełnieniu,</li>
 <li>ma keepalive,</li>
-<li>ponawia połączenie z backoffem.</li>
+<li>ponawia połączenie z backoffem,</li>
+<li>serializuje start/stop blokadą lifecycle, aby równoległe <code>start_once</code> nie
+tworzyły osieroconych strumieni mikrofonu.</li>
 </ul>
-<p>Nasłuch jest domyślnie wyłączony i włączany przez panel lub API.</p>
-<h3 id="15-2-spotkania-screenpipe">15.2. Spotkania Screenpipe</h3>
-<p>Oddzielny worker używa Deepgram tylko dla zakończonych spotkań spełniających lokalną politykę. Nie należy łączyć tej funkcji z globalnym nagrywaniem audio.</p>
-<h3 id="15-3-sekret">15.3. Sekret</h3>
+<p>Live STT domyślnie dodaje <code>diarize_model=latest</code> (obecnie streaming diarizer v1).
+Parametr <code>diarize=true</code> jest przestarzały i nie jest wysyłany.</p>
+<h3>15.2. Diaryzacja i ochrona przed rozmową w tle</h3>
+<p>Diaryzacja Deepgram rozróżnia zmiany mówców przy małym koszcie opóźnienia, ale
+zwraca wyłącznie lokalne numery <code>speaker</code> — nie rozpoznaje właściciela głosu.
+Ponieważ half-duplex zestawia nowy WebSocket po TTS, identyfikatory nie są trwałe
+między turami.</p>
+<p>Zastosowane zabezpieczenia:</p>
+<ul>
+<li>co najmniej dwa numery mówców w jednej wypowiedzi → ignorowanie bez zwrotu do
+modelu, chyba że tekst zaczyna się od <code>Asystencie…</code>/<code>Venice…</code>,</li>
+<li>po <code>CONVERSATION_DIRECT_ADDRESS_AFTER_SECONDS</code> (domyślnie 30 s) kończy się
+okno swobodnego follow-upu i ponownie jest wymagany bezpośredni zwrot,</li>
+<li>podczas potwierdzonej przerwy przechodzą wyłącznie frazy wznowienia,</li>
+<li>echo aktualnego TTS jest porównywane z interim/final i nie uruchamia barge-in;
+filtr obejmuje krótkie asymetryczne fragmenty 2–3 słów oraz końcówkę odebraną
+do 2,5 s po zakończeniu TTS, a bezpośredni zwrot <code>Asystencie…</code> omija ten filtr,</li>
+<li>po <code>CONVERSATION_BARGE_IN_AFTER_MS</code> dokładne STOP działa już na interim, a
+pozostała mowa czeka na final Deepgram, aby sam szum lub niestabilny interim
+nie uciął rozpoczętego zdania; VoiceAttack/API omijają okres ochronny.</li>
+</ul>
+<p>To jest filtr rozmowy w tle, nie speaker verification. Pewna identyfikacja
+konkretnej osoby wymaga enrollmentu i osobnego modelu embeddingów głosu.</p>
+<h3>15.3. Spotkania Screenpipe</h3>
+<p>Oddzielny worker używa Deepgram tylko dla zakończonych spotkań spełniających
+lokalną politykę. Nie należy łączyć tej funkcji z globalnym nagrywaniem audio.</p>
+<h3>15.4. Sekret</h3>
 <p>Klucz Deepgram należy przechowywać tylko w:</p>
-<pre><code class="language-text">listener\.env</code></pre>
-<p>Historycznie klucz występował w starym panelu, dlatego jego rotacja jest zalecana, jeśli nie została wykonana.</p>
+<pre><code class="language-text">listener\.env
+</code></pre>
+<p>Historycznie klucz występował w starym panelu, dlatego jego rotacja jest
+zalecana, jeśli nie została wykonana.</p>
 <hr>
-<h2 id="16-n8n">16. n8n</h2>
+<h2>16. n8n</h2>
 <p>Pliki:</p>
 <pre><code class="language-text">n8n\voice-loop.json
-scripts\start-n8n.bat</code></pre>
+scripts\start-n8n.bat
+</code></pre>
 <p>Założenia:</p>
 <ul>
 <li>wersja bazowa: n8n 2.33.7,</li>
@@ -921,14 +987,19 @@ scripts\start-n8n.bat</code></pre>
 <li>n8n nie wykonuje dowolnego shell,</li>
 <li>n8n zwraca tylko typowany intent/action.</li>
 </ul>
-<p>Aktualny workflow jest mały i celowo deterministyczny. Nie jest jeszcze rozbudowanym orkiestratorem integracji zewnętrznych.</p>
-<p>Aktualny workflow nie sprawdza <code>X-VoiceLoop-Token</code>, mimo że klient może wysłać ten nagłówek. Nie wolno wystawiać portu <code>5678</code> do sieci przed dodaniem jawnej weryfikacji sekretu webhooka.</p>
+<p>Aktualny workflow jest mały i celowo deterministyczny. Nie jest jeszcze
+rozbudowanym orkiestratorem integracji zewnętrznych.</p>
+<p>Aktualny workflow nie sprawdza <code>X-VoiceLoop-Token</code>, mimo że klient może wysłać
+ten nagłówek. Nie wolno wystawiać portu <code>5678</code> do sieci przed dodaniem jawnej
+weryfikacji sekretu webhooka.</p>
 <hr>
-<h2 id="17-ui-vision">17. UI.Vision</h2>
+<h2>17. UI.Vision</h2>
 <p>Źródło prawdy makr:</p>
-<pre><code class="language-text">uivision\macros\</code></pre>
+<pre><code class="language-text">uivision\macros\
+</code></pre>
 <p>Runtime:</p>
-<pre><code class="language-text">%USERPROFILE%\Desktop\uivision</code></pre>
+<pre><code class="language-text">%USERPROFILE%\Desktop\uivision
+</code></pre>
 <p>Skrypty:</p>
 <ul>
 <li><code>sync-uivision.ps1</code> — synchronizacja makr,</li>
@@ -949,26 +1020,37 @@ scripts\start-n8n.bat</code></pre>
 <li>może zostać zatrzymany przez STOP.</li>
 </ul>
 <hr>
-<h2 id="18-voiceattack">18. VoiceAttack</h2>
-<p>VoiceAttack jest warstwą szybkich, sztywnych komend głosowych i pewnym wyzwalaczem swobodnego asystenta. Profil v2 nie używa wildcardu VoiceAttack do dyktowania długich zdań. Po stałej frazie „Asystent” otwiera na jedną wypowiedź polski STT Deepgram.</p>
+<h2>18. VoiceAttack</h2>
+<p>VoiceAttack jest warstwą szybkich, jawnych komend głosowych i pewnym
+wyzwalaczem swobodnego asystenta. Profil <code>VoiceLoop v2 PRO</code> ma 622 naturalne
+warianty 30 komend, ale nie używa wildcardu VoiceAttack do dyktowania długich
+zdań. Po stałej frazie „Asystent” otwiera na jedną wypowiedź polski STT
+Deepgram.</p>
 <p>Pliki:</p>
 <pre><code class="language-text">voiceattack\VoiceLoop-v2.vap
 voiceattack\INSTRUKCJA.md
 scripts\build-voiceattack-profile.py
 scripts\va\*.vbs
-scripts\send-command.ps1</code></pre>
-<p>Profil zawiera 15 komend:</p>
+scripts\send-command.ps1
+</code></pre>
+<p>Profil zawiera 30 komend:</p>
 <ul>
 <li>jednorazowy asystent: <code>Asystent</code>, <code>Hej asystent</code>,</li>
 <li>przechwycenie treści: <code>Zapisz notatkę</code>, <code>Zapamiętaj</code>,</li>
 <li>decyzje: <code>Potwierdź</code>, <code>Anuluj zadanie</code>,</li>
-<li>kontekst lokalny: <code>Co robiłem ostatnio</code>, <code>Opisz aktywne okno</code>,</li>
+<li>kontekst lokalny: <code>Co robiłem ostatnio</code>, <code>Opisz aktywne okno</code>,
+<code>Sprawdź pole tekstowe</code>,</li>
+<li>okna: <code>Zminimalizuj okno</code>, <code>Zminimalizuj wszystkie</code> / <code>Pokaż pulpit</code>,
+potwierdzane <code>WM_CLOSE</code> dla okna pod kursorem,</li>
+<li>kursor i schowek: kopiowanie tekstu, zaznaczenia, e-maila, numeru i zdania
+oraz zaznaczanie zdania lub akapitu przez UI Automation,</li>
 <li>Deepgram: <code>Włącz nasłuch</code>, <code>Wyłącz nasłuch</code>,</li>
 <li>diagnostyka: <code>Status Voice Loop</code>, <code>Test pętli</code>,</li>
-<li>akcje: kalendarz, przeglądarka i czat,</li>
+<li>akcje: kalendarz, przeglądarka, wyszukiwanie, zapamiętanie ostatniego źródła,
+czat, GPT i Gemini,</li>
 <li>panic button: <code>Stop teraz</code>, <code>Przerwij wszystko</code>.</li>
 </ul>
-<h3 id="18-1-przebieg-asystent">18.1. Przebieg „Asystent”</h3>
+<h3>18.1. Przebieg „Asystent”</h3>
 <pre><code class="language-text">„Asystent”
   → VoiceAttack uruchamia assistant.vbs
   → send-command.ps1
@@ -978,96 +1060,139 @@ scripts\send-command.ps1</code></pre>
   → po speech_final zamyka połączenie
   → CommandRequest(source=deepgram)
   → n8n → deterministic router → vector retrieval → Venice/Qwen
-  → executor i odpowiedź głosowa</code></pre>
-<p>Tryb ma timeout 30 sekund. <code>mode=note</code> poprzedza transkrypcję tekstem „Zapisz notatkę”, dzięki czemu lokalny router buduje <code>create_note</code>. <code>mode=remember</code> dodaje „Zapamiętaj” i tworzy akcję <code>remember</code>, która zgodnie z polityką wymaga osobnego potwierdzenia.</p>
-<h3 id="18-2-dispatcher">18.2. Dispatcher</h3>
+  → executor i odpowiedź głosowa
+</code></pre>
+<p>Tryb ma timeout 30 sekund. <code>mode=note</code> poprzedza transkrypcję tekstem
+„Zapisz notatkę”, dzięki czemu lokalny router buduje <code>create_note</code>.
+<code>mode=remember</code> dodaje „Zapamiętaj” i tworzy akcję <code>remember</code>, która zgodnie z
+polityką wymaga osobnego potwierdzenia.</p>
+<h3>18.2. Dispatcher</h3>
 <p>Wszystkie wrappery VBS uruchamiają <code>scripts\send-command.ps1</code>. Dispatcher:</p>
 <ul>
 <li>odczytuje lokalny token,</li>
 <li>obsługuje zwykłe <code>command_id</code> i tekst,</li>
+<li>przy aktywnym Deepgramie mapuje komendy VA na naturalny tekst,</li>
 <li>uruchamia tryb one-shot lub ciągły Deepgram,</li>
 <li>czyta krótki status usług,</li>
 <li>potwierdza albo anuluje najnowszą oczekującą akcję,</li>
 <li>nie interpoluje transkrypcji jako kodu shell.</li>
 </ul>
-<p>STOP używa dedykowanego <code>/api/v1/stop</code> i nie czeka na n8n ani model. Potwierdzenie zachowuje się poprawnie po restarcie rdzenia, ponieważ executor może odtworzyć plan z SQLite, ale zgoda wygasa po 5 minutach. Dispatcher również ignoruje starsze wpisy <code>awaiting_confirmation</code>. Plik profilu jest generowany deterministycznie z istniejącego eksportu XML; po przeniesieniu repozytorium należy ponownie uruchomić <code>scripts\build-voiceattack-profile.py</code>, ponieważ akcje VoiceAttack zawierają bezwzględne ścieżki.</p>
+<p>STOP używa dedykowanego <code>/api/v1/stop</code> i nie czeka na n8n ani model.
+Potwierdzenie zachowuje się poprawnie po restarcie rdzenia, ponieważ executor
+może odtworzyć plan z SQLite, ale zgoda wygasa po 5 minutach. Dispatcher również
+ignoruje starsze wpisy <code>awaiting_confirmation</code>.
+Plik profilu jest generowany deterministycznie z istniejącego eksportu XML.
+Generator wykrywa kolizje fraz i brakujące wrappery VBS. Po przeniesieniu
+repozytorium należy ponownie uruchomić
+<code>scripts\build-voiceattack-profile.py</code>, ponieważ akcje VoiceAttack zawierają
+bezwzględne ścieżki.</p>
 <hr>
-<h2 id="19-tts">19. TTS</h2>
+<h2>19. TTS</h2>
 <p><code>tts.py</code> używa lokalnych mechanizmów Windows. TTS:</p>
 <ul>
 <li>wypowiada odpowiedź dla źródeł Deepgram i VoiceAttack,</li>
-<li>dla akcji odczytujących dane wypowiada końcowy <code>ActionResult</code>, a nie tylko</li>
-</ul>
-<p>komunikat „Sprawdzam”,</p>
-<ul>
+<li>dla akcji odczytujących dane wypowiada końcowy <code>ActionResult</code>, a nie tylko
+komunikat „Sprawdzam”,</li>
 <li>po potwierdzeniu <code>remember</code> wypowiada wynik „Zapamiętano”,</li>
 <li>zwykłe odpowiedzi planu działają jako śledzone taski asyncio,</li>
 <li>odczyt końcowego wyniku jest sekwencjonowany na końcu wykonania planu,</li>
-<li>może zostać przerwany przez STOP.</li>
+<li>może zostać przerwany przez STOP,</li>
+<li>nie jest przerywany przez własne echo: barge-in odrzuca transkrypt podobny do
+aktualnie czytanego tekstu, w tym krótkie fragmenty i końcówkę z bufora
+Deepgram odebraną tuż po ponownym otwarciu mikrofonu,</li>
+<li>oblicza timeout Azure SDK i fallbacku REST z długości pełnego tekstu oraz tempa
+głosu zamiast ucinać odczyt po stałych 20 sekundach,</li>
+<li>publikuje <code>conversation.tts_completed</code> z flagami <code>completed</code> i <code>interrupted</code>.</li>
 </ul>
-<p>Plan ma wewnętrzną flagę <code>speak_result</code>. <code>AssistantService</code> ustawia ją wyłącznie dla żądań głosowych i wybranych akcji (<code>create_note</code>, <code>remember</code>, <code>recall</code>, <code>describe_active_window</code>, <code>describe_recent_activity</code>). Executor wypowiada wtedy komunikat zwrócony przez akcję. Status VoiceAttack używa krótkiego lokalnego TTS w dispatcherze PowerShell, ponieważ nie tworzy wpisu w kolejce komend.</p>
+<p>Przed TTS odpowiedź rozmowy przechodzi kontrolę protokołu. <code>finish_reason=length</code>,
+niekońcowy status API, artefakt JSON albo brak <code>.</code>, <code>?</code>, <code>!</code> lub <code>…</code> na końcu
+powodują ponowne wygenerowanie całej odpowiedzi. Po dwóch nieudanych próbach tekst
+nie jest czytany jako pozornie poprawna odpowiedź.</p>
+<p>Plan ma wewnętrzną flagę <code>speak_result</code>. <code>AssistantService</code> ustawia ją wyłącznie
+dla żądań głosowych i wybranych akcji (<code>create_note</code>, <code>remember</code>, <code>recall</code>,
+<code>describe_active_window</code>, <code>describe_recent_activity</code>). Executor wypowiada wtedy
+komunikat zwrócony przez akcję. Status VoiceAttack używa krótkiego lokalnego TTS
+w dispatcherze PowerShell, ponieważ nie tworzy wpisu w kolejce komend.</p>
 <hr>
-<h2 id="20-konfiguracja">20. Konfiguracja</h2>
+<h2>20. Konfiguracja</h2>
 <p>Wzór:</p>
-<pre><code class="language-text">listener\.env.example</code></pre>
+<pre><code class="language-text">listener\.env.example
+</code></pre>
 <p>Właściwy plik lokalny:</p>
-<pre><code class="language-text">listener\.env</code></pre>
+<pre><code class="language-text">listener\.env
+</code></pre>
 <p>Najważniejsze grupy ustawień:</p>
-<h3 id="rdze">Rdzeń</h3>
+<h3>Rdzeń</h3>
 <pre><code class="language-text">VOICELOOP_HOST=127.0.0.1
 VOICELOOP_PORT=8765
 VOICELOOP_DATA_DIR=../data
 COMMAND_DEDUPE_SECONDS=2
-COMMAND_QUEUE_LIMIT=10</code></pre>
-<h3 id="venice-jako-primary">Venice jako primary</h3>
-<pre><code class="language-text">LLM_PRIMARY=cloud
-CLOUD_LLM_ENABLED=true
+COMMAND_QUEUE_LIMIT=10
+</code></pre>
+<h3>Gemini jako primary</h3>
+<pre><code class="language-text">LLM_PRIMARY=gemini
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.5-flash
+</code></pre>
+<h3>Venice jako opcjonalny provider</h3>
+<pre><code class="language-text">CLOUD_LLM_ENABLED=false
 CLOUD_LLM_BASE_URL=https://api.venice.ai/api/v1
 CLOUD_LLM_API_KEY=
-CLOUD_LLM_MODEL=venice-uncensored-1-2</code></pre>
-<h3 id="qwen-jako-fallback">Qwen jako fallback</h3>
+CLOUD_LLM_MODEL=venice-uncensored-1-2
+</code></pre>
+<h3>Qwen jako fallback</h3>
 <pre><code class="language-text">LM_STUDIO_BASE_URL=http://127.0.0.1:1234/v1
-LM_STUDIO_MODEL=qwen2.5-14b-instruct-1m-abliterated</code></pre>
-<h3 id="embeddingi">Embeddingi</h3>
+LM_STUDIO_MODEL=qwen2.5-14b-instruct-1m-abliterated
+</code></pre>
+<h3>Embeddingi</h3>
 <pre><code class="language-text">LOCAL_EMBEDDINGS_ENABLED=true
 LOCAL_EMBEDDINGS_MODEL=text-embedding-nomic-embed-text-v2-moe
 LOCAL_EMBEDDINGS_TIMEOUT_SECONDS=30
-VECTOR_MEMORY_CONTEXT_LIMIT=8</code></pre>
-<h3 id="screenpipe">Screenpipe</h3>
+VECTOR_MEMORY_CONTEXT_LIMIT=8
+</code></pre>
+<h3>Screenpipe</h3>
 <pre><code class="language-text">SCREENPIPE_ENABLED=true
 SCREENPIPE_BASE_URL=http://127.0.0.1:3030
 SCREENPIPE_LOOKBACK_DAYS=14
 SCREENPIPE_VECTOR_MEMORY_ENABLED=true
 SCREENPIPE_VECTOR_POLL_SECONDS=120
-SCREENPIPE_VECTOR_RECENT_MINUTES=60</code></pre>
-<h3 id="deepgram">Deepgram</h3>
+SCREENPIPE_VECTOR_RECENT_MINUTES=60
+</code></pre>
+<h3>Deepgram</h3>
 <pre><code class="language-text">DEEPGRAM_API_KEY=
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_LANGUAGE=pl
+DEEPGRAM_DIARIZATION_ENABLED=true
+DEEPGRAM_DIARIZATION_MODEL=latest
 SAMPLE_RATE=16000
 AUTO_START_LISTENING=false
-# MICROPHONE_DEVICE=Microphone Array</code></pre>
-<p>Nigdy nie kopiuj wartości z <code>listener\.env</code> do dokumentacji, logów, commitów ani wiadomości.</p>
+CONVERSATION_DIRECT_ADDRESS_AFTER_SECONDS=30
+CONVERSATION_IGNORE_MULTI_SPEAKER=true
+# MICROPHONE_DEVICE=Microphone Array
+</code></pre>
+<p>Nigdy nie kopiuj wartości z <code>listener\.env</code> do dokumentacji, logów, commitów
+ani wiadomości.</p>
 <hr>
-<h2 id="21-uruchamianie">21. Uruchamianie</h2>
-<h3 id="21-1-lm-studio">21.1. LM Studio</h3>
+<h2>21. Uruchamianie</h2>
+<h3>21.1. LM Studio</h3>
 <p>W LM Studio:</p>
 <ol>
 <li>uruchom Local Server na <code>127.0.0.1:1234</code>,</li>
-<li>załaduj:</li>
-</ol>
-<ul>
+<li>załaduj:<ul>
 <li><code>text-embedding-nomic-embed-text-v2-moe</code>,</li>
 <li><code>qwen2.5-14b-instruct-1m-abliterated</code>,</li>
 </ul>
-<ol>
+</li>
 <li>upewnij się, że oba modele mają status READY.</li>
 </ol>
-<h3 id="21-2-caly-stack">21.2. Cały stack</h3>
+<h3>21.2. Cały stack</h3>
 <pre><code class="language-powershell">cd C:\Users\marci\VoiceLoop
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1</code></pre>
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
+</code></pre>
 <p>Opcjonalny limit oczekiwania:</p>
-<pre><code class="language-powershell">.\scripts\start-all.ps1 -TimeoutSeconds 600</code></pre>
+<pre><code class="language-powershell">.\scripts\start-all.ps1 -TimeoutSeconds 600
+</code></pre>
 <p>Skrypt:</p>
 <ul>
 <li>ostrzega, jeśli LM Studio nie działa,</li>
@@ -1079,38 +1204,49 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1</cod
 <li>czeka na porty do 300 sekund domyślnie,</li>
 <li>otwiera panel.</li>
 </ul>
-<p>Nie istnieje też jeden globalny skrypt resetujący wszystkie procesy i dane; opcja <code>-Restart</code> dotyczy wyłącznie Screenpipe.</p>
-<h3 id="21-3-osobno">21.3. Osobno</h3>
+<p>Nie istnieje też jeden globalny skrypt resetujący wszystkie procesy i dane;
+opcja <code>-Restart</code> dotyczy wyłącznie Screenpipe.</p>
+<h3>21.3. Osobno</h3>
 <pre><code class="language-powershell">.\scripts\start-core.bat
 .\scripts\start-n8n.bat
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-screenpipe.ps1</code></pre>
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-screenpipe.ps1
+</code></pre>
 <hr>
-<h2 id="22-diagnostyka">22. Diagnostyka</h2>
-<h3 id="health">Health</h3>
+<h2>22. Diagnostyka</h2>
+<h3>Health</h3>
 <pre><code class="language-powershell">Invoke-RestMethod http://127.0.0.1:8765/api/v1/health |
-    ConvertTo-Json -Depth 6</code></pre>
-<h3 id="porty">Porty</h3>
+    ConvertTo-Json -Depth 6
+</code></pre>
+<h3>Porty</h3>
 <pre><code class="language-powershell">Get-NetTCPConnection -State Listen |
-    Where-Object LocalPort -in 1234,3030,5678,5679,8765</code></pre>
-<h3 id="smoke-test">Smoke test</h3>
-<pre><code class="language-powershell">powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-loop.ps1</code></pre>
+    Where-Object LocalPort -in 1234,3030,5678,5679,8765
+</code></pre>
+<h3>Smoke test</h3>
+<pre><code class="language-powershell">powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-loop.ps1
+</code></pre>
 <p>Smoke test nie używa mikrofonu i nie wykonuje akcji ekranowych.</p>
-<h3 id="testy-python">Testy Python</h3>
+<h3>Testy Python</h3>
 <pre><code class="language-powershell">cd listener
 .\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests
-.\.venv\Scripts\python.exe -m pytest -c pyproject.toml ..\tests</code></pre>
-<p>Konfigurację pytest należy jawnie wskazać przez <code>-c pyproject.toml</code>, ponieważ testy leżą katalog wyżej niż plik konfiguracyjny.</p>
-<h3 id="logi">Logi</h3>
+.\.venv\Scripts\python.exe -m pytest -c pyproject.toml ..\tests
+</code></pre>
+<p>Konfigurację pytest należy jawnie wskazać przez <code>-c pyproject.toml</code>, ponieważ
+testy leżą katalog wyżej niż plik konfiguracyjny.</p>
+<h3>Logi</h3>
 <pre><code class="language-text">logs\voiceloop-core.out.log
 logs\voiceloop-core.err.log
-logs\uivision_*.txt</code></pre>
+logs\uivision_*.txt
+</code></pre>
 <hr>
-<h2 id="23-mapa-modul-w-python">23. Mapa modułów Python</h2>
-<table><thead><tr>
+<h2>23. Mapa modułów Python</h2>
+<table>
+<thead>
+<tr>
 <th>Plik</th>
 <th>Odpowiedzialność</th>
-</tr></thead><tbody>
-<tr>
+</tr>
+</thead>
+<tbody><tr>
 <td><code>app.py</code></td>
 <td>składanie serwisów, lifespan, FastAPI, health, endpointy</td>
 </tr>
@@ -1196,7 +1332,7 @@ logs\uivision_*.txt</code></pre>
 </tr>
 </tbody></table>
 <hr>
-<h2 id="24-struktura-repozytorium">24. Struktura repozytorium</h2>
+<h2>24. Struktura repozytorium</h2>
 <pre><code class="language-text">VoiceLoop\
 ├── README.md
 ├── docs\
@@ -1233,10 +1369,11 @@ logs\uivision_*.txt</code></pre>
 │   └── INSTRUKCJA.md
 ├── tests\
 ├── data\                    baza, token, screenshots
-└── logs\                    logi runtime</code></pre>
+└── logs\                    logi runtime
+</code></pre>
 <hr>
-<h2 id="25-model-bezpiecze-stwa">25. Model bezpieczeństwa</h2>
-<h3 id="gl-wne-zabezpieczenia">Główne zabezpieczenia</h3>
+<h2>25. Model bezpieczeństwa</h2>
+<h3>Główne zabezpieczenia</h3>
 <ul>
 <li>wszystkie usługi lokalne bindują się do loopback,</li>
 <li>sekrety są w <code>.env</code>, nie w panelu,</li>
@@ -1251,62 +1388,58 @@ logs\uivision_*.txt</code></pre>
 <li>STOP anuluje system centralnie,</li>
 <li>n8n ma wyłączony Execute Command.</li>
 </ul>
-<h3 id="granice-i-wiadome-kompromisy">Granice i świadome kompromisy</h3>
+<h3>Granice i świadome kompromisy</h3>
 <ol>
-<li>Venice jest głównym planerem, więc wolny język trafia do chmury.</li>
-<li>Historia rozmowy i wybrany kontekst vector memory trafiają do Venice.</li>
-<li><code>include_screen=true</code> może wysłać obraz aktywnego okna do Venice.</li>
+<li>Gemini jest głównym modelem, więc wolny język trafia do API Google.</li>
+<li>Historia rozmowy i wybrany kontekst vector memory trafiają do aktywnego
+providera chmurowego.</li>
+<li><code>include_screen=true</code> może wysłać obraz aktywnego okna do aktywnego providera.</li>
 <li>Screenpipe przechowuje bardzo szeroki lokalny kontekst.</li>
 <li>SSE nie ma osobnej autoryzacji i opiera się na loopback.</li>
 <li>Webhook n8n nie weryfikuje obecnie wysyłanego tokenu i opiera się na loopback.</li>
 <li>SQLite, token i screenshoty nie są szyfrowane przez VoiceLoop na dysku.</li>
 <li><code>open_url</code> nie wymaga potwierdzenia, ale sprawdza protokół i poprawność URL.</li>
-<li>Istniejące makro UI.Vision nadal jest zaufanym kodem automatyzacji; walidacja</li>
-</ol>
-<p>ścieżki nie analizuje bezpieczeństwa jego treści.</p>
-<ol>
+<li>Istniejące makro UI.Vision nadal jest zaufanym kodem automatyzacji; walidacja
+ścieżki nie analizuje bezpieczeństwa jego treści.</li>
 <li>Model „uncensored/abliterated” nie zastępuje lokalnej polityki bezpieczeństwa.</li>
 </ol>
 <hr>
-<h2 id="26-znane-ograniczenia">26. Znane ograniczenia</h2>
-<h3 id="funkcjonalne">Funkcjonalne</h3>
+<h2>26. Znane ograniczenia</h2>
+<h3>Funkcjonalne</h3>
 <ul>
 <li>n8n obsługuje obecnie mało reguł i nie jest pełnym katalogiem integracji,</li>
 <li>jawne <code>memories</code> i <code>vector_memories</code> mają oddzielne mechanizmy wyszukiwania,</li>
 <li>nie ma panelu do przeglądania i usuwania vector memories,</li>
-<li>swobodny tryb „Asystent” jest dialogiem dwustopniowym, a nie pojedynczą frazą</li>
-</ul>
-<p><code>Asystent &lt;polecenie&gt;</code>,</p>
-<ul>
-<li>VoiceAttack i Deepgram korzystają z tego samego urządzenia wejściowego; stałe</li>
-</ul>
-<p>komendy należy wypowiadać bez uruchamiania trybu „Asystent”,</p>
-<ul>
-<li>nie ma natywnego barge-in dla TTS poza globalnym STOP,</li>
+<li>swobodny tryb „Asystent” jest dialogiem dwustopniowym, a nie pojedynczą frazą
+<code>Asystent &lt;polecenie&gt;</code>,</li>
+<li>VoiceAttack i Deepgram korzystają z tego samego urządzenia wejściowego; stałe
+komendy należy wypowiadać bez uruchamiania trybu „Asystent”,</li>
+<li>light barge-in działa po okresie ochronnym i filtruje echo, ale nie jest pełnym
+akustycznym echo cancellation,</li>
+<li>diaryzacja Deepgram wykrywa numery mówców tylko w bieżącym strumieniu; nie
+identyfikuje biometrycznie właściciela i nie zachowuje ID między połączeniami,</li>
 <li>nie ma systemu wersjonowanych migracji SQLite.</li>
 </ul>
-<h3 id="skalowalno">Skalowalność</h3>
+<h3>Skalowalność</h3>
 <ul>
 <li>Qdrant odpytuje każdą z pięciu przestrzeni osobno i łączy wyniki w Pythonie,</li>
 <li>SQLite fallback nadal przechowuje embedding jako JSON i wyszukuje liniowo,</li>
 <li>nie ma automatycznego pruning danych Qdrant ani <code>vector_memories</code>,</li>
 <li>pełny re-ranking i kontrola retencji wymagają dalszej pracy.</li>
 </ul>
-<h3 id="operacyjne">Operacyjne</h3>
+<h3>Operacyjne</h3>
 <ul>
 <li>n8n uruchamiane przez npm może wymagać migracji po przyszłej aktualizacji,</li>
-<li>jeśli VoiceAttack pozostanie uruchamiany jako administrator, jego skrypty</li>
-</ul>
-<p>dziedziczą niepotrzebnie wyższe uprawnienia; zalecany jest zwykły tryb użytkownika,</p>
-<ul>
+<li>jeśli VoiceAttack pozostanie uruchamiany jako administrator, jego skrypty
+dziedziczą niepotrzebnie wyższe uprawnienia; zalecany jest zwykły tryb użytkownika,</li>
 <li>profile VoiceAttack zawierają bezwzględne ścieżki tej instalacji,</li>
 <li>nie ma pełnego supervision ani wspólnego restartu wszystkich usług,</li>
 <li>aktualizacje LM Studio mogą zmienić nazwy lub format identyfikatorów modeli,</li>
 <li>dokładne urządzenia audio Screenpipe są wybierane heurystycznie.</li>
 </ul>
 <hr>
-<h2 id="27-rekomendowany-backlog">27. Rekomendowany backlog</h2>
-<h3 id="priorytet-0-hardening-lokalnego-api">Priorytet 0 — hardening lokalnego API</h3>
+<h2>27. Rekomendowany backlog</h2>
+<h3>Priorytet 0 — hardening lokalnego API</h3>
 <ol>
 <li>Weryfikować sekret bezpośrednio w workflow n8n.</li>
 <li>Dodać autoryzację albo bezpieczny kanał sesyjny dla SSE.</li>
@@ -1314,40 +1447,38 @@ logs\uivision_*.txt</code></pre>
 <li>Ustawić restrykcyjne ACL dla bazy, tokenu, screenshotów i danych Screenpipe.</li>
 <li>Rozważyć podpisy lub sumy kontrolne zatwierdzonych makr UI.Vision.</li>
 </ol>
-<h3 id="priorytet-1-prywatno-i-kontrola-kontekstu">Priorytet 1 — prywatność i kontrola kontekstu</h3>
+<h3>Priorytet 1 — prywatność i kontrola kontekstu</h3>
 <ol>
 <li>Dodać osobny przełącznik „Wyślij historię/pamięć do Venice”.</li>
-<li>Oddzielić <code>include_screen</code> na:</li>
-</ol>
-<ul>
+<li>Oddzielić <code>include_screen</code> na:<ul>
 <li>same metadane,</li>
 <li>UI Automation,</li>
 <li>obraz.</li>
 </ul>
-<ol>
+</li>
 <li>Zredagować URL, tytuły i sekrety przed przekazaniem do Venice.</li>
 <li>Dodać allowlistę aplikacji Screenpipe do vector memory.</li>
 <li>Dodać pruning vector memories i retencję.</li>
 </ol>
-<h3 id="priorytet-2-lepszy-rag">Priorytet 2 — lepszy RAG</h3>
+<h3>Priorytet 2 — lepszy RAG</h3>
 <ol>
 <li>Wektoryzować transkrypcje zakończonych spotkań.</li>
 <li>Indeksować krótkie fragmenty OCR tylko z dozwolonych aplikacji.</li>
 <li>Dodać filtrowanie po czasie, aplikacji i typie źródła.</li>
 <li>Łączyć wyniki semantyczne z recency score.</li>
 <li>Dodać endpoint diagnostyczny pokazujący retrieved chunks.</li>
-<li>Przejść na <code>sqlite-vec</code> po przekroczeniu kilku–kilkudziesięciu tysięcy</li>
+<li>Przejść na <code>sqlite-vec</code> po przekroczeniu kilku–kilkudziesięciu tysięcy
+rekordów.</li>
 </ol>
-<p>rekordów.</p>
-<h3 id="priorytet-3-ux">Priorytet 3 — UX</h3>
+<h3>Priorytet 3 — UX</h3>
 <ol>
 <li>Dodać serwerowy tryb prywatności wyłączający wysyłanie kontekstu do Venice.</li>
 <li>Pokazywać provider i model przy każdej odpowiedzi.</li>
 <li>Dodać podgląd planu przed wykonaniem.</li>
 <li>Dodać panel vector memories.</li>
-<li>Dodać barge-in i lepsze przerwanie TTS.</li>
+<li>Rozważyć sprzętowe AEC lub push-to-talk jako uzupełnienie light barge-in.</li>
 </ol>
-<h3 id="priorytet-4-integracje">Priorytet 4 — integracje</h3>
+<h3>Priorytet 4 — integracje</h3>
 <ol>
 <li>Rozbudować n8n o kalendarz, e-mail i przypomnienia.</li>
 <li>Dodać typed adapters zamiast ogólnego workflow.</li>
@@ -1355,14 +1486,12 @@ logs\uivision_*.txt</code></pre>
 <li>Dodać tray app i autostart.</li>
 </ol>
 <hr>
-<h2 id="28-jak-bezpiecznie-doda-now-akcj">28. Jak bezpiecznie dodać nową akcję</h2>
+<h2>28. Jak bezpiecznie dodać nową akcję</h2>
 <ol>
 <li>Dodaj <code>ActionSpec</code> w <code>actions.py</code>.</li>
 <li>Zdefiniuj ścisły <code>args_schema</code>.</li>
 <li>Ustal minimalny uczciwy poziom ryzyka.</li>
-<li>Ustaw <code>confirmation_required=True</code>, jeśli akcja:</li>
-</ol>
-<ul>
+<li>Ustaw <code>confirmation_required=True</code>, jeśli akcja:<ul>
 <li>wysyła,</li>
 <li>publikuje,</li>
 <li>usuwa,</li>
@@ -1371,7 +1500,7 @@ logs\uivision_*.txt</code></pre>
 <li>zmienia konto,</li>
 <li>steruje cudzymi danymi.</li>
 </ul>
-<ol>
+</li>
 <li>Zaimplementuj handler bez interpretowania dowolnego shell.</li>
 <li>Dodaj testy polityki.</li>
 <li>Dodaj test powodzenia i błędu.</li>
@@ -1379,7 +1508,7 @@ logs\uivision_*.txt</code></pre>
 <li>Uzupełnij ten dokument.</li>
 </ol>
 <hr>
-<h2 id="29-kryteria-akceptacji-zmian">29. Kryteria akceptacji zmian</h2>
+<h2>29. Kryteria akceptacji zmian</h2>
 <p>Zmiana jest gotowa dopiero, gdy:</p>
 <ul>
 <li>nie wprowadza sekretu do repozytorium,</li>
@@ -1393,31 +1522,35 @@ logs\uivision_*.txt</code></pre>
 <li>dokumentacja odzwierciedla stan kodu.</li>
 </ul>
 <hr>
-<h2 id="30-skr-cona-checklista-dla-nast-pnego-agenta">30. Skrócona checklista dla następnego agenta</h2>
+<h2>30. Skrócona checklista dla następnego agenta</h2>
 <p>Przed pracą:</p>
 <ul>
-<li><input type="checkbox" disabled> przeczytaj ten dokument,</li>
-<li><input type="checkbox" disabled> sprawdź <code>git status</code>,</li>
-<li><input type="checkbox" disabled> nie czytaj wartości sekretów bez potrzeby,</li>
-<li><input type="checkbox" disabled> sprawdź <code>/api/v1/health</code>,</li>
-<li><input type="checkbox" disabled> sprawdź aktywne modele LM Studio,</li>
-<li><input type="checkbox" disabled> ustal, czy zmiana dotyczy Venice, Qwen czy Nomic.</li>
+<li><input disabled="" type="checkbox"> przeczytaj ten dokument,</li>
+<li><input disabled="" type="checkbox"> sprawdź <code>git status</code>,</li>
+<li><input disabled="" type="checkbox"> nie czytaj wartości sekretów bez potrzeby,</li>
+<li><input disabled="" type="checkbox"> sprawdź <code>/api/v1/health</code>,</li>
+<li><input disabled="" type="checkbox"> sprawdź aktywne modele LM Studio,</li>
+<li><input disabled="" type="checkbox"> ustal, czy zmiana dotyczy Venice, Qwen czy Nomic.</li>
 </ul>
 <p>Po pracy:</p>
 <ul>
-<li><input type="checkbox" disabled> <code>ruff</code>,</li>
-<li><input type="checkbox" disabled> pełny <code>pytest</code>,</li>
-<li><input type="checkbox" disabled> smoke test,</li>
-<li><input type="checkbox" disabled> healthcheck,</li>
-<li><input type="checkbox" disabled> brak sekretów w diffie,</li>
-<li><input type="checkbox" disabled> aktualizacja dokumentacji,</li>
-<li><input type="checkbox" disabled> brak niekontrolowanego procesu w tle.</li>
+<li><input disabled="" type="checkbox"> <code>ruff</code>,</li>
+<li><input disabled="" type="checkbox"> pełny <code>pytest</code>,</li>
+<li><input disabled="" type="checkbox"> smoke test,</li>
+<li><input disabled="" type="checkbox"> healthcheck,</li>
+<li><input disabled="" type="checkbox"> brak sekretów w diffie,</li>
+<li><input disabled="" type="checkbox"> aktualizacja dokumentacji,</li>
+<li><input disabled="" type="checkbox"> brak niekontrolowanego procesu w tle.</li>
 </ul>
 <hr>
-<h2 id="31-najwa-niejsza-zasada-architektoniczna">31. Najważniejsza zasada architektoniczna</h2>
+<h2>31. Najważniejsza zasada architektoniczna</h2>
 <p>VoiceLoop ma oddzielać <strong>rozumowanie</strong> od <strong>uprawnień</strong>:</p>
 <pre><code class="language-text">Venice/Qwen mogą proponować.
-Tylko lokalny, walidowany kod może wykonywać.</code></pre>
-<p>To rozdzielenie jest ważniejsze niż wybór konkretnego modelu, dostawcy chmury, systemu RPA czy bazy wektorowej.</p></article>
+Tylko lokalny, walidowany kod może wykonywać.
+</code></pre>
+<p>To rozdzielenie jest ważniejsze niż wybór konkretnego modelu, dostawcy chmury,
+systemu RPA czy bazy wektorowej.</p>
+
+</article>
 </body>
 </html>

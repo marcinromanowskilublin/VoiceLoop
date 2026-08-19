@@ -20,11 +20,13 @@ class N8nClient:
         webhook_url: str,
         token: SecretStr | None,
         timeout_seconds: float,
+        enabled: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.webhook_url = webhook_url
         self.token = token
         self.timeout_seconds = timeout_seconds
+        self.enabled = enabled
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -35,6 +37,8 @@ class N8nClient:
         return headers
 
     async def health(self) -> tuple[bool, str]:
+        if not self.enabled:
+            return True, "wyłączony"
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 response = await client.get(f"{self.base_url}/healthz")
@@ -46,6 +50,8 @@ class N8nClient:
             return False, str(exc)
 
     async def route(self, request: CommandRequest) -> CommandPlan | None:
+        if not self.enabled:
+            return None
         payload = request.model_dump(mode="json")
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
