@@ -102,12 +102,7 @@ class WebSearchClient:
         if not self.enabled:
             return False, "wyłączone w konfiguracji"
         chain = " -> ".join(self._provider_chain())
-        try:
-            results = await self.search("aktualne informacje", limit=1)
-        except WebSearchError as exc:
-            return False, f"{exc} (chain: {chain})"
-        active_provider = results[0].provider if results else self.provider
-        return True, f"provider={active_provider}; chain={chain}"
+        return True, f"skonfigurowane; chain={chain}"
 
     async def search(
         self,
@@ -599,8 +594,11 @@ class WebSearchClient:
                 "https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{self.gemini_model}:generateContent"
             ),
-            params={"key": token},
-            headers={"Content-Type": "application/json"},
+            params={},
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": token,
+            },
             json_payload={
                 "contents": [
                     {

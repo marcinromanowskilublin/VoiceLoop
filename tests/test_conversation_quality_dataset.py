@@ -10,9 +10,8 @@ from voiceloop.settings import Settings
 def test_conversation_quality_dataset_has_sixty_balanced_cases(tmp_path) -> None:
     path = (
         Path(__file__).resolve().parents[1]
-        / "data"
-        / "corpus"
-        / "eval"
+        / "tests"
+        / "fixtures"
         / "conversation-quality-v1.json"
     )
     cases = json.loads(path.read_text(encoding="utf-8"))

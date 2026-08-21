@@ -18,7 +18,7 @@ rozmowy głosowej, telemetrii i warstwy wiedzy.
 
 ## 2) Stan spójności na moment przekazania
 
-- `530 passed` w pełnym `pytest` (lokalne uruchomienie na tym drzewie).
+- Historyczny wynik przy tym handoffie: `530 passed`; aktualny wynik pokazuje CI.
 - `compileall` dla `listener/voiceloop` bez błędów.
 - `git diff --check` bez błędów whitespace.
 
@@ -39,7 +39,9 @@ listener/.venv/Scripts/python.exe -m uvicorn voiceloop.app:app --host 127.0.0.1 
 4. Sprawdź health:
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/v1/health"
+$token = (Get-Content -Raw .\data\voiceloop.token).Trim()
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/v1/health" `
+  -Headers @{ 'X-VoiceLoop-Token' = $token }
 ```
 
 ## 4) Checklista odbioru (15 min)
@@ -58,6 +60,7 @@ listener/.venv/Scripts/python.exe -m pytest -q
 ## 5) Pliki, które Mikołaj powinien przeczytać najpierw
 
 - `README.md`
+- `docs/PORTFOLIO_PL.md`
 - `docs/VOICELOOP_ARCHITECTURE_HANDOFF.md`
 - `listener/voiceloop/voice_conversation.py`
 - `listener/voiceloop/assistant.py`

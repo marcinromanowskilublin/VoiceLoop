@@ -18,6 +18,7 @@ from .actions import ActionRegistry
 from .assistant import AssistantService
 from .behavior_digest import LocalBehaviorDigestClient
 from .capability_index import CapabilityIndex, CapabilityIndexError
+from .conversation_telemetry import ConversationTelemetry
 from .corpus.candidates import (
     CandidateDecisionError,
     MemoryCandidateStore,
@@ -30,7 +31,6 @@ from .corpus.schema import (
     MemoryCandidateApprovalRequest,
     MemoryCandidateCreate,
 )
-from .conversation_telemetry import ConversationTelemetry
 from .deepgram import DeepgramListener
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 from .events import EventBus
@@ -446,6 +446,8 @@ async def lifespan(app: FastAPI):
         level=getattr(logging, settings.voiceloop_log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     services = build_services(settings)
     app.state.services = services
     await services.memory.initialize()
@@ -609,8 +611,9 @@ async def match_capabilities(
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)
-async def health(request: Request) -> HealthResponse:
-    services = services_from(request)
+async def health(
+    services: Annotated[Services, Depends(require_token)],
+) -> HealthResponse:
     cloud_health = (
         services.cloud_planner.health()
         if services.cloud_planner is not None
@@ -1113,9 +1116,10 @@ async def reject_memory_candidate(
 
 
 @app.get("/api/v1/events", include_in_schema=False)
-async def events(request: Request) -> StreamingResponse:
-    services = services_from(request)
-
+async def events(
+    request: Request,
+    services: Annotated[Services, Depends(require_token)],
+) -> StreamingResponse:
     async def stream():
         iterator = services.events.subscribe().__aiter__()
         next_event = asyncio.create_task(anext(iterator))

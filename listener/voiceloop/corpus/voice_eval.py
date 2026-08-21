@@ -38,6 +38,26 @@ _SCREENPIPE_FILE_PATTERN = re.compile(
     r"\.(?P<extension>mp4|m4a|wav|webm)$",
     re.IGNORECASE,
 )
+_MEETING_INPUT_WAV_PATTERN = re.compile(
+    r"^input-microphone-(?P<stamp>\d{8}T\d{6,15}Z)-(?P<clip>[0-9a-f]{8})\.wav$",
+    re.IGNORECASE,
+)
+_LONG_MEETING_FILE_THRESHOLD = 1500
+_DUMP_MEETING_FILE_THRESHOLD = 2000
+_LONG_MEETING_SOURCE_CAP = 48
+_VOICE_EVAL_BACKUP_NAMES = (
+    "samples-v1.jsonl",
+    "splits-v1.json",
+    "candidates-v1.jsonl",
+    "annotation-template-v1.jsonl",
+    "annotation-template-development-v1.jsonl",
+    "annotation-template-holdout-v1.jsonl",
+    "review-v1.html",
+    "review-development-v1.html",
+    "review-holdout-v1.html",
+    "transcription-report-development-v1.json",
+    "validation-v1.json",
+)
 _QUESTION_WORDS = {
     "czy",
     "co",
@@ -112,6 +132,24 @@ def parse_timestamp(value: str) -> datetime:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
+def parse_meeting_clip_timestamp(value: str) -> datetime:
+    stamp = value[:-1] if value.upper().endswith("Z") else value
+    if "T" not in stamp:
+        raise VoiceEvalError(f"Nieprawidłowy timestamp nagrania spotkania: {value!r}.")
+    date_part, time_part = stamp.split("T", 1)
+    if len(date_part) != 8 or len(time_part) < 6 or not time_part[:6].isdigit():
+        raise VoiceEvalError(f"Nieprawidłowy timestamp nagrania spotkania: {value!r}.")
+    try:
+        captured = datetime.strptime(date_part + time_part[:6], "%Y%m%d%H%M%S")
+    except ValueError as exc:
+        raise VoiceEvalError(
+            f"Nieprawidłowy timestamp nagrania spotkania: {value!r}."
+        ) from exc
+    fraction = time_part[6:]
+    microsecond = int(fraction.ljust(6, "0")[:6]) if fraction.isdigit() else 0
+    return captured.replace(microsecond=microsecond, tzinfo=UTC)
+
+
 def infer_audio_direction(device_name: str, device_type: str) -> AudioDirection:
     combined = f"{device_type} {device_name}".casefold()
     if any(marker in combined for marker in ("input", "microphone", "mikrofon", "mic")):
@@ -124,17 +162,21 @@ def infer_audio_direction(device_name: str, device_type: str) -> AudioDirection:
     return AudioDirection.UNKNOWN
 
 
-def safe_screenpipe_audio_path(path: Path, *, screenpipe_root: Path) -> Path:
-    root = screenpipe_root.expanduser().resolve()
+def safe_local_audio_path(path: Path, *, audio_root: Path) -> Path:
+    root = audio_root.expanduser().resolve()
     candidate = path if path.is_absolute() else root / path
     try:
         resolved = candidate.resolve(strict=True)
         resolved.relative_to(root)
     except (FileNotFoundError, OSError, ValueError) as exc:
-        raise VoiceEvalError("Plik audio jest poza bezpiecznym katalogiem Screenpipe.") from exc
+        raise VoiceEvalError("Plik audio jest poza bezpiecznym katalogiem źródłowym.") from exc
     if resolved.suffix.casefold() not in _SUPPORTED_AUDIO_SUFFIXES:
         raise VoiceEvalError(f"Nieobsługiwany format audio: {resolved.suffix}.")
     return resolved
+
+
+def safe_screenpipe_audio_path(path: Path, *, screenpipe_root: Path) -> Path:
+    return safe_local_audio_path(path, audio_root=screenpipe_root)
 
 
 async def inventory_screenpipe_audio(
@@ -233,6 +275,100 @@ def discover_screenpipe_audio_files(
     ]
 
 
+def discover_meeting_input_files(
+    meetings_root: Path,
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    per_session_limit: int = 80,
+    skip_long_sessions: bool = True,
+) -> list[ScreenpipeAudioChunk]:
+    """Find meeting-recorder microphone WAVs without importing output audio."""
+
+    root = meetings_root.expanduser().resolve()
+    if not root.is_dir():
+        raise VoiceEvalError(f"Brak katalogu nagrań spotkań: {root}")
+    chunks: list[ScreenpipeAudioChunk] = []
+    for session_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+        audio_dir = session_dir / "audio"
+        if not audio_dir.is_dir():
+            continue
+        matches: list[tuple[datetime, Path]] = []
+        for path in audio_dir.iterdir():
+            if not path.is_file():
+                continue
+            match = _MEETING_INPUT_WAV_PATTERN.match(path.name)
+            if match is None:
+                continue
+            try:
+                captured = parse_meeting_clip_timestamp(match.group("stamp"))
+            except VoiceEvalError:
+                continue
+            if start is not None and captured < start:
+                continue
+            if end is not None and captured >= end:
+                continue
+            matches.append((captured, path))
+        matches.sort(key=lambda item: (item[0], item[1].name))
+        session_limit = _meeting_session_source_limit(
+            len(matches),
+            per_session_limit,
+            skip_long_sessions=skip_long_sessions,
+        )
+        selected = _evenly_spaced([path for _, path in matches], session_limit)
+        captured_by_path = {path: captured for captured, path in matches}
+        for path in selected:
+            captured = captured_by_path[path]
+            try:
+                duration = wav_duration_seconds(path)
+            except (OSError, wave.Error):
+                duration = 15.0
+            if duration <= 0:
+                duration = 15.0
+            chunks.append(
+                ScreenpipeAudioChunk(
+                    chunk_id=f"meeting:{session_dir.name}:{path.stem}",
+                    file_path=path.resolve(),
+                    device_name="microphone",
+                    device_type="Input",
+                    start_time=captured.isoformat(),
+                    end_time=(captured + timedelta(seconds=duration)).isoformat(),
+                    text="",
+                )
+            )
+    chunks.sort(key=lambda item: (item.start_time, item.chunk_id))
+    return chunks
+
+
+def inventory_meeting_audio(
+    meetings_root: Path,
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    per_session_limit: int = 80,
+    skip_long_sessions: bool = True,
+) -> VoiceSourceManifestV1:
+    chunks = discover_meeting_input_files(
+        meetings_root,
+        start=start,
+        end=end,
+        per_session_limit=per_session_limit,
+        skip_long_sessions=skip_long_sessions,
+    )
+    if not chunks:
+        raise VoiceEvalError("Brak mikrofonowych WAV-ów w nagraniach spotkań.")
+    range_start = start or min(parse_timestamp(chunk.start_time) for chunk in chunks)
+    range_end = end or max(parse_timestamp(chunk.end_time) for chunk in chunks)
+    if range_end <= range_start:
+        range_end = range_start + timedelta(seconds=1)
+    return build_voice_source_manifest(
+        chunks,
+        start=range_start,
+        end=range_end,
+        screenpipe_root=meetings_root,
+    )
+
+
 def build_voice_source_manifest(
     chunks: list[ScreenpipeAudioChunk],
     *,
@@ -317,6 +453,34 @@ def build_voice_source_manifest(
     )
 
 
+def merge_voice_candidates(
+    existing: list[VoiceEvalSampleV1],
+    incoming: list[VoiceEvalSampleV1],
+) -> list[VoiceEvalSampleV1]:
+    by_id = {sample.sample_id: sample for sample in existing}
+    by_id.update((sample.sample_id, sample) for sample in incoming)
+    return sorted(
+        by_id.values(),
+        key=lambda sample: (sample.provenance.captured_start, sample.sample_id),
+    )
+
+
+def backup_voice_eval_artifacts(eval_root: Path) -> Path | None:
+    existing = [
+        eval_root / name
+        for name in _VOICE_EVAL_BACKUP_NAMES
+        if (eval_root / name).is_file()
+    ]
+    if not existing:
+        return None
+    stamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    backup_root = eval_root / "backups" / stamp
+    backup_root.mkdir(parents=True, exist_ok=False)
+    for source in existing:
+        shutil.copy2(source, backup_root / source.name)
+    return backup_root
+
+
 def build_voice_candidates(
     manifest: VoiceSourceManifestV1,
     *,
@@ -325,6 +489,7 @@ def build_voice_candidates(
     speaker_role: SpeakerRole,
     max_candidates: int = 360,
     ffmpeg_executable: str = "ffmpeg",
+    source_system: str = "screenpipe",
 ) -> list[VoiceEvalSampleV1]:
     if max_candidates < 1:
         return []
@@ -337,7 +502,7 @@ def build_voice_candidates(
     for source in _spread_sources(sources):
         if len(candidates) >= max_candidates:
             break
-        path = safe_screenpipe_audio_path(Path(source.path), screenpipe_root=screenpipe_root)
+        path = safe_local_audio_path(Path(source.path), audio_root=screenpipe_root)
         remaining = max_candidates - len(candidates)
         candidates.extend(
             _segment_source(
@@ -347,6 +512,7 @@ def build_voice_candidates(
                 speaker_role=speaker_role,
                 max_segments=remaining,
                 ffmpeg_executable=ffmpeg_executable,
+                source_system=source_system,
             )
         )
     return mark_cross_channel_duplicates(candidates)
@@ -710,6 +876,7 @@ def _segment_source(
     speaker_role: SpeakerRole,
     max_segments: int,
     ffmpeg_executable: str,
+    source_system: str = "screenpipe",
 ) -> list[VoiceEvalSampleV1]:
     if max_segments < 1:
         return []
@@ -759,10 +926,10 @@ def _segment_source(
                 captured_start = source.captured_start + timedelta(seconds=start_offset)
                 captured_end = source.captured_start + timedelta(seconds=end_offset)
             provenance = ProvenanceV1(
-                source_system="screenpipe",
+                source_system=_source_system_for(source, source_system),
                 source_id=source.source_id,
                 source_record_id=f"{source.chunk_id}:{ordinal}",
-                session_id=f"screenpipe:{source.captured_start.date().isoformat()}",
+                session_id=_session_id_for(source, source_system),
                 captured_start=captured_start,
                 captured_end=captured_end,
                 audio_direction=source.audio_direction,
@@ -1209,3 +1376,42 @@ def _is_safe_audio_path(path: Path, *, screenpipe_root: Path) -> bool:
     except VoiceEvalError:
         return False
     return True
+
+
+def _evenly_spaced(items: list[Path], limit: int) -> list[Path]:
+    if limit < 1:
+        return []
+    if len(items) <= limit:
+        return items
+    return [items[index * len(items) // limit] for index in range(limit)]
+
+
+def _meeting_session_source_limit(
+    file_count: int,
+    per_session_limit: int,
+    *,
+    skip_long_sessions: bool = True,
+) -> int:
+    if per_session_limit < 1:
+        return 0
+    if skip_long_sessions and file_count >= _DUMP_MEETING_FILE_THRESHOLD:
+        return 0
+    if file_count >= _LONG_MEETING_FILE_THRESHOLD:
+        return min(_LONG_MEETING_SOURCE_CAP, per_session_limit)
+    return per_session_limit
+
+
+def _source_system_for(source: VoiceAudioSourceV1, fallback: str) -> str:
+    if source.chunk_id.startswith("meeting:"):
+        return "meeting_recorder"
+    return fallback
+
+
+def _session_id_for(source: VoiceAudioSourceV1, fallback: str) -> str:
+    if source.chunk_id.startswith("meeting:"):
+        parts = source.chunk_id.split(":")
+        if len(parts) >= 2:
+            return f"meeting:{parts[1]}"
+    if fallback == "meeting_recorder":
+        return f"meeting:{source.captured_start.date().isoformat()}"
+    return f"screenpipe:{source.captured_start.date().isoformat()}"

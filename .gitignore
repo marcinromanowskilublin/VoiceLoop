@@ -15,5 +15,6 @@ data/*
 listener/requirements.lock.tmp
 uivision/runtime/
 n8n/backups/
+scripts/staging-voice-eval/
 *.bak
 *.tmp

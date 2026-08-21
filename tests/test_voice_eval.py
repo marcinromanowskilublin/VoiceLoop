@@ -9,8 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from voiceloop.corpus import cli as corpus_cli
 from voiceloop.corpus.cli import build_parser
 from voiceloop.corpus.journal import extract_project_journal_candidates
+from voiceloop.corpus.pipeline import CorpusPaths
 from voiceloop.corpus.proper_names import (
     apply_proper_name_lexicon,
     build_proper_name_lexicon,
@@ -35,12 +37,24 @@ from voiceloop.corpus.schema import (
     VoiceIntentLabel,
     VoiceSampleState,
 )
-from voiceloop.corpus.storage import sha256_file, sha256_text
+from voiceloop.corpus.storage import (
+    read_jsonl,
+    sha256_file,
+    sha256_text,
+    write_json,
+    write_jsonl,
+)
 from voiceloop.corpus.voice_eval import (
+    VoiceEvalError,
+    backup_voice_eval_artifacts,
     build_voice_source_manifest,
     detect_speech_segments,
+    discover_meeting_input_files,
     discover_screenpipe_audio_files,
+    inventory_meeting_audio,
     mark_cross_channel_duplicates,
+    merge_voice_candidates,
+    parse_meeting_clip_timestamp,
     refill_voice_development_samples,
     select_voice_eval_samples,
     validate_voice_eval_dataset,
@@ -101,6 +115,15 @@ def _sample(index: int) -> VoiceEvalSampleV1:
             "adverse_audio",
             "non_action",
         ),
+    )
+
+
+def _selected_sample(index: int, split: VoiceEvalSplit) -> VoiceEvalSampleV1:
+    return _sample(index).model_copy(
+        update={
+            "state": VoiceSampleState.SELECTED,
+            "split": split,
+        }
     )
 
 
@@ -256,6 +279,193 @@ def test_discovers_unindexed_screenpipe_files_and_prioritizes_input(tmp_path) ->
     assert len(chunks) == 2
     assert chunks[0].device_type == "Input"
     assert chunks[1].device_type == "Output"
+
+
+def test_meeting_inventory_accepts_only_microphone_wavs(tmp_path) -> None:
+    audio_dir = tmp_path / "meeting-20260818T154448Z-abc123" / "audio"
+    input_path = audio_dir / "input-microphone-20260818T154448724919Z-a21437bf.wav"
+    _write_wav(input_path, [0.2] * 1600)
+    _write_wav(
+        audio_dir / "output-loopback-20260818T154448724919Z-deadbeef.wav",
+        [0.9] * 1600,
+    )
+    (audio_dir / "input-microphone-invalid.mp4").write_bytes(b"not-a-wav")
+
+    chunks = discover_meeting_input_files(tmp_path)
+    manifest = inventory_meeting_audio(tmp_path)
+
+    assert parse_meeting_clip_timestamp("20260818T154448724919Z") == datetime(
+        2026,
+        8,
+        18,
+        15,
+        44,
+        48,
+        724919,
+        tzinfo=UTC,
+    )
+    assert len(chunks) == 1
+    assert chunks[0].file_path.resolve() == input_path.resolve()
+    assert manifest.included_source_count == 1
+    assert manifest.sources[0].audio_direction is AudioDirection.INPUT
+
+
+def test_merge_and_backup_voice_artifacts_are_safe_on_first_run(tmp_path) -> None:
+    first = _sample(1)
+    updated = _sample(1).model_copy(update={"tags": ("prosody_available",)})
+    second = _sample(2)
+
+    assert backup_voice_eval_artifacts(tmp_path) is None
+    merged = merge_voice_candidates([first], [updated, second])
+    assert [sample.sample_id for sample in merged] == ["sample-001", "sample-002"]
+    assert merged[0].tags == ("prosody_available",)
+
+    (tmp_path / "samples-v1.jsonl").write_text("samples\n", encoding="utf-8")
+    backup_root = backup_voice_eval_artifacts(tmp_path)
+    assert backup_root is not None
+    assert (backup_root / "samples-v1.jsonl").read_text(encoding="utf-8") == "samples\n"
+
+
+@pytest.mark.asyncio
+async def test_prepare_meeting_voice_publishes_after_holdout_validation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    data_root = tmp_path / "corpus"
+    paths = CorpusPaths(data_root)
+    meetings_root = tmp_path / "meetings"
+    meeting_audio = (
+        meetings_root
+        / "meeting-20260818T154448Z-abc123"
+        / "audio"
+        / "input-microphone-20260818T154448724919Z-a21437bf.wav"
+    )
+    _write_wav(meeting_audio, [0.2] * 1600)
+    development = _selected_sample(0, VoiceEvalSplit.DEVELOPMENT)
+    holdout = _selected_sample(1, VoiceEvalSplit.HOLDOUT)
+    write_jsonl(paths.voice_candidates, [development, holdout])
+    write_jsonl(paths.voice_samples, [development, holdout])
+    write_json(
+        paths.voice_root / "transcription-report-development-v1.json",
+        {"no_speech_sample_ids": [development.sample_id]},
+    )
+
+    def fake_build_voice_candidates(_manifest, *, eval_root, source_system, **_kwargs):
+        assert source_system == "meeting_recorder"
+        clip_path = eval_root / "audio" / "meeting.wav"
+        _write_wav(clip_path, [0.3] * 16000)
+        candidate = _sample(2)
+        return [
+            candidate.model_copy(
+                update={
+                    "provenance": candidate.provenance.model_copy(
+                        update={
+                            "source_system": "meeting_recorder",
+                            "session_id": "meeting:abc123",
+                        }
+                    ),
+                    "audio": candidate.audio.model_copy(
+                        update={
+                            "relative_path": "audio/meeting.wav",
+                            "clip_sha256": sha256_file(clip_path),
+                        }
+                    ),
+                }
+            )
+        ]
+
+    monkeypatch.setattr(
+        corpus_cli,
+        "build_voice_candidates",
+        fake_build_voice_candidates,
+    )
+    args = build_parser().parse_args(
+        [
+            "prepare-meeting-voice",
+            "--meetings-root",
+            str(meetings_root),
+            "--data-root",
+            str(data_root),
+            "--development-count",
+            "1",
+            "--confirm",
+            "SELF_AUDIO_ONLY",
+        ]
+    )
+
+    assert await corpus_cli._run_async(args) == 0
+
+    samples = read_jsonl(paths.voice_samples, VoiceEvalSampleV1)
+    holdout_ids = {
+        sample.sample_id
+        for sample in samples
+        if sample.split is VoiceEvalSplit.HOLDOUT
+    }
+    assert holdout_ids == {holdout.sample_id}
+    assert any(sample.provenance.source_system == "meeting_recorder" for sample in samples)
+    assert (paths.voice_root / "audio" / "meeting.wav").is_file()
+    assert paths.voice_meeting_manifest.is_file()
+
+
+@pytest.mark.asyncio
+async def test_prepare_meeting_voice_does_not_publish_when_refill_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    data_root = tmp_path / "corpus"
+    paths = CorpusPaths(data_root)
+    meetings_root = tmp_path / "meetings"
+    meeting_audio = (
+        meetings_root
+        / "meeting-20260818T154448Z-abc123"
+        / "audio"
+        / "input-microphone-20260818T154448724919Z-a21437bf.wav"
+    )
+    _write_wav(meeting_audio, [0.2] * 1600)
+    existing = _sample(0)
+    write_jsonl(paths.voice_candidates, [existing])
+    original_candidates = paths.voice_candidates.read_bytes()
+
+    def fake_build_voice_candidates(_manifest, *, eval_root, **_kwargs):
+        clip_path = eval_root / "audio" / "meeting.wav"
+        _write_wav(clip_path, [0.3] * 16000)
+        candidate = _sample(2)
+        return [
+            candidate.model_copy(
+                update={
+                    "audio": candidate.audio.model_copy(
+                        update={
+                            "relative_path": "audio/meeting.wav",
+                            "clip_sha256": sha256_file(clip_path),
+                        }
+                    )
+                }
+            )
+        ]
+
+    monkeypatch.setattr(
+        corpus_cli,
+        "build_voice_candidates",
+        fake_build_voice_candidates,
+    )
+    args = build_parser().parse_args(
+        [
+            "prepare-meeting-voice",
+            "--meetings-root",
+            str(meetings_root),
+            "--data-root",
+            str(data_root),
+            "--confirm",
+            "SELF_AUDIO_ONLY",
+        ]
+    )
+
+    with pytest.raises(VoiceEvalError, match="Brak raportu development"):
+        await corpus_cli._run_async(args)
+
+    assert paths.voice_candidates.read_bytes() == original_candidates
+    assert not paths.voice_meeting_manifest.exists()
+    assert not (paths.voice_root / "audio" / "meeting.wav").exists()
 
 
 def test_audio_asset_rejects_path_traversal() -> None:

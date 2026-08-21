@@ -2384,7 +2384,10 @@ class ActionRegistry:
             message = f"Powiedz: „{example}”.{confirmation}"
         elif relevant and asks_if:
             descriptions = "; ".join(
-                f"{item['spoken_name']}, na przykład „{(item.get('positive_examples') or [item['label']])[0]}”"
+                (
+                    f"{item['spoken_name']}, na przykład "
+                    f"„{(item.get('positive_examples') or [item['label']])[0]}”"
+                )
                 for item in relevant
             )
             message = f"Tak, najbliższe realne możliwości to: {descriptions}."
