@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .actions import ActionRegistry
@@ -541,6 +542,10 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
+)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
 )
 
 

@@ -2,8 +2,8 @@
 
 **Wersja projektu:** 0.2.0  
 **Platforma:** Windows, uruchomienie lokalne  
-**Stan dokumentu:** 11 sierpnia 2026
-**Repozytorium:** `C:\Users\marci\VoiceLoop`
+**Stan dokumentu:** 21 sierpnia 2026
+**Repozytorium:** katalog sklonowanego repozytorium
 
 ---
 
@@ -29,7 +29,7 @@ Poniższy blok można wkleić jako pierwszą wiadomość do innego AI:
 
 ```text
 Kontynuujesz projekt VoiceLoop znajdujący się w:
-C:\Users\marci\VoiceLoop
+<ścieżka-do-repozytorium>\VoiceLoop
 
 VoiceLoop to lokalny asystent Windows z bezpiecznym rdzeniem FastAPI.
 Gemini jest głównym mózgiem rozmowy. Venice pozostaje opcjonalnym providerem
@@ -114,11 +114,11 @@ Stan zweryfikowany na żywym systemie:
 Aktualne modele:
 
 - konfigurowalny model rozmowy: `gemini-3.6-flash`,
-- opcjonalny provider: `venice-uncensored-1-2`,
-- lokalny fallback: `qwen2.5-14b-instruct-1m-abliterated`,
+- opcjonalny provider: `venice-model-id`,
+- lokalny fallback: `qwen2.5-14b-instruct`,
 - embeddingi: `text-embedding-nomic-embed-text-v2-moe`.
 
-Aktualny przebieg to `541 passed, 1 skipped`; pomijany jest prywatny replay bez
+Aktualny przebieg to `545 passed, 1 skipped`; pomijany jest prywatny replay bez
 lokalnych transkryptów. Wynik pytest i Ruff publikuje również workflow CI.
 
 ---
@@ -386,7 +386,7 @@ obsługiwać wyszukiwanie. Obowiązują go te same lokalne kontrakty i allowlist
 Model:
 
 ```text
-qwen2.5-14b-instruct-1m-abliterated
+qwen2.5-14b-instruct
 ```
 
 Odpowiada za awaryjne planowanie, gdy provider główny nie może odpowiedzieć, oraz za
@@ -418,30 +418,25 @@ Nie odpowiada za rozmowę ani planowanie. Zwracany wektor ma obecnie
 
 Skrypt `scripts/start-screenpipe.ps1` uruchamia Screenpipe z:
 
-- wszystkimi monitorami,
 - wybranym fizycznym mikrofonem,
 - fizycznymi wyjściami audio,
-- zdarzeniami klawiatury,
-- zdarzeniami schowka,
-- zdarzeniami przewijania,
 - retencją 14 dni,
+- redakcją PII włączoną,
 - telemetrią wyłączoną,
 - lokalnym API chronionym tokenem.
 
-Globalna transkrypcja Screenpipe jest wyłączona.
+Globalna transkrypcja Screenpipe jest wyłączona. Skrypt nie nadpisuje list
+ignorowanych ani dołączonych okien i nie wymusza przechwytywania schowka,
+klawiatury lub wszystkich monitorów.
 
 ### 9.2. Ważna uwaga prywatności
 
-Konfiguracja Screenpipe jest szeroka:
-
-- `ignore-incognito-windows=false`,
-- `use-pii-removal=false`,
-- `capture-on-keystroke=true`,
-- `capture-on-clipboard=true`.
-
-To oznacza, że lokalny magazyn Screenpipe może zawierać bardzo wrażliwe dane.
+Screenpipe pozostaje narzędziem szerokiego przechwytywania. Przed uruchomieniem
+użytkownik powinien skonfigurować ignorowane aplikacje i okna (np. menedżer
+haseł, bankowość i okna prywatne) oraz sprawdzić wybrane urządzenia audio.
 Nie wolno kopiować katalogu `%USERPROFILE%\.screenpipe` do repozytorium ani
-udostępniać go bez świadomej decyzji użytkownika.
+udostępniać go bez świadomej decyzji użytkownika. Funkcje VoiceLoop korzystające
+z Screenpipe są domyślnie wyłączone.
 
 ### 9.3. Vector memory worker
 
@@ -945,14 +940,14 @@ GEMINI_MODEL=gemini-3.6-flash
 CLOUD_LLM_ENABLED=false
 CLOUD_LLM_BASE_URL=https://api.venice.ai/api/v1
 CLOUD_LLM_API_KEY=
-CLOUD_LLM_MODEL=venice-uncensored-1-2
+CLOUD_LLM_MODEL=venice-model-id
 ```
 
 ### Qwen jako fallback
 
 ```text
 LM_STUDIO_BASE_URL=http://127.0.0.1:1234/v1
-LM_STUDIO_MODEL=qwen2.5-14b-instruct-1m-abliterated
+LM_STUDIO_MODEL=qwen2.5-14b-instruct
 ```
 
 ### Embeddingi
@@ -967,13 +962,16 @@ VECTOR_MEMORY_CONTEXT_LIMIT=8
 ### Screenpipe
 
 ```text
-SCREENPIPE_ENABLED=true
+SCREENPIPE_ENABLED=false
 SCREENPIPE_BASE_URL=http://127.0.0.1:3030
 SCREENPIPE_LOOKBACK_DAYS=14
-SCREENPIPE_VECTOR_MEMORY_ENABLED=true
+SCREENPIPE_VECTOR_MEMORY_ENABLED=false
 SCREENPIPE_VECTOR_POLL_SECONDS=120
 SCREENPIPE_VECTOR_RECENT_MINUTES=60
 ```
+
+Zmień odpowiednie wartości na `true` dopiero po świadomym skonfigurowaniu
+Screenpipe i zakresu przechwytywania.
 
 ### Deepgram
 
@@ -1004,13 +1002,13 @@ W LM Studio:
 1. uruchom Local Server na `127.0.0.1:1234`,
 2. załaduj:
    - `text-embedding-nomic-embed-text-v2-moe`,
-   - `qwen2.5-14b-instruct-1m-abliterated`,
+   - `qwen2.5-14b-instruct`,
 3. upewnij się, że oba modele mają status READY.
 
 ### 21.2. Cały stack
 
 ```powershell
-cd C:\Users\marci\VoiceLoop
+cd <ścieżka-do-repozytorium>\VoiceLoop
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
 ```
 
@@ -1192,7 +1190,7 @@ VoiceLoop\
 7. `open_url` nie wymaga potwierdzenia, ale sprawdza protokół i poprawność URL.
 8. Istniejące makro UI.Vision nadal jest zaufanym kodem automatyzacji; walidacja
    ścieżki nie analizuje bezpieczeństwa jego treści.
-9. Model „uncensored/abliterated” nie zastępuje lokalnej polityki bezpieczeństwa.
+9. Żaden model dostawcy nie zastępuje lokalnej polityki bezpieczeństwa.
 10. Hume pozostaje wyłączonym eksperymentem; włączenie wysyła audio do chmury.
 
 ---

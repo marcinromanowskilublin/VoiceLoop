@@ -1,9 +1,6 @@
 param(
     [int]$RetentionDays = 14,
     [int]$AudioChunkSeconds = 15,
-    [int]$IdleCaptureIntervalMs = 5000,
-    [int]$VisualCheckIntervalMs = 1000,
-    [int]$MinCaptureIntervalMs = 1500,
     [switch]$Restart
 )
 
@@ -40,54 +37,6 @@ function Set-EnvValue([string]$Path, [string]$Name, [string]$Value) {
     Set-Content -LiteralPath $Path -Value $content -Encoding utf8
 }
 
-function Set-UnfilteredCaptureSettings([string]$StorePath) {
-    if (-not (Test-Path -LiteralPath $StorePath)) {
-        return
-    }
-    $store = Get-Content -LiteralPath $StorePath -Raw | ConvertFrom-Json
-    if (-not $store.settings) {
-        return
-    }
-    $values = [ordered]@{
-        appContext = 'both'
-        asyncImagePiiRedaction = $false
-        asyncPiiRedaction = $false
-        audioCaptureMode = 'always'
-        captureOnClipboard = $true
-        captureOnKeystroke = $true
-        captureScroll = $true
-        disableClickCapture = $false
-        disableClipboardCapture = $false
-        disableKeyboardCapture = $false
-        enhancedIncognitoDetection = $false
-        idleCaptureIntervalMs = $IdleCaptureIntervalMs
-        ignoreIncognitoWindows = $false
-        minCaptureIntervalMs = $MinCaptureIntervalMs
-        pauseOnDrmContent = $false
-        piiRedactionPseudonyms = $false
-        redactAgentSessionSecrets = $false
-        scheduleEnabled = $false
-        usePiiRemoval = $false
-        visualCheckIntervalMs = $VisualCheckIntervalMs
-    }
-    foreach ($entry in $values.GetEnumerator()) {
-        $store.settings |
-            Add-Member -MemberType NoteProperty -Name $entry.Key -Value $entry.Value -Force
-    }
-    foreach (
-        $name in @('ignoredMeetingApps', 'ignoredUrls', 'ignoredWindows', 'includedWindows')
-    ) {
-        $store.settings |
-            Add-Member -MemberType NoteProperty -Name $name -Value @() -Force
-    }
-    $json = $store | ConvertTo-Json -Depth 100 -Compress
-    [System.IO.File]::WriteAllText(
-        $StorePath,
-        $json,
-        [System.Text.UTF8Encoding]::new($false)
-    )
-}
-
 $screenpipeCommand = Get-Command screenpipe -ErrorAction SilentlyContinue
 if (-not $screenpipeCommand) {
     throw "Nie znaleziono Screenpipe w PATH. Zainstaluj pakiet screenpipe CLI."
@@ -115,7 +64,6 @@ if ($Restart) {
     }
 }
 
-Set-UnfilteredCaptureSettings -StorePath (Join-Path $dataDir 'store.bin')
 $env:SCREENPIPE_KEEP_NORMAL_PRIORITY = '1'
 
 $token = (& screenpipe auth token 2>$null | Out-String).Trim()
@@ -169,21 +117,13 @@ $arguments = @(
     '--audio-chunk-duration', [string][Math]::Max(10, $AudioChunkSeconds),
     '--audio-transcription-engine', 'disabled',
     '--use-system-default-audio=false',
-    '--use-all-monitors',
     '--language', 'polish',
     '--app-context', 'both',
-    '--ignore-incognito-windows=false',
     '--disable-telemetry',
     '--api-auth',
-    '--use-pii-removal=false',
+    '--use-pii-removal=true',
     '--retention-days', [string][Math]::Max(1, $RetentionDays),
-    '--retention-mode', 'all',
-    '--capture-on-keystroke', 'true',
-    '--capture-on-clipboard', 'true',
-    '--capture-scroll', 'true',
-    '--idle-capture-interval-ms', [string][Math]::Max(1000, $IdleCaptureIntervalMs),
-    '--visual-check-interval-ms', [string][Math]::Max(250, $VisualCheckIntervalMs),
-    '--min-capture-interval-ms', [string][Math]::Max(500, $MinCaptureIntervalMs)
+    '--retention-mode', 'all'
 )
 foreach ($device in $audioDevices) {
     $arguments += @('--audio-device', $device)
@@ -191,10 +131,11 @@ foreach ($device in $audioDevices) {
 
 Write-Output (
     (
-        "Uruchamiam Screenpipe: 2 monitory, mikrofon i {0} wyjsc audio, " +
-        "pelne zdarzenia wejscia, OCR co najmniej co {1}s, retencja {2} dni. " +
-        "Transkrypcja globalna wylaczona."
-    ) -f $physicalOutputs.Count, [Math]::Round($IdleCaptureIntervalMs / 1000, 1), $RetentionDays
+        "Uruchamiam Screenpipe z zachowaniem ustawien prywatnosci uzytkownika, " +
+        "redakcja PII, mikrofonem i {0} wyjsciami audio; retencja {1} dni. " +
+        "Transkrypcja globalna jest wylaczona. Skonfiguruj ignorowane okna " +
+        "w Screenpipe przed przechwytywaniem danych wrazliwych."
+    ) -f $physicalOutputs.Count, $RetentionDays
 )
 
 & screenpipe @arguments

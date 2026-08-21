@@ -77,7 +77,7 @@
 </head>
 <body>
   <article><h1 id="voiceloop-dokumentacja-architektury-i-handoff-dla-kolejnego-ai">VoiceLoop — dokumentacja architektury i handoff dla kolejnego AI</h1>
-<p><strong>Wersja projektu:</strong> 0.2.0 <strong>Platforma:</strong> Windows, uruchomienie lokalne <strong>Stan dokumentu:</strong> 11 sierpnia 2026 <strong>Repozytorium:</strong> <code>C:\Users\marci\VoiceLoop</code></p>
+<p><strong>Wersja projektu:</strong> 0.2.0 <strong>Platforma:</strong> Windows, uruchomienie lokalne <strong>Stan dokumentu:</strong> 21 sierpnia 2026 <strong>Repozytorium:</strong> katalog sklonowanego repozytorium</p>
 <hr><section class="toc"><h2>Spis treści</h2><ul><li class="level-2"><a href="#1-po-co-istnieje-ten-dokument">1. Po co istnieje ten dokument</a></li>
 <li class="level-2"><a href="#2-prompt-startowy-dla-kolejnego-chatu-lub-agenta">2. Prompt startowy dla kolejnego chatu lub agenta</a></li>
 <li class="level-2"><a href="#3-cel-produktu">3. Cel produktu</a></li>
@@ -178,7 +178,7 @@
 <h2 id="2-prompt-startowy-dla-kolejnego-chatu-lub-agenta">2. Prompt startowy dla kolejnego chatu lub agenta</h2>
 <p>Poniższy blok można wkleić jako pierwszą wiadomość do innego AI:</p>
 <pre><code class="language-text">Kontynuujesz projekt VoiceLoop znajdujący się w:
-C:\Users\marci\VoiceLoop
+&lt;ścieżka-do-repozytorium&gt;\VoiceLoop
 
 VoiceLoop to lokalny asystent Windows z bezpiecznym rdzeniem FastAPI.
 Gemini jest głównym mózgiem rozmowy. Venice pozostaje opcjonalnym providerem
@@ -313,11 +313,11 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <p>Aktualne modele:</p>
 <ul>
 <li>konfigurowalny model rozmowy: <code>gemini-3.6-flash</code>,</li>
-<li>opcjonalny provider: <code>venice-uncensored-1-2</code>,</li>
-<li>lokalny fallback: <code>qwen2.5-14b-instruct-1m-abliterated</code>,</li>
+<li>opcjonalny provider: <code>venice-model-id</code>,</li>
+<li>lokalny fallback: <code>qwen2.5-14b-instruct</code>,</li>
 <li>embeddingi: <code>text-embedding-nomic-embed-text-v2-moe</code>.</li>
 </ul>
-<p>Aktualny przebieg to <code>541 passed, 1 skipped</code>; pomijany jest prywatny replay bez lokalnych transkryptów. Wynik pytest i Ruff publikuje również workflow CI.</p>
+<p>Aktualny przebieg to <code>545 passed, 1 skipped</code>; pomijany jest prywatny replay bez lokalnych transkryptów. Wynik pytest i Ruff publikuje również workflow CI.</p>
 <hr>
 <h2 id="5-architektura-wysokiego-poziomu">5. Architektura wysokiego poziomu</h2>
 <pre><code class="language-text">                         WEJŚCIA
@@ -557,7 +557,7 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <p>Venice może przejąć planowanie po ustawieniu <code>LLM_PRIMARY=venice</code>/<code>cloud</code> oraz obsługiwać wyszukiwanie. Obowiązują go te same lokalne kontrakty i allowlista.</p>
 <h3 id="8-3-qwen-2-5-14b-lokalny-fallback">8.3. Qwen 2.5 14B — lokalny fallback</h3>
 <p>Model:</p>
-<pre><code class="language-text">qwen2.5-14b-instruct-1m-abliterated</code></pre>
+<pre><code class="language-text">qwen2.5-14b-instruct</code></pre>
 <p>Odpowiada za awaryjne planowanie, gdy provider główny nie może odpowiedzieć, oraz za lokalny <code>behavior digest</code> aktywności Screenpipe: streszczenie, temat, intencję, decyzje i kontekst osób. Nie powinien być mylony z modelem embeddingowym.</p>
 <h3 id="8-4-nomic-embed-lokalny-model-wektorowy">8.4. Nomic Embed — lokalny model wektorowy</h3>
 <p>Model:</p>
@@ -574,26 +574,16 @@ Następnie opisz, które pliki zamierzasz zmienić i dlaczego.</code></pre>
 <h3 id="9-1-co-rejestruje-screenpipe">9.1. Co rejestruje Screenpipe</h3>
 <p>Skrypt <code>scripts/start-screenpipe.ps1</code> uruchamia Screenpipe z:</p>
 <ul>
-<li>wszystkimi monitorami,</li>
 <li>wybranym fizycznym mikrofonem,</li>
 <li>fizycznymi wyjściami audio,</li>
-<li>zdarzeniami klawiatury,</li>
-<li>zdarzeniami schowka,</li>
-<li>zdarzeniami przewijania,</li>
 <li>retencją 14 dni,</li>
+<li>redakcją PII włączoną,</li>
 <li>telemetrią wyłączoną,</li>
 <li>lokalnym API chronionym tokenem.</li>
 </ul>
-<p>Globalna transkrypcja Screenpipe jest wyłączona.</p>
+<p>Globalna transkrypcja Screenpipe jest wyłączona. Skrypt nie nadpisuje list ignorowanych ani dołączonych okien i nie wymusza przechwytywania schowka, klawiatury lub wszystkich monitorów.</p>
 <h3 id="9-2-wa-na-uwaga-prywatno-ci">9.2. Ważna uwaga prywatności</h3>
-<p>Konfiguracja Screenpipe jest szeroka:</p>
-<ul>
-<li><code>ignore-incognito-windows=false</code>,</li>
-<li><code>use-pii-removal=false</code>,</li>
-<li><code>capture-on-keystroke=true</code>,</li>
-<li><code>capture-on-clipboard=true</code>.</li>
-</ul>
-<p>To oznacza, że lokalny magazyn Screenpipe może zawierać bardzo wrażliwe dane. Nie wolno kopiować katalogu <code>%USERPROFILE%\.screenpipe</code> do repozytorium ani udostępniać go bez świadomej decyzji użytkownika.</p>
+<p>Screenpipe pozostaje narzędziem szerokiego przechwytywania. Przed uruchomieniem użytkownik powinien skonfigurować ignorowane aplikacje i okna (np. menedżer haseł, bankowość i okna prywatne) oraz sprawdzić wybrane urządzenia audio. Nie wolno kopiować katalogu <code>%USERPROFILE%\.screenpipe</code> do repozytorium ani udostępniać go bez świadomej decyzji użytkownika. Funkcje VoiceLoop korzystające z Screenpipe są domyślnie wyłączone.</p>
 <h3 id="9-3-vector-memory-worker">9.3. Vector memory worker</h3>
 <p><code>ScreenpipeVectorMemoryWorker</code>:</p>
 <ol>
@@ -1139,22 +1129,23 @@ GEMINI_MODEL=gemini-3.6-flash</code></pre>
 <pre><code class="language-text">CLOUD_LLM_ENABLED=false
 CLOUD_LLM_BASE_URL=https://api.venice.ai/api/v1
 CLOUD_LLM_API_KEY=
-CLOUD_LLM_MODEL=venice-uncensored-1-2</code></pre>
+CLOUD_LLM_MODEL=venice-model-id</code></pre>
 <h3 id="qwen-jako-fallback">Qwen jako fallback</h3>
 <pre><code class="language-text">LM_STUDIO_BASE_URL=http://127.0.0.1:1234/v1
-LM_STUDIO_MODEL=qwen2.5-14b-instruct-1m-abliterated</code></pre>
+LM_STUDIO_MODEL=qwen2.5-14b-instruct</code></pre>
 <h3 id="embeddingi">Embeddingi</h3>
 <pre><code class="language-text">LOCAL_EMBEDDINGS_ENABLED=true
 LOCAL_EMBEDDINGS_MODEL=text-embedding-nomic-embed-text-v2-moe
 LOCAL_EMBEDDINGS_TIMEOUT_SECONDS=30
 VECTOR_MEMORY_CONTEXT_LIMIT=8</code></pre>
 <h3 id="screenpipe">Screenpipe</h3>
-<pre><code class="language-text">SCREENPIPE_ENABLED=true
+<pre><code class="language-text">SCREENPIPE_ENABLED=false
 SCREENPIPE_BASE_URL=http://127.0.0.1:3030
 SCREENPIPE_LOOKBACK_DAYS=14
-SCREENPIPE_VECTOR_MEMORY_ENABLED=true
+SCREENPIPE_VECTOR_MEMORY_ENABLED=false
 SCREENPIPE_VECTOR_POLL_SECONDS=120
 SCREENPIPE_VECTOR_RECENT_MINUTES=60</code></pre>
+<p>Zmień odpowiednie wartości na <code>true</code> dopiero po świadomym skonfigurowaniu Screenpipe i zakresu przechwytywania.</p>
 <h3 id="deepgram">Deepgram</h3>
 <pre><code class="language-text">DEEPGRAM_API_KEY=
 DEEPGRAM_MODEL=nova-3
@@ -1177,13 +1168,13 @@ CONVERSATION_IGNORE_MULTI_SPEAKER=true
 </ol>
 <ul>
 <li><code>text-embedding-nomic-embed-text-v2-moe</code>,</li>
-<li><code>qwen2.5-14b-instruct-1m-abliterated</code>,</li>
+<li><code>qwen2.5-14b-instruct</code>,</li>
 </ul>
 <ol>
 <li>upewnij się, że oba modele mają status READY.</li>
 </ol>
 <h3 id="21-2-caly-stack">21.2. Cały stack</h3>
-<pre><code class="language-powershell">cd C:\Users\marci\VoiceLoop
+<pre><code class="language-powershell">cd &lt;ścieżka-do-repozytorium&gt;\VoiceLoop
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-all.ps1</code></pre>
 <p>Opcjonalny limit oczekiwania:</p>
 <pre><code class="language-powershell">.\scripts\start-all.ps1 -TimeoutSeconds 600</code></pre>
@@ -1388,7 +1379,7 @@ logs\uivision_*.txt</code></pre>
 </ol>
 <p>ścieżki nie analizuje bezpieczeństwa jego treści.</p>
 <ol>
-<li>Model „uncensored/abliterated” nie zastępuje lokalnej polityki bezpieczeństwa.</li>
+<li>Żaden model dostawcy nie zastępuje lokalnej polityki bezpieczeństwa.</li>
 <li>Hume pozostaje wyłączonym eksperymentem; włączenie wysyła audio do chmury.</li>
 </ol>
 <hr>

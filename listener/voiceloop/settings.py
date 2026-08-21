@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.6-flash"
     gemini_timeout_seconds: float = 90.0
 
     web_search_enabled: bool = True
@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     vector_memory_ttl_days: int = 14
     vector_memory_prune_enabled: bool = False
     vector_memory_prune_interval_seconds: int = 86400
-    behavior_digest_enabled: bool = True
+    behavior_digest_enabled: bool = False
     behavior_digest_model: str | None = None
     behavior_digest_timeout_seconds: float = 240.0
     behavior_digest_poll_seconds: int = 300
@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     corpus_style_profile_file: str = "style/profile-v1.json"
     corpus_routing_margin_threshold: float = 0.05
 
-    screenpipe_enabled: bool = True
+    screenpipe_enabled: bool = False
     screenpipe_base_url: str = "http://127.0.0.1:3030"
     screenpipe_api_token: SecretStr | None = None
     screenpipe_timeout_seconds: float = 5.0
@@ -142,16 +142,16 @@ class Settings(BaseSettings):
     screenpipe_deepgram_call_apps: str = (
         "zoom,teams,discord,webex,skype,slack"
     )
-    screenpipe_deepgram_enabled: bool = True
+    screenpipe_deepgram_enabled: bool = False
     screenpipe_deepgram_poll_seconds: int = 30
     screenpipe_deepgram_meeting_grace_seconds: int = 90
     screenpipe_deepgram_max_file_mb: int = 100
     meeting_recording_poll_seconds: int = 5
     meeting_recording_finalize_seconds: int = 25
-    meeting_recording_archive_audio: bool = True
+    meeting_recording_archive_audio: bool = False
     meeting_recording_audio_chunk_seconds: int = 15
     meeting_recording_output_sample_rate: int = 48000
-    screenpipe_vector_memory_enabled: bool = True
+    screenpipe_vector_memory_enabled: bool = False
     screenpipe_vector_poll_seconds: int = 300
     screenpipe_vector_recent_minutes: int = 10
 
@@ -289,12 +289,16 @@ class Settings(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         token_path = self.data_dir / "voiceloop.token"
         if token_path.exists():
+            if os.name == "posix":
+                token_path.chmod(0o600)
             value = token_path.read_text(encoding="utf-8").strip()
             if value:
                 return value
 
         value = secrets.token_urlsafe(32)
         token_path.write_text(value, encoding="utf-8")
+        if os.name == "posix":
+            token_path.chmod(0o600)
         return value
 
 

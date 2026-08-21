@@ -112,9 +112,6 @@ from .voice_metrics import (
 )
 from .voice_review import render_voice_annotation_review
 
-DEFAULT_AUDIO = Path(r"C:\Users\marci\Desktop\lmstudio-transcript-analysis\transcript.txt")
-DEFAULT_CURSOR_ROOT = Path(r"C:\Users\marci\.cursor\projects")
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -1638,8 +1635,16 @@ async def _run_async(args: argparse.Namespace) -> int:
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--audio", type=Path, default=DEFAULT_AUDIO)
-    parser.add_argument("--cursor-root", type=Path, default=DEFAULT_CURSOR_ROOT)
+    parser.add_argument(
+        "--audio",
+        type=Path,
+        help="Opcjonalny lokalny plik transkrypcji audio.",
+    )
+    parser.add_argument(
+        "--cursor-root",
+        type=Path,
+        help="Opcjonalny lokalny katalog projektów Cursor.",
+    )
     parser.add_argument("--data-root", type=Path)
 
 

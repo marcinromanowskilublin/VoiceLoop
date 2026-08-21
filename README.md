@@ -17,12 +17,13 @@ about making that loop controllable, inspectable, and testable.
 
 > **Portfolio status:** the core, safety model, voice-evaluation pipeline, API,
 > and local tooling are verified. Hume and n8n are explicitly optional or
-> experimental and are not presented as production features.
+> experimental and are not presented as production features. Screenpipe and
+> every feature that processes broad computer activity are opt-in.
 
 ## At a glance
 
 - **Focus:** applied AI, safe tool use, Polish voice UX, and measurable quality.
-- **Proof:** 541 tests pass; one private-data replay is intentionally skipped;
+- **Proof:** 545 tests pass; one private-data replay is intentionally skipped;
   full Ruff and Windows CI pass.
 - **Platform:** Windows and Python 3.11, with a local FastAPI control plane.
 - **Cloud boundary:** Deepgram and optional model/TTS providers may use cloud
@@ -256,6 +257,9 @@ The default configuration is local-first:
 LLM_PRIMARY=local
 N8N_ENABLED=false
 HUME_EMOTION_ANALYSIS_ENABLED=false
+SCREENPIPE_ENABLED=false
+SCREENPIPE_DEEPGRAM_ENABLED=false
+MEETING_RECORDING_ARCHIVE_AUDIO=false
 AUTO_START_LISTENING=false
 AUTO_START_CONVERSATION=false
 ```
@@ -282,7 +286,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
 ```
 
 This starts Qdrant, Screenpipe, and the VoiceLoop core. It does not
-automatically enable n8n or Hume.
+automatically enable n8n or Hume. Before using it, configure Screenpipe's
+ignored applications and windows. The startup script preserves those privacy
+settings and keeps PII removal enabled.
 
 ## Test and verify
 
@@ -295,7 +301,7 @@ From `listener/`:
   ..\scripts\holding-commands\server.py `
   ..\scripts\calibration-phrases\server.py
 
-.\.venv\Scripts\python -m pytest -c pyproject.toml -q
+.\.venv\Scripts\python -m pytest -c ..\pytest.ini -q
 ```
 
 Safe API smoke test:
@@ -359,7 +365,11 @@ demo.
 
 Screenpipe is an optional source of broad local computer context. A full
 Screenpipe setup may capture screens, audio, clipboard, and input activity.
-It is intentionally excluded from the controlled portfolio demo.
+It is disabled by default and intentionally excluded from the controlled
+portfolio demo. `scripts/start-screenpipe.ps1` does not clear ignored-window
+lists or disable Screenpipe's PII removal. Enabling meeting transcription sends
+eligible meeting audio to Deepgram; enabling Hume separately may send audio
+chunks to Hume.
 
 ## Privacy boundaries
 
@@ -399,6 +409,8 @@ VoiceLoop/
 - Cloud STT, LLM, and TTS providers require credentials and may incur cost.
 - Diarization distinguishes speakers in a stream; it is not voice biometrics.
 - Screenpipe requires careful privacy configuration.
+- Existing Screenpipe privacy settings and exclusion lists remain the
+  operator's responsibility.
 - The n8n webhook still relies on loopback rather than application-level
   authentication.
 - Hume remains an unverified experiment.
