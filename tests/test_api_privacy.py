@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from voiceloop.app import app
 
 

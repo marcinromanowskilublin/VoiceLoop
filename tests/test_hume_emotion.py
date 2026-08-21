@@ -1,5 +1,4 @@
 import pytest
-
 from voiceloop.hume_emotion import HumeEmotionClient
 from voiceloop.settings import Settings
 
