@@ -17,7 +17,8 @@ _EXPLICIT_WEB = re.compile(
 )
 _CURRENT_INFORMATION = re.compile(
     r"\b(?:dzis\w*|teraz|obecnie|aktualn\w*|najnowsz\w*|"
-    r"pogod\w*|kurs\w*|cen\w*|wiadomosc\w*|news\w*|"
+    r"pogod\w*|kurs(?:\s+(?:walut\w*|euro|dolara|funta|franka|"
+    r"zlot\w*|pln|eur|usd|gbp|chf))|cen\w*|wiadomosc\w*|news\w*|"
     r"wersj\w*|status\w*|notowani\w*|premier\w*)\b"
 )
 _PERSONAL_CONTEXT = re.compile(
