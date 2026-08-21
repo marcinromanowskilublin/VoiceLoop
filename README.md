@@ -1,510 +1,310 @@
-# VoiceLoop — hybrydowy asystent Windows
+# VoiceLoop
 
-VoiceLoop łączy polski głos, lokalny rdzeń FastAPI, typowane akcje Windows oraz
-opcjonalne modele i usługi: Gemini, Venice AI, LM Studio, Screenpipe, Qdrant,
-n8n, UI.Vision RPA i VoiceAttack.
+**What it is.** VoiceLoop is a local-first Polish voice assistant for Windows,
+built around a FastAPI core and a strict boundary between language models and
+operating-system actions.
 
-Szczegółowa dokumentacja architektury, handoff dla kolejnego AI i wersja PDF:
+**What it does.** It turns speech into either a natural conversation or a
+validated, typed action plan; executes only allowlisted actions; speaks the
+result; and lets the user interrupt the entire loop at any time.
 
-- [`docs/VOICELOOP_ARCHITECTURE_HANDOFF.md`](docs/VOICELOOP_ARCHITECTURE_HANDOFF.md)
-- [`docs/VOICELOOP_ARCHITECTURE_HANDOFF.pdf`](docs/VOICELOOP_ARCHITECTURE_HANDOFF.pdf)
-- [`docs/HANDOFF_MIKOLAJ.md`](docs/HANDOFF_MIKOLAJ.md) — szybki pakiet
-  przekazania projektu i checklista odbioru
-- [`docs/PROGRAM_DOKUMENTACJA_PL.md`](docs/PROGRAM_DOKUMENTACJA_PL.md) — skrócona
-  dokumentacja programu: budowa, działanie, wdrożenie, rozwój
-- [`docs/SAFE_USER_CORPUS.md`](docs/SAFE_USER_CORPUS.md) — lokalny korpus,
-  zestaw 120 próbek głosowych, prozodia i ewaluacja Routing V2
-- [`docs/PORTFOLIO_PL.md`](docs/PORTFOLIO_PL.md) — krótki, uczciwy opis
-  portfolio, granice prywatności i scenariusz demo
+**Why it exists.** Most assistant demos optimize for fluency and hide the hard
+parts: unsafe tool execution, accidental triggers, cloud privacy, unreliable
+audio, and results that cannot be measured. VoiceLoop is an engineering project
+about making that loop controllable, inspectable, and testable.
 
-```text
-mikrofon / panel / VoiceAttack
-             │
-             ▼
-     rdzeń VoiceLoop :8765
-       ├─ Deepgram Nova-3 (pl) — zawsze najpierw tekst
-      ├─ Gemini — główna rozmowa; zadanie trafia do typowanego planera
-       ├─ Azure Speech SDK → Azure REST → Windows TTS
-       ├─ LM Studio Qwen (fallback planera + trawienie)
-       ├─ LM Studio Nomic (embeddingi)
-       ├─ Screenpipe + Qdrant (5 named vectors)
-       ├─ SQLite (stan, historia i dual-write)
-       ├─ zgody, kolejka i STOP
-       └─ n8n (opcjonalny router, domyślnie wyłączony)
-             │
-             ▼
- Windows API / UI.Vision / VoiceAttack / opcjonalny workflow n8n
+[![VoiceLoop CI](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml)
+
+> **Portfolio status:** the core, safety model, voice-evaluation pipeline, API,
+> and local tooling are verified. Hume and n8n are explicitly optional or
+> experimental and are not presented as production features.
+
+## Why this project matters
+
+A voice assistant that can operate a computer has two very different jobs:
+
+1. understand open-ended human language;
+2. perform a small, controlled set of deterministic actions.
+
+VoiceLoop keeps those jobs separate. The model may interpret intent, but it
+cannot send arbitrary shell commands or lower an action's risk level. Every
+executable step must match a local `action_id`, pass argument validation, and
+go through the execution policy.
+
+This makes the project useful as a case study in:
+
+- applied and agentic AI engineering;
+- Polish conversational and voice interfaces;
+- safe model-to-tool boundaries;
+- local-first memory and privacy;
+- evaluation with frozen data and regression tests;
+- turning a prototype into a reproducible system.
+
+## Core capabilities
+
+### Polish voice interaction
+
+- Deepgram Nova-3 for Polish speech-to-text.
+- Managed conversation sessions with short-term context.
+- Barge-in that can stop model generation and speech playback.
+- Echo filtering around synthesized speech.
+- Multi-speaker guards based on diarization metadata.
+- Deterministic pause, resume, and global STOP commands.
+- Azure Speech SDK, Azure REST, and Windows TTS fallbacks.
+
+### Safe Windows actions
+
+- Static allowlist of executable `action_id` values.
+- Validated arguments instead of model-generated code.
+- Explicit risk levels controlled by local code.
+- Confirmation for high-risk operations.
+- Sequential execution and request deduplication.
+- Direct STOP path that bypasses the model and optional routers.
+- VoiceAttack and UI.Vision adapters for constrained Windows automation.
+
+### Local memory and context
+
+- SQLite for durable operational state and explicit memories.
+- Optional Qdrant collections with named vector spaces.
+- Optional Screenpipe ingestion through a local digest and privacy gate.
+- Bounded retrieval context instead of sending the complete local history.
+- Local Qwen and Nomic models through LM Studio.
+
+### Evaluation instead of demo-only claims
+
+- More than 500 unit and integration tests.
+- Current baseline: **541 passed, 1 skipped**.
+- The skipped test requires a private local replay dataset that is intentionally
+  not committed.
+- Frozen voice-evaluation split: 30 development and 90 holdout samples.
+- Audio provenance, hashes, deduplication, speaker confirmation, and manual
+  annotations.
+- Atomic metadata publication when adding meeting-microphone samples.
+- Windows CI on Python 3.11 with full Ruff and pytest runs.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Voice["Polish voice"] --> STT["Deepgram STT"]
+    Panel["Local web panel"] --> Core["FastAPI core"]
+    VoiceAttack["VoiceAttack"] --> Core
+    STT --> Core
+
+    Core --> Router["Conversation or task router"]
+    Router -->|"conversation"| LLM["Local or opt-in cloud LLM"]
+    Router -->|"task"| Plan["Validated action plan"]
+    Plan --> Policy["Allowlist and risk policy"]
+    Policy --> Executor["Sequential executor"]
+    Executor --> Windows["Windows and approved UI tools"]
+
+    LLM --> TTS["Azure or Windows TTS"]
+    Executor --> TTS
+    Stop["Global STOP"] --> Core
+
+    SQLite["SQLite"] <--> Core
+    Qdrant["Optional Qdrant"] <--> Core
+    Corpus["Private evaluation corpus"] --> Router
 ```
 
-LLM i n8n zwracają wyłącznie typowane `action_id` oraz argumenty. Nie mogą
-przekazać dowolnego polecenia powłoki do wykonania.
-
-## Rozmowa vs zadanie (bez rewolucji)
-
-Prosty flow:
-
-1. **Deepgram** zawsze zbiera tekst (ciągły nasłuch albo jednorazowo z VA).
-2. Powiedzenie **„Venice…” zawsze otwiera nową sesję rozmowy MAX IQ**.
-3. Kolejne wypowiedzi należą do tej samej sesji, zachowują jej kontekst i nie
-   wymagają ponownego słowa „Venice”.
-4. Znane, twarde komendy (`command_id` z VoiceAttack) idą od razu do akcji.
-5. W sesji Venice nadal rozróżnia:
-   - rozmowę → `intent=conversation`, naturalna odpowiedź przez Azure TTS,
-   - wyraźne zadanie → `intent=task`, kroki z lokalnej allowlisty.
-
-Sterowanie sesją:
-
-- `Venice, porozmawiajmy o...` → zaczyna nową rozmowę i zeruje kontekst
-  poprzedniej sesji,
-- następne pytania można mówić bez prefiksu,
-- `koniec rozmowy` / `zakończ rozmowę` → zamyka sesję,
-- `stop` / `przerwij` → po uzbrojeniu mikrofonu barge-in przerywa generowanie,
-  mowę Azure i wykonywane akcje, ale pozostawia sesję otwartą; przycisk/komenda
-  VoiceAttack STOP i API działają także w okresie ochronnym.
-
-Kontekst sesji obejmuje ostatnie 12 wiadomości użytkownika i asystenta. Jest
-trzymany w pamięci procesu: restart rdzenia zamyka sesję, a powiedzenie
-„Venice…” zaczyna ją od czystego kontekstu. Jeśli Deepgram nie usłyszy komendy
-przez głośną mowę Azure, można użyć stałej komendy **STOP** w VoiceAttack albo
-przycisku STOP w panelu.
-
-Poza aktywną sesją Venice nadal decyduje na podstawie treści: pytanie oznacza
-rozmowę, a konkretne czasowniki (`otwórz`, `minimalizuj`, `skopiuj`,
-`wyszukaj`, `zapamiętaj`) oznaczają zadanie.
-
-Style odpowiedzi:
-
-- sesja rozpoczęta przez `Venice ...` → MAX IQ,
-- `Asystencie ...` → zwięźle,
-- bez prefiksu i bez aktywnej sesji → balanced.
-
-### Polecenia wtrącone podczas rozmowy
-
-Aktywnej rozmowy nie trzeba przerywać ani przełączać ręcznie do VoiceAttack.
-Deepgram przekazuje całe zdanie do Venice, a Venice rozróżnia pytanie od
-lokalnego zadania. Przykład:
+The most important boundary is:
 
 ```text
-skopiuj mi ten mail, gdzie mam kursor, do schowka
+natural language
+    -> model interpretation
+    -> validated JSON schema
+    -> local action_id allowlist
+    -> local risk policy
+    -> sequential executor
 ```
 
-VoiceLoop wykonuje lokalną akcję `copy_email_under_cursor`, mówi krótko
-„Skopiowałem adres e-mail” dopiero po sukcesie i pozostawia sesję rozmowy
-aktywną. VoiceAttack nadal odpowiada za szybkie komendy stałe, wybudzanie i
-awaryjny STOP; nie wymaga osobnej komendy dla każdej naturalnej parafrazy.
+The model never becomes a shell.
 
-Głos: **Azure Speech SDK** (`pl-PL-ZofiaNeural`) z natywnym zatrzymaniem mowy.
-Jeśli SDK zawiedzie, VoiceLoop próbuje dotychczasowego Azure REST, a następnie
-lokalnego Windows TTS.
-Mózg rozmowy: **Gemini** (`LLM_PRIMARY=gemini`) albo **Venice**/lokalny Qwen.
-Gemini do wyszukiwania nadal używa osobnego `WEB_SEARCH_*`. Sterowanie PC:
-**Deepgram (STT) → VoiceLoop → VoiceAttack/akcje** (np. zmiana nazwy pod kursorem).
+## Conversation and task contracts
 
-### Kontrakt odpowiedzi modelu i diagnostyka opóźnień
+VoiceLoop uses two separate model contracts:
 
-Rozmowa i wykonywanie zadań używają dwóch oddzielnych kontraktów:
+- **Conversation:** the model returns a short natural-language response, which
+  may be sent to TTS.
+- **Task:** the planner returns structured JSON containing allowlisted
+  `action_id` values and validated arguments.
 
-- `intent=conversation` → model zwraca zwykły, krótki tekst po polsku; TTS nigdy
-  nie dostaje schematu ani opisu JSON,
-- zadanie → planer zwraca walidowany JSON Schema z `action_id` i argumentami,
-- ucięty lub niepoprawny JSON jest błędem protokołu i może uruchomić kontrolowany
-  retry/fallback; nie jest zamieniany na odpowiedź rozmowy,
-- odpowiedź rozmowy jest odrzucana i generowana ponownie, gdy API zwróci
-  `finish_reason=length`, inny niekońcowy status albo tekst bez końcowej
-  interpunkcji.
+Malformed or truncated task JSON is a protocol failure. It is not silently
+converted into a conversational answer.
 
-Dla Gemini ustawiany jest niski poziom reasoning, ale odpowiednio duży budżet
-completion. Zapobiega to sytuacji, w której tokeny myślenia zużywają cały limit,
-a odpowiedź kończy się na „Here is the JSON requested”.
+Known deterministic commands can bypass model planning entirely. Natural
+requests may use the planner, but execution always returns to the same local
+policy.
 
-Po każdym powrocie do słuchania log i zdarzenie SSE `conversation.timing`
-zawierają:
+## Safety model
+
+VoiceLoop is not a general-purpose shell agent.
+
+- Services bind to loopback.
+- Detailed health and the SSE event stream require a local token.
+- The browser panel sends the token in `X-VoiceLoop-Token`.
+- Gemini and Hume credentials are sent in headers, not query strings.
+- LLM output cannot reduce locally assigned risk.
+- High-risk steps require explicit confirmation.
+- Only one screen action executes at a time.
+- `request_id` and deduplication windows reduce repeated execution.
+- STOP cancels model work, TTS, queued work, and the active action.
+- `.env`, runtime data, recordings, logs, and tokens are excluded from Git.
+
+## Voice evaluation pipeline
+
+The private voice corpus is designed to preserve evaluation integrity:
 
 ```text
-tts_ms, cooldown_ms, deepgram_reconnect_ms
+local audio inventory
+    -> source and speaker gates
+    -> candidate segmentation
+    -> quality tags and deduplication
+    -> frozen development and holdout split
+    -> manual annotation
+    -> STT, routing, and prosody metrics
 ```
 
-Stan `listening_once` jest publikowany dopiero po rzeczywistym zestawieniu
-WebSocketu Deepgram.
-
-### Pełne TTS, przerwa czasowa i ochrona przed rozmową w tle
-
-Barge-in porównuje interim/final Deepgram z aktualnie czytanym tekstem. Echo
-głośnika pasujące do TTS — również krótkie, zniekształcone fragmenty 2–3 słów
-i końcówka odebrana tuż po ponownym otwarciu mikrofonu — jest ignorowane, więc
-asystentka nie wywołuje już `tts.stop()` własnym głosem. Bezpośredni zwrot
-`Asystencie…` omija ochronę końcówki. Po okresie ochronnym dokładne
-„stop”/„przerwij” działa już na interim; VoiceAttack i API mogą przerwać TTS od
-początku.
-Inna wypowiedź czeka na final Deepgram przed przerwaniem; sam niestabilny interim
-nie ucina zdania.
-Zdarzenie `conversation.tts_completed` podaje, czy odczyt zakończył się normalnie
-czy został świadomie przerwany.
-Timeout Azure SDK i awaryjnej ścieżki REST jest obliczany z długości tekstu oraz
-tempa głosu, dzięki czemu dłuższa odpowiedź nie kończy się po stałych 20 sekundach.
-
-Przerwa czasowa jest obsługiwana deterministycznie, bez wysyłania komendy do LLM:
-
-1. powiedz `Przerwij działanie na 10 minut` (liczba może być cyfrą albo polskim
-   słowem z zakresu 1–99, np. `dwie minuty`),
-2. asystentka zapyta `Czy na pewno wstrzymać działanie na 10 minut?`,
-3. powiedz `potwierdzam` albo `anuluj`,
-4. podczas przerwy zwykłe wypowiedzi są ignorowane; `wznów działanie`, `włącz się`
-   lub `koniec przerwy` wznawia pracę od razu,
-5. po zadanym czasie praca wznawia się automatycznie.
-
-Komenda jest przechwytywana także przy zwykłym ciągłym nasłuchu Deepgram, zanim
-transkrypt trafi do planera, więc pytanie o potwierdzenie nie zależy od LLM.
-
-Deepgram live używa `diarize_model=latest` i przekazuje identyfikatory mówców.
-Wypowiedź obejmująca co najmniej dwóch mówców jest ignorowana, chyba że zaczyna się
-od `Asystencie…`/`Venice…`. Dodatkowo po 30 sekundach bez nowej odpowiedzi kończy
-się okno dialogu bez wake worda; później trzeba ponownie zwrócić się do asystentki.
-To ogranicza przypadkowe reakcje na rozmowę obok, ale diarization nie jest
-biometrią: numer `speaker` nie identyfikuje właściciela i zeruje się przy nowym
-połączeniu WebSocket. Pełne rozpoznawanie właściciela wymaga osobnego enrollmentu
-głosu.
-
-## Aktualny stan
-
-Zweryfikowany rdzeń i dostępne integracje obejmują:
-
-- panel i lokalne API na `http://127.0.0.1:8765`,
-- LM Studio OpenAI API na `http://127.0.0.1:1234/v1`,
-- Gemini `gemini-3.6-flash` jako konfigurowalny model rozmowy,
-- Venice `venice-uncensored-1-2` jako opcjonalny provider chmurowy,
-- Qwen `qwen2.5-14b-instruct-1m-abliterated` jako lokalny fallback,
-- Nomic `text-embedding-nomic-embed-text-v2-moe` jako model embeddingowy,
-- ustrukturyzowane planowanie i wieloetapowy format planu,
-- lokalne metadane aktywnego okna i opcjonalny zrzut dla planera,
-- pamięć SQLite z jawnym potwierdzeniem zapisu,
-- lokalny Qdrant z wektorami `semantic`, `topic`, `intent`, `decision`
-  i `person_context`,
-- ciągłe lokalne trawienie aktywności przez Qwen także podczas pracy użytkownika,
-- szybkie wyszukiwanie internetowe (`search_web`) przez DuckDuckGo lub Brave,
-- Deepgram Nova-3 dla polskiego mikrofonu,
-- zamrożony lokalny zestaw 120 klipów audio (30 development / 90 holdout) z
-  timestampami, hashami, ręcznymi adnotacjami i analizą prozodii,
-- opcjonalny n8n Router v1, domyślnie wyłączony,
-- UI.Vision z wynikiem, logiem i timeoutem,
-- Azure Speech SDK jako główny głos, Azure REST i Windows TTS jako fallbacki,
-- przycisk STOP i deduplikacja komend.
-
-VoiceAttack wymaga jednorazowego ręcznego importu profilu, opisanego niżej.
-
-## Ważne: klucz Deepgram
-
-Poprzedni klucz był zapisany również w kodzie starego panelu, więc należy uznać
-go za ujawniony:
-
-1. unieważnij go w Deepgram Console,
-2. wygeneruj nowy,
-3. wpisz go wyłącznie do `listener\.env` jako `DEEPGRAM_API_KEY=...`.
-
-Panel nie przechowuje już klucza. `.env`, baza, logi i środowisko wirtualne są
-wykluczone przez `.gitignore`.
-
-## Uruchamianie
-
-### 1. LM Studio
-
-W LM Studio:
-
-1. załaduj `qwen2.5-14b-instruct-1m-abliterated` jako lokalny fallback,
-2. załaduj `text-embedding-nomic-embed-text-v2-moe` do embeddingów,
-3. otwórz **Developer → Local Server**,
-4. uruchom serwer na porcie `1234`.
-
-Konfiguracja została ograniczona do `127.0.0.1`, CORS jest wyłączony, a
-logowanie treści wrażliwych wyłączone. Jeśli LM Studio przywróci ustawienia po
-aktualizacji, health check pokaże problem.
-
-### 2. Wszystkie usługi
+Meeting samples can be prepared with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
+cd listener
+.\.venv\Scripts\python -m voiceloop.corpus prepare-meeting-voice `
+  --confirm SELF_AUDIO_ONLY
 ```
 
-Skrypt:
+The command:
 
-- sprawdza LM Studio,
-- synchronizuje makra UI.Vision do runtime,
-- uruchamia Qdrant w trwałym kontenerze Docker na `127.0.0.1:6333`,
-- uruchamia Screenpipe z pełnym lokalnym zapisem i retencją 14 dni,
-- pozostawia n8n wyłączone, dopóki nie zostanie uruchomione jawnie,
-- uruchamia rdzeń VoiceLoop,
-- czeka domyślnie do 300 sekund na wszystkie porty,
-- otwiera panel.
+- accepts only `input-microphone-*.wav`;
+- excludes output-channel audio;
+- stages generated candidates in a temporary directory;
+- verifies the frozen holdout before metadata changes;
+- creates a backup of existing evaluation artifacts;
+- publishes the candidates only after validation.
 
-Limit można zmienić, np.:
+The private corpus and all recordings remain under ignored `data/` paths.
+
+## Local voice-sample tools
+
+Two loopback-only panels help collect self-recorded samples:
 
 ```powershell
-.\scripts\start-all.ps1 -TimeoutSeconds 600
+python .\scripts\holding-commands\server.py
+python .\scripts\calibration-phrases\server.py
 ```
 
-Można też uruchamiać osobno:
+- `http://127.0.0.1:8791` — stable command set;
+- `http://127.0.0.1:8792` — varied Polish calibration phrases.
+
+They write only to local `data/` directories and do not upload audio. See
+[`scripts/VOICE_CAPTURE_TOOLS.md`](scripts/VOICE_CAPTURE_TOOLS.md).
+
+## Technology
+
+The verified implementation uses:
+
+- Python 3.11;
+- FastAPI and Uvicorn;
+- Pydantic models and settings;
+- Deepgram streaming and file transcription;
+- Gemini, Venice, or LM Studio-compatible model APIs;
+- Azure Speech and Windows TTS;
+- SQLite and optional Qdrant;
+- Screenpipe as an optional local context source;
+- VoiceAttack, UI Automation, and UI.Vision;
+- pytest, Ruff, and GitHub Actions.
+
+## Quick start
+
+### Requirements
+
+The project targets Windows. A minimal core demo needs:
+
+- Python 3.11;
+- a local `listener/.env` created from `.env.example`;
+- only the providers you explicitly choose to enable.
+
+A full local stack may additionally use:
+
+- LM Studio;
+- Docker Desktop for Qdrant;
+- Screenpipe;
+- VoiceAttack and UI.Vision.
+
+Hume and n8n are not required.
+
+### Configure
+
+```powershell
+copy .\listener\.env.example .\listener\.env
+```
+
+Keep secrets only in `listener/.env`. Do not commit or display that file.
+
+The default configuration is local-first:
 
 ```text
-scripts\start-n8n.bat
-scripts\start-core.bat
-powershell -ExecutionPolicy Bypass -File .\scripts\start-qdrant.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\start-screenpipe.ps1
+LLM_PRIMARY=local
+N8N_ENABLED=false
+HUME_EMOTION_ANALYSIS_ENABLED=false
+AUTO_START_LISTENING=false
+AUTO_START_CONVERSATION=false
 ```
 
-Screenpipe zapisuje dwa monitory, mikrofon, fizyczne wyjścia audio oraz zdarzenia
-wejścia, w tym klawiaturę, kliknięcia, schowek, przewijanie, okna prywatne oraz
-projekcje `memory` i `automation`. Redakcja tekstu, obrazów i PII jest wyłączona.
-API nadal nasłuchuje tylko na localhost. Globalny silnik transkrypcji Screenpipe
-jest wyłączony. Automatyczny worker wysyła do Deepgram audio zakończonych spotkań
-wykrytych przez Screenpipe; domeny i okna YouTube są blokowane bez wyjątków.
-Jawny tryb **Rozpocznij nagranie** omija detekcję spotkania: wyłącza odpowiedzi
-asystenta, zapisuje osobno PCM mikrofonu i WASAPI loopback aktywnego outputu,
-importuje zapasowe pliki Screenpipe, archiwizuje wszystko w
-`data/meetings/<session_id>/audio` i pokazuje diarization Deepgram w panelu.
+### Start the core
 
-### 3. Panel
+```powershell
+.\scripts\start-core.bat
+```
 
-Otwórz:
+Open:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Panel umożliwia:
+The core is designed to start in a degraded mode when optional services are
+offline. Health reports which components are ready, stopped, or unavailable.
 
-- wpisanie polecenia lub uruchomienie mikrofonu,
-- rozpoczęcie i zakończenie trwałego nagrania spotkania,
-- niezależne włączenie lub wyłączenie live Deepgram bez zatrzymywania Screenpipe,
-- podgląd transkryptu z etykietami `Ty` / `Rozmówca`,
-- opcjonalne dołączenie aktywnego okna do planowania,
-- potwierdzanie i anulowanie ryzykownych kroków,
-- STOP,
-- przegląd zadań oraz lokalnej pamięci.
-
-Panel pobiera aktywny tryb LLM z lokalnej sesji. Przy `LLM_PRIMARY=cloud`
-informuje, że Venice jest modelem głównym i wyłącza checkbox fallbacku. W trybie
-local-first checkbox jawnie zezwala wyłącznie na chmurowy fallback.
-
-## n8n bez Dockera — opcjonalnie
-
-Repo zawiera workflow **VoiceLoop Router v1** dla `n8n 2.33.7`. Integracja jest
-domyślnie wyłączona (`N8N_ENABLED=false`) i nie jest wymagana przez demo
-portfolio. Po jawnym uruchomieniu n8n nasłuchuje wyłącznie na `127.0.0.1`, a
-Execute Command pozostaje wyłączone.
-
-n8n 2.33.7 wyświetla ostrzeżenie, że uruchamianie npm poza kontenerem będzie
-wycofywane w przyszłych wersjach. Nie wpływa to na bieżącą wersję, ale przed
-aktualizacją n8n trzeba sprawdzić migrację do oficjalnego obrazu.
-
-Aktualny workflow nie weryfikuje nagłówka `X-VoiceLoop-Token`; jego ochroną
-jest obecnie wyłącznie bind do loopback. Portu `5678` nie wolno wystawiać do
-sieci bez dodania autoryzacji webhooka.
-
-Kopia workflow sprzed migracji:
-
-```text
-n8n\backups\workflows-before-voiceloop.json
-```
-
-## Hume — eksperyment, nie funkcja demo
-
-Repo zawiera eksperymentalny klient prozodii Hume oraz testy parsera odpowiedzi.
-`HUME_EMOTION_ANALYSIS_ENABLED=false` jest ustawieniem domyślnym. Integracja nie
-jest przedstawiana jako zweryfikowana end-to-end ani używana w demo portfolio.
-Jej jawne włączenie wysyła fragmenty audio spotkania do chmurowego Hume EVI.
-
-## UI.Vision
-
-Repozytorium jest źródłem prawdy dla makr:
+### Start the optional local stack
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\sync-uivision.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
 ```
 
-Runtime znajduje się w:
+This starts Qdrant, Screenpipe, and the VoiceLoop core. It does not
+automatically enable n8n or Hume.
 
-```text
-%USERPROFILE%\Desktop\uivision
-```
+## Test and verify
 
-`ui.vision.html` został utworzony na podstawie oficjalnego generatora UI.Vision,
-a dostęp rozszerzenia do adresów `file://` został włączony.
-
-Test:
+From `listener/`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-uivision.ps1 `
-  -Macro voiceloop_notatka.json `
-  -Var1 "Test VoiceLoop" `
-  -TimeoutSeconds 30
+.\.venv\Scripts\python -m ruff check `
+  voiceloop ..\tests `
+  ..\scripts\voice_capture_server.py `
+  ..\scripts\holding-commands\server.py `
+  ..\scripts\calibration-phrases\server.py
+
+.\.venv\Scripts\python -m pytest -c pyproject.toml -q
 ```
 
-Runner:
+Safe API smoke test:
 
-- akceptuje wyłącznie bezpieczną nazwę makra z allowlisty repozytorium,
-- wymaga zsynchronizowanej kopii w runtime,
-- koduje `cmd_var1..3`,
-- tworzy osobny log każdego uruchomienia,
-- czeka na jednoznaczny rezultat,
-- kończy się błędem po timeout.
-
-## VoiceAttack
-
-VoiceAttack 2.1.7 jest zainstalowany w:
-
-```text
-C:\Program Files\VoiceAttack\VoiceAttack.exe
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test-loop.ps1
 ```
 
-VoiceAttack jest zarejestrowany (pełna wersja). Import profilu:
+The smoke test does not start the microphone or execute screen actions.
 
-1. **More Actions → Import Profile**
-2. wybierz `voiceattack\VoiceLoop-v2.vap`
-3. ustaw aktywny profil **VoiceLoop v2 PRO**
+## Local API
 
-Profil **VoiceLoop v2 PRO** zachowuje stabilny identyfikator profilu v2, ale
-zawiera 30 bezpiecznych komend i 622 jawne warianty języka naturalnego
-(odmiany, krótkie formy, typowe warianty bez polskich znaków). Pełna lista,
-instalacja i test przyjęcia:
-[`voiceattack/INSTRUKCJA.md`](voiceattack/INSTRUKCJA.md).
-
-Skrypty `.vbs` są skierowane do jednego lokalnego dispatchera
-`scripts\send-command.ps1`. VoiceAttack nie powinien być uruchamiany jako
-administrator, jeśli sterowana aplikacja nie wymaga podniesionych uprawnień.
-
-Najważniejsza komenda działa w dwóch krokach:
-
-1. powiedz **„Asystent”**;
-2. po komunikacie **„Słucham”** wypowiedz dowolne polskie polecenie.
-
-VoiceAttack rozpoznaje rozbudowany pakiet pewnych fraz. Gdy Deepgram jest
-aktywny, dispatcher mapuje znaną komendę VA z powrotem na naturalny tekst, aby
-sesja Venice pozostała spójna. Gdy Deepgram jest wyłączony, ta sama fraza leci
-bezpośrednio po `command_id`. Pakiet „pod kursorem” obejmuje kopiowanie
-dostępnego tekstu, adresu e-mail, numeru i zdania oraz zaznaczanie zdania lub
-akapitu przez UI Automation. „Wyłącz aplikację pod kursorem” wymaga
-potwierdzenia i wysyła `WM_CLOSE` zamiast zabijać proces, więc aplikacja może
-nadal zapytać o zapis zmian. Kursor musi pozostać nad tym samym oknem do chwili
-powiedzenia „Potwierdź”. Jeśli program nie udostępnia zakresów tekstowych UI
-Automation, zaznaczanie kończy się czytelnym błędem bez awaryjnego klikania.
-Dla wypowiedzi spoza profilu użyj `Asystent` albo ciągłego nasłuchu Deepgram.
-
-STOP omija n8n i bezpośrednio anuluje rdzeń.
-
-## Konfiguracja
-
-Wzór znajduje się w `listener\.env.example`. Najważniejsze pola:
+Important endpoints include:
 
 ```text
-DEEPGRAM_API_KEY=
-DEEPGRAM_MODEL=nova-3
-DEEPGRAM_LANGUAGE=pl
-SAMPLE_RATE=16000
-AUTO_START_LISTENING=false
-AUTO_START_CONVERSATION=false
-CONVERSATION_GREETING=Cześć. Możemy porozmawiać albo możesz od razu wydać polecenie. Możesz też zapytać, co potrafię. W czym mogę pomóc?
-STT_MIN_ACTION_CONFIDENCE=0.75
-LM_STUDIO_BASE_URL=http://127.0.0.1:1234/v1
-LM_STUDIO_MODEL=qwen2.5-14b-instruct-1m-abliterated
-N8N_WEBHOOK_URL=http://127.0.0.1:5678/webhook/voice-command-v1
-N8N_TIMEOUT_SECONDS=5
-LLM_PRIMARY=gemini
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.6-flash
-CLOUD_LLM_ENABLED=false
-WEB_SEARCH_ENABLED=true
-WEB_SEARCH_PROVIDER=duckduckgo
-WEB_SEARCH_FALLBACK_PROVIDER=duckduckgo
-WEB_SEARCH_GEMINI_MODEL=gemini-3.6-flash
-AZURE_TTS_ENABLED=true
-AZURE_TTS_KEY=
-AZURE_TTS_REGION=germanywestcentral
-AZURE_TTS_VOICE=pl-PL-ZofiaNeural
-TTS_RATE_PERCENT=-20
-TTS_PITCH_PERCENT=-5
-```
-
-`azure-cognitiveservices-speech` jest instalowane z `requirements.lock`.
-Biblioteka SDK jest bezpłatna; rozliczane pozostaje użycie chmurowej usługi
-Azure Speech według wybranego planu, tak samo jak przy REST. SDK odtwarza głos
-bez pliku tymczasowego i obsługuje natywne `stop_speaking_async`. Kolejność
-awaryjna to: Speech SDK → Azure REST → Windows TTS.
-
-`LLM_PRIMARY=local` używa LM Studio jako głównego mózgu. `LLM_PRIMARY=gemini`
-używa skonfigurowanego `GEMINI_MODEL` (`gemini-3.6-flash`) z lokalnym Qwen jako
-fallbackiem błędów transportu lub
-protokołu.
-`LLM_PRIMARY=cloud` lub `LLM_PRIMARY=venice` używa providera chmurowego jako
-głównego mózgu, a LM Studio zostaje fallbackiem.
-
-Provider chmurowy musi udostępniać API zgodne z OpenAI:
-
-```text
-LLM_PRIMARY=cloud
-CLOUD_LLM_ENABLED=true
-CLOUD_LLM_BASE_URL=https://api.venice.ai/api/v1
-CLOUD_LLM_API_KEY=
-CLOUD_LLM_MODEL=venice-uncensored-1-2
-```
-
-Wzór konfiguracji pozostawia `LLM_PRIMARY=local`; dostawcę chmurowego włącza
-się jawnie. Klucze API pozostają wyłącznie w lokalnym `listener\.env`.
-
-Główny planer otrzymuje historię, pamięć i opcjonalny obraz. Planer fallback
-otrzymuje ograniczony kontekst bez historii, pamięci oraz obrazu.
-
-### Lokalna pamięć Qdrant ze Screenpipe
-
-VoiceLoop stale buduje pamięć z aktywności i transkrypcji Screenpipe:
-
-```text
-Screenpipe → Qwen: analiza i wnioski
-           → filtr jakości i deduplikacja
-           → Nomic: 3 albo 5 embeddingów
-           → Qdrant: zapis i wyszukiwanie
-           → SQLite: dual-write i stan operacyjny
-```
-
-Aktywność komputera używa profilu 3-vector: `semantic`, `intent`,
-`person_context`. Rozmowy i wizyty używają pełnego profilu 5-vector:
-`semantic`, `topic`, `intent`, `decision`, `person_context`. Surowy OCR nie jest
-już zapisywany jako normalna pamięć, jeśli lokalny digest ma niską pewność
-(`confidence < 0.65`). Typowe elementy interfejsu są czyszczone przed analizą,
-a powiązane wcześniejsze obserwacje trafiają do metadanych zamiast doklejać się
-do nowej treści. Model Qwen działa cyklicznie także podczas aktywnej pracy; nie
-ma warunku bezczynności.
-
-Najważniejsze ustawienia:
-
-```text
-LOCAL_EMBEDDINGS_ENABLED=true
-LOCAL_EMBEDDINGS_MODEL=text-embedding-nomic-embed-text-v2-moe
-VECTOR_MEMORY_CONTEXT_LIMIT=8
-QDRANT_ENABLED=true
-QDRANT_URL=http://127.0.0.1:6333
-QDRANT_COLLECTION=voiceloop_memory
-QDRANT_DUAL_WRITE=true
-BEHAVIOR_DIGEST_ENABLED=true
-BEHAVIOR_DIGEST_MODEL=qwen2.5-14b-instruct-1m-abliterated
-BEHAVIOR_DIGEST_TIMEOUT_SECONDS=240
-BEHAVIOR_DIGEST_POLL_SECONDS=300
-BEHAVIOR_DIGEST_RECENT_MINUTES=10
-SCREENPIPE_VECTOR_MEMORY_ENABLED=true
-SCREENPIPE_VECTOR_POLL_SECONDS=300
-SCREENPIPE_VECTOR_RECENT_MINUTES=10
-```
-
-Surowe dane Screenpipe i pełne wektory zostają lokalnie. Planer dostaje tylko
-kilka najbardziej trafnych fragmentów z Qdrant, po połączeniu wyników pięciu
-przestrzeni cosine. Istniejące wektory SQLite są migrowane bez usuwania starej
-bazy.
-
-## Lokalne API
-
-Najważniejsze endpointy:
-
-```text
+GET  /api/v1/session
 GET  /api/v1/health
+GET  /api/v1/events
 POST /api/v1/commands
 GET  /api/v1/commands
 POST /api/v1/commands/{id}/confirm
@@ -518,91 +318,108 @@ POST /api/v1/listening/start
 POST /api/v1/listening/stop
 GET  /api/v1/memories
 POST /api/v1/memories
-GET  /api/v1/events
 ```
 
-Endpointy prywatne, w tym szczegółowy health i strumień SSE, wymagają lokalnego
-nagłówka `X-VoiceLoop-Token`. Token jest generowany przy pierwszym starcie w
-`data\voiceloop.token`; panel pobiera go wyłącznie przez endpoint dostępny z
-loopback.
+Private endpoints require `X-VoiceLoop-Token`. The panel obtains the local token
+through the loopback-only session endpoint.
 
-Dokumentacja OpenAPI:
+OpenAPI is available locally at:
 
 ```text
 http://127.0.0.1:8765/api/docs
 ```
 
-## Testy
+## Optional and experimental components
 
-Smoke test bez mikrofonu i bez otwierania aplikacji:
+### Hume
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\test-loop.ps1
-```
+The repository contains an experimental prosody client and parser tests.
+`HUME_EMOTION_ANALYSIS_ENABLED=false` is the default.
 
-Testy Python:
+It has not been verified as an end-to-end portfolio demo and must not be
+presented as a production feature. Enabling it would send meeting-audio chunks
+to Hume's cloud API.
 
-```powershell
-cd listener
-.\.venv\Scripts\python -m ruff check voiceloop ..\tests `
-  ..\scripts\voice_capture_server.py `
-  ..\scripts\holding-commands\server.py `
-  ..\scripts\calibration-phrases\server.py
-.\.venv\Scripts\python -m pytest -c pyproject.toml -q
-```
+### n8n
 
-Zestaw obejmuje routing, normalizację języka polskiego, pamięć, politykę ryzyka,
-potwierdzenia, kolejkę, routing modeli, embeddingi, worker Screenpipe oraz profil
-VoiceAttack. Aktualny czysty przebieg to `541 passed, 1 skipped`; pomijany jest
-wyłącznie prywatny replay, gdy lokalne transkrypty nie istnieją. Pełny Ruff i
-pytest weryfikuje workflow CI. Generator profilu dodatkowo odrzuca kolizje fraz
-i brakujące wrappery VBS.
+The repository contains a small deterministic n8n workflow, but
+`N8N_ENABLED=false` is the default. It is not required by the core portfolio
+demo.
 
-## Struktura
+### Screenpipe
+
+Screenpipe is an optional source of broad local computer context. A full
+Screenpipe setup may capture screens, audio, clipboard, and input activity.
+It is intentionally excluded from the controlled portfolio demo.
+
+## Privacy boundaries
+
+Never commit or publish:
+
+- `listener/.env`;
+- `data/`;
+- runtime logs;
+- local tokens;
+- meeting recordings or transcripts;
+- private screenshots;
+- medical or patient data;
+- private corpus samples.
+
+The repository contains code and schemas for private data processing, not the
+private data itself.
+
+## Repository map
 
 ```text
-VoiceLoop\
-├── docs\
-│   ├── PORTFOLIO_PL.md
-│   ├── VOICELOOP_ARCHITECTURE_HANDOFF.md
-│   └── VOICELOOP_ARCHITECTURE_HANDOFF.pdf
-├── listener\
-│   ├── voiceloop\          rdzeń FastAPI
-│   ├── requirements.in     zależności bez pinu
-│   ├── requirements.lock   dokładny stan środowiska
-│   └── start-listener.bat
-├── panel\index.html        lokalny panel
-├── n8n\voice-loop.json     bezpieczny router
-├── scripts\
-│   ├── start-all.ps1
-│   ├── start-qdrant.ps1
-│   ├── start-screenpipe.ps1
-│   ├── calibration-phrases\
-│   ├── holding-commands\
-│   ├── send-command.ps1
-│   ├── run-uivision.ps1
-│   ├── sync-uivision.ps1
-│   └── va\*.vbs
-├── uivision\macros\
-├── voiceattack\
-├── tests\
-├── data\                   baza, token, zrzuty (lokalne)
-└── logs\                   logi wykonania (lokalne)
+VoiceLoop/
+├── listener/voiceloop/       FastAPI core, routing, memory, voice loop
+├── panel/                    local web interface
+├── tests/                    unit and integration tests
+├── docs/                     architecture and portfolio documentation
+├── scripts/                  startup, smoke, automation, capture tools
+├── voiceattack/              constrained voice-command profiles
+├── uivision/macros/          approved UI automation macros
+├── n8n/                      optional deterministic workflow
+├── data/                     local runtime data, ignored
+└── logs/                     local runtime logs, ignored
 ```
 
-## Zasady bezpieczeństwa
+## Verified status
 
-- Usługi nasłuchują tylko na loopback.
-- LLM nie wykonuje tekstu jako shell.
-- Każda akcja istnieje w lokalnej allowliście.
-- Model nie może obniżyć poziomu ryzyka akcji.
-- Operacje wysokiego ryzyka zawsze wymagają potwierdzenia.
-- Jedna akcja ekranowa działa naraz.
-- `request_id` i okno deduplikacji zapobiegają podwójnemu wykonaniu.
-- Głosowe `stop` / `przerwij` anuluje model, TTS, kolejkę i bieżącą akcję,
-  pozostawiając nasłuch i sesję rozmowy aktywne.
-- Globalny STOP w panelu dodatkowo zatrzymuje Deepgram.
-- Obraz trafia do Venice tylko wtedy, gdy request ma `include_screen=true`.
-- Health, SSE i operacje prywatne wymagają lokalnego tokenu.
-- Webhook n8n nadal opiera ochronę na lokalnym bindzie; nie wystawiaj portu.
-- Stary adres `panel\deepgram.html` przekierowuje do aktualnego panelu.
+The current portfolio branch has been checked with:
+
+- **541 passed, 1 skipped**;
+- full Ruff validation;
+- Windows GitHub Actions CI;
+- authenticated health and SSE tests;
+- a safe `voice_test` API smoke test;
+- a manual panel test without microphone or cloud activity;
+- secret-pattern scanning.
+
+The skipped test requires a private local transcript replay and is expected to
+skip when that data is absent.
+
+## Known limitations
+
+- Full reproduction is Windows-specific and requires several optional tools.
+- Cloud STT, LLM, and TTS providers require credentials and may incur cost.
+- Diarization distinguishes speakers in a stream; it is not voice biometrics.
+- Screenpipe requires careful privacy configuration.
+- The n8n webhook still relies on loopback rather than application-level
+  authentication.
+- Hume remains an unverified experiment.
+- The repository does not currently have a public open-source license.
+
+## Documentation
+
+- [`docs/PORTFOLIO_PL.md`](docs/PORTFOLIO_PL.md) — honest portfolio scope in Polish.
+- [`docs/VOICELOOP_ARCHITECTURE_HANDOFF.md`](docs/VOICELOOP_ARCHITECTURE_HANDOFF.md) — detailed architecture and operational handoff in Polish.
+- [`docs/VOICELOOP_ARCHITECTURE_HANDOFF.pdf`](docs/VOICELOOP_ARCHITECTURE_HANDOFF.pdf) — generated handoff PDF.
+- [`docs/SAFE_USER_CORPUS.md`](docs/SAFE_USER_CORPUS.md) — private corpus and evaluation design in Polish.
+- [`scripts/VOICE_CAPTURE_TOOLS.md`](scripts/VOICE_CAPTURE_TOOLS.md) — local sample-capture tools.
+
+## License and portfolio use
+
+This is currently a private portfolio repository without a public open-source
+license. Code, documentation, and local data should not be redistributed
+without explicit permission.
