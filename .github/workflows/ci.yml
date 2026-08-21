@@ -1,0 +1,49 @@
+name: VoiceLoop CI
+
+on:
+  push:
+    branches:
+      - master
+      - "cursor/**"
+  pull_request:
+
+concurrency:
+  group: voiceloop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: listener
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: listener/requirements.lock
+
+      - name: Install runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+          python -m pip install pytest pytest-asyncio ruff
+
+      - name: Ruff
+        run: >-
+          python -m ruff check
+          voiceloop
+          ../tests
+          ../scripts/voice_capture_server.py
+          ../scripts/holding-commands/server.py
+          ../scripts/calibration-phrases/server.py
+
+      - name: Pytest
+        run: python -m pytest -c pyproject.toml -q

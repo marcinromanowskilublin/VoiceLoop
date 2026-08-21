@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from voiceloop.corpus import cli as corpus_cli
 from voiceloop.corpus.cli import build_parser
 from voiceloop.corpus.journal import extract_project_journal_candidates

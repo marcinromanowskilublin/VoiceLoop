@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+
 from voiceloop.settings import Settings
 from voiceloop.web_search import WebSearchClient, WebSearchError, WebSearchResult
 

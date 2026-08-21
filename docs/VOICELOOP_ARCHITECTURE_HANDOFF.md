@@ -61,8 +61,8 @@ Najważniejsze reguły:
 - panel odczytuje `LLM_PRIMARY` z sesji; przy trybie cloud informuje, że Venice
   jest modelem głównym, a checkbox dotyczy tylko fallbacku w trybie local-first.
 
-Najpierw sprawdź:
-GET http://127.0.0.1:8765/api/v1/health
+Najpierw sprawdź chroniony health przez `scripts/test-loop.ps1` albo wyślij
+`X-VoiceLoop-Token` odczytany z lokalnego `data/voiceloop.token`.
 
 Następnie opisz, które pliki zamierzasz zmienić i dlaczego.
 ```
@@ -107,17 +107,19 @@ Stan zweryfikowany na żywym systemie:
 | Screenpipe vector worker | OK | Qwen → Nomic → Qdrant + dual-write SQLite |
 | Screenpipe meeting worker | OK | oczekiwanie na zakończone spotkania |
 | UI.Vision | OK | dozwolone automatyzacje ekranowe |
-| VoiceAttack | OK | profil v2: 15 stałych komend i wyzwalanie one-shot Deepgram |
+| VoiceAttack | OK | profil v2: 30 bezpiecznych komend i ponad 620 wariantów fraz |
 | Deepgram live listener | OK | Nova-3 PL, one-shot, streaming diarization |
+| Hume EVI | eksperymentalny, off | szkielet prozodii; bez deklaracji E2E |
 
 Aktualne modele:
 
-- główny model rozmowy: `gemini-3.5-flash`,
+- konfigurowalny model rozmowy: `gemini-3.6-flash`,
 - opcjonalny provider: `venice-uncensored-1-2`,
 - lokalny fallback: `qwen2.5-14b-instruct-1m-abliterated`,
 - embeddingi: `text-embedding-nomic-embed-text-v2-moe`.
 
-Po ostatnich zmianach pełny zestaw 200 testów i Ruff przechodzą bez błędów.
+Pakiet zawiera ponad 500 testów. Dokładny wynik pytest i Ruff publikuje workflow
+CI; lokalny wynik należy zawsze potwierdzić przed przekazaniem wersji.
 
 ---
 
@@ -557,7 +559,7 @@ jeszcze osobnego publicznego `action_id`.
 |---|---|---:|---|
 | GET | `/` | lokalna sesja | panel WWW |
 | GET | `/api/v1/session` | tylko loopback | token i aktywny tryb LLM dla panelu |
-| GET | `/api/v1/health` | brak | status komponentów |
+| GET | `/api/v1/health` | token | szczegółowy status komponentów |
 | POST | `/api/v1/commands` | token | utworzenie komendy |
 | GET | `/api/v1/commands` | token | lista komend |
 | GET | `/api/v1/commands/{id}` | token | stan komendy |
@@ -574,7 +576,7 @@ jeszcze osobnego publicznego `action_id`.
 | GET | `/api/v1/memories` | token | jawna pamięć |
 | POST | `/api/v1/memories` | token | dodanie pamięci |
 | DELETE | `/api/v1/memories/{id}` | token | usunięcie pamięci |
-| GET | `/api/v1/events` | brak | lokalny stream SSE |
+| GET | `/api/v1/events` | token | lokalny stream SSE |
 
 OpenAPI:
 
@@ -596,8 +598,9 @@ Mutujące i wrażliwe endpointy wymagają:
 X-VoiceLoop-Token: <token>
 ```
 
-`/api/v1/session` wydaje token tylko klientowi z loopback. SSE nie ma osobnego
-sprawdzenia tokenu, dlatego port `8765` nie może być wystawiony do sieci.
+`/api/v1/session` wydaje token tylko klientowi z loopback. Panel odbiera SSE
+przez `fetch` z nagłówkiem tokenu; health i stream nie są już anonimowe. Port
+`8765` nadal nie jest przeznaczony do wystawiania w sieci.
 
 `N8nClient` może wysłać ten token do webhooka, ale aktualny workflow n8n nie
 weryfikuje nagłówka. Ochroną webhooka n8n jest obecnie wyłącznie bind loopback.
@@ -933,7 +936,7 @@ COMMAND_QUEUE_LIMIT=10
 LLM_PRIMARY=gemini
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-3.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 ```
 
 ### Venice jako opcjonalny provider
@@ -1023,7 +1026,7 @@ Skrypt:
 - synchronizuje wersjonowane makra UI.Vision do runtime,
 - uruchamia Qdrant,
 - uruchamia Screenpipe,
-- uruchamia n8n,
+- pozostawia opcjonalne n8n wyłączone,
 - uruchamia core,
 - czeka na porty do 300 sekund domyślnie,
 - otwiera panel.
@@ -1046,7 +1049,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-screenpipe.p
 ### Health
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8765/api/v1/health |
+$token = (Get-Content -Raw ..\data\voiceloop.token).Trim()
+Invoke-RestMethod http://127.0.0.1:8765/api/v1/health `
+    -Headers @{ 'X-VoiceLoop-Token' = $token } |
     ConvertTo-Json -Depth 6
 ```
 
@@ -1177,18 +1182,18 @@ VoiceLoop\
 
 ### Granice i świadome kompromisy
 
-1. Gemini jest głównym modelem, więc wolny język trafia do API Google.
+1. Przy `LLM_PRIMARY=gemini` wolny język trafia do API Google.
 2. Historia rozmowy i wybrany kontekst vector memory trafiają do aktywnego
    providera chmurowego.
 3. `include_screen=true` może wysłać obraz aktywnego okna do aktywnego providera.
 4. Screenpipe przechowuje bardzo szeroki lokalny kontekst.
-5. SSE nie ma osobnej autoryzacji i opiera się na loopback.
-6. Webhook n8n nie weryfikuje obecnie wysyłanego tokenu i opiera się na loopback.
-7. SQLite, token i screenshoty nie są szyfrowane przez VoiceLoop na dysku.
-8. `open_url` nie wymaga potwierdzenia, ale sprawdza protokół i poprawność URL.
-9. Istniejące makro UI.Vision nadal jest zaufanym kodem automatyzacji; walidacja
+5. Webhook n8n nie weryfikuje obecnie wysyłanego tokenu i opiera się na loopback.
+6. SQLite, token i screenshoty nie są szyfrowane przez VoiceLoop na dysku.
+7. `open_url` nie wymaga potwierdzenia, ale sprawdza protokół i poprawność URL.
+8. Istniejące makro UI.Vision nadal jest zaufanym kodem automatyzacji; walidacja
    ścieżki nie analizuje bezpieczeństwa jego treści.
-10. Model „uncensored/abliterated” nie zastępuje lokalnej polityki bezpieczeństwa.
+9. Model „uncensored/abliterated” nie zastępuje lokalnej polityki bezpieczeństwa.
+10. Hume pozostaje wyłączonym eksperymentem; włączenie wysyła audio do chmury.
 
 ---
 
@@ -1233,10 +1238,9 @@ VoiceLoop\
 ### Priorytet 0 — hardening lokalnego API
 
 1. Weryfikować sekret bezpośrednio w workflow n8n.
-2. Dodać autoryzację albo bezpieczny kanał sesyjny dla SSE.
-3. Wzmocnić model wydawania tokenu przez `/api/v1/session`.
-4. Ustawić restrykcyjne ACL dla bazy, tokenu, screenshotów i danych Screenpipe.
-5. Rozważyć podpisy lub sumy kontrolne zatwierdzonych makr UI.Vision.
+2. Wzmocnić model wydawania tokenu przez `/api/v1/session`.
+3. Ustawić restrykcyjne ACL dla bazy, tokenu, screenshotów i danych Screenpipe.
+4. Rozważyć podpisy lub sumy kontrolne zatwierdzonych makr UI.Vision.
 
 ### Priorytet 1 — prywatność i kontrola kontekstu
 

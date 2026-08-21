@@ -1,8 +1,8 @@
 # VoiceLoop — hybrydowy asystent Windows
 
-VoiceLoop łączy polski głos, Gemini, opcjonalne Venice AI, lokalne modele w
-LM Studio, Screenpipe, n8n, UI.Vision RPA i VoiceAttack w jedną kontrolowaną
-pętlę.
+VoiceLoop łączy polski głos, lokalny rdzeń FastAPI, typowane akcje Windows oraz
+opcjonalne modele i usługi: Gemini, Venice AI, LM Studio, Screenpipe, Qdrant,
+n8n, UI.Vision RPA i VoiceAttack.
 
 Szczegółowa dokumentacja architektury, handoff dla kolejnego AI i wersja PDF:
 
@@ -14,6 +14,8 @@ Szczegółowa dokumentacja architektury, handoff dla kolejnego AI i wersja PDF:
   dokumentacja programu: budowa, działanie, wdrożenie, rozwój
 - [`docs/SAFE_USER_CORPUS.md`](docs/SAFE_USER_CORPUS.md) — lokalny korpus,
   zestaw 120 próbek głosowych, prozodia i ewaluacja Routing V2
+- [`docs/PORTFOLIO_PL.md`](docs/PORTFOLIO_PL.md) — krótki, uczciwy opis
+  portfolio, granice prywatności i scenariusz demo
 
 ```text
 mikrofon / panel / VoiceAttack
@@ -28,10 +30,10 @@ mikrofon / panel / VoiceAttack
        ├─ Screenpipe + Qdrant (5 named vectors)
        ├─ SQLite (stan, historia i dual-write)
        ├─ zgody, kolejka i STOP
-       └─ n8n (routing + integracje)
+       └─ n8n (opcjonalny router, domyślnie wyłączony)
              │
              ▼
- Windows API / UI.Vision / VoiceAttack / workflow n8n
+ Windows API / UI.Vision / VoiceAttack / opcjonalny workflow n8n
 ```
 
 LLM i n8n zwracają wyłącznie typowane `action_id` oraz argumenty. Nie mogą
@@ -165,11 +167,11 @@ głosu.
 
 ## Aktualny stan
 
-Działa pełny pionowy przekrój:
+Zweryfikowany rdzeń i dostępne integracje obejmują:
 
 - panel i lokalne API na `http://127.0.0.1:8765`,
 - LM Studio OpenAI API na `http://127.0.0.1:1234/v1`,
-- Gemini `gemini-3.5-flash` jako główny model rozmowy,
+- Gemini `gemini-3.6-flash` jako konfigurowalny model rozmowy,
 - Venice `venice-uncensored-1-2` jako opcjonalny provider chmurowy,
 - Qwen `qwen2.5-14b-instruct-1m-abliterated` jako lokalny fallback,
 - Nomic `text-embedding-nomic-embed-text-v2-moe` jako model embeddingowy,
@@ -183,7 +185,7 @@ Działa pełny pionowy przekrój:
 - Deepgram Nova-3 dla polskiego mikrofonu,
 - zamrożony lokalny zestaw 120 klipów audio (30 development / 90 holdout) z
   timestampami, hashami, ręcznymi adnotacjami i analizą prozodii,
-- n8n Router v1 na `http://127.0.0.1:5678`,
+- opcjonalny n8n Router v1, domyślnie wyłączony,
 - UI.Vision z wynikiem, logiem i timeoutem,
 - Azure Speech SDK jako główny głos, Azure REST i Windows TTS jako fallbacki,
 - przycisk STOP i deduplikacja komend.
@@ -229,7 +231,7 @@ Skrypt:
 - synchronizuje makra UI.Vision do runtime,
 - uruchamia Qdrant w trwałym kontenerze Docker na `127.0.0.1:6333`,
 - uruchamia Screenpipe z pełnym lokalnym zapisem i retencją 14 dni,
-- uruchamia n8n, jeśli nie działa,
+- pozostawia n8n wyłączone, dopóki nie zostanie uruchomione jawnie,
 - uruchamia rdzeń VoiceLoop,
 - czeka domyślnie do 300 sekund na wszystkie porty,
 - otwiera panel.
@@ -283,11 +285,12 @@ Panel pobiera aktywny tryb LLM z lokalnej sesji. Przy `LLM_PRIMARY=cloud`
 informuje, że Venice jest modelem głównym i wyłącza checkbox fallbacku. W trybie
 local-first checkbox jawnie zezwala wyłącznie na chmurowy fallback.
 
-## n8n bez Dockera
+## n8n bez Dockera — opcjonalnie
 
-Obecnie używana i przetestowana wersja to `n8n 2.33.7`, instalowana przez npm.
-Workflow `n8n\voice-loop.json` jest opublikowany jako **VoiceLoop Router v1**.
-n8n nasłuchuje wyłącznie na `127.0.0.1`, a Execute Command jest wyłączony.
+Repo zawiera workflow **VoiceLoop Router v1** dla `n8n 2.33.7`. Integracja jest
+domyślnie wyłączona (`N8N_ENABLED=false`) i nie jest wymagana przez demo
+portfolio. Po jawnym uruchomieniu n8n nasłuchuje wyłącznie na `127.0.0.1`, a
+Execute Command pozostaje wyłączone.
 
 n8n 2.33.7 wyświetla ostrzeżenie, że uruchamianie npm poza kontenerem będzie
 wycofywane w przyszłych wersjach. Nie wpływa to na bieżącą wersję, ale przed
@@ -302,6 +305,13 @@ Kopia workflow sprzed migracji:
 ```text
 n8n\backups\workflows-before-voiceloop.json
 ```
+
+## Hume — eksperyment, nie funkcja demo
+
+Repo zawiera eksperymentalny klient prozodii Hume oraz testy parsera odpowiedzi.
+`HUME_EMOTION_ANALYSIS_ENABLED=false` jest ustawieniem domyślnym. Integracja nie
+jest przedstawiana jako zweryfikowana end-to-end ani używana w demo portfolio.
+Jej jawne włączenie wysyła fragmenty audio spotkania do chmurowego Hume EVI.
 
 ## UI.Vision
 
@@ -421,8 +431,8 @@ bez pliku tymczasowego i obsługuje natywne `stop_speaking_async`. Kolejność
 awaryjna to: Speech SDK → Azure REST → Windows TTS.
 
 `LLM_PRIMARY=local` używa LM Studio jako głównego mózgu. `LLM_PRIMARY=gemini`
-używa skonfigurowanego `GEMINI_MODEL` (OpenAI-compatible; w bieżącej instalacji
-`gemini-3.5-flash`) z lokalnym Qwen jako fallbackiem błędów transportu lub
+używa skonfigurowanego `GEMINI_MODEL` (`gemini-3.6-flash`) z lokalnym Qwen jako
+fallbackiem błędów transportu lub
 protokołu.
 `LLM_PRIMARY=cloud` lub `LLM_PRIMARY=venice` używa providera chmurowego jako
 głównego mózgu, a LM Studio zostaje fallbackiem.
@@ -437,8 +447,8 @@ CLOUD_LLM_API_KEY=
 CLOUD_LLM_MODEL=venice-uncensored-1-2
 ```
 
-Aktualna instalacja używa Gemini jako głównego modelu. Klucze API pozostają
-wyłącznie w lokalnym `listener\.env`.
+Wzór konfiguracji pozostawia `LLM_PRIMARY=local`; dostawcę chmurowego włącza
+się jawnie. Klucze API pozostają wyłącznie w lokalnym `listener\.env`.
 
 Główny planer otrzymuje historię, pamięć i opcjonalny obraz. Planer fallback
 otrzymuje ograniczony kontekst bez historii, pamięci oraz obrazu.
@@ -511,8 +521,10 @@ POST /api/v1/memories
 GET  /api/v1/events
 ```
 
-Polecenia modyfikujące wymagają lokalnego nagłówka `X-VoiceLoop-Token`. Token
-jest generowany przy pierwszym starcie w `data\voiceloop.token`.
+Endpointy prywatne, w tym szczegółowy health i strumień SSE, wymagają lokalnego
+nagłówka `X-VoiceLoop-Token`. Token jest generowany przy pierwszym starcie w
+`data\voiceloop.token`; panel pobiera go wyłącznie przez endpoint dostępny z
+loopback.
 
 Dokumentacja OpenAPI:
 
@@ -532,21 +544,25 @@ Testy Python:
 
 ```powershell
 cd listener
-.\.venv\Scripts\python -m ruff check voiceloop ..\tests
+.\.venv\Scripts\python -m ruff check voiceloop ..\tests `
+  ..\scripts\voice_capture_server.py `
+  ..\scripts\holding-commands\server.py `
+  ..\scripts\calibration-phrases\server.py
 .\.venv\Scripts\python -m pytest -c pyproject.toml -q
 ```
 
 Zestaw obejmuje routing, normalizację języka polskiego, pamięć, politykę ryzyka,
 potwierdzenia, kolejkę, routing modeli, embeddingi, worker Screenpipe oraz profil
-VoiceAttack. Aktualny pakiet przeszedł 200 testów, pełny lint i kontrolę składni
-dispatchera PowerShell. Generator profilu dodatkowo odrzuca kolizje fraz i
-brakujące wrappery VBS.
+VoiceAttack. Pakiet zawiera ponad 500 testów; dokładny wynik i pełny Ruff są
+weryfikowane przez workflow CI. Generator profilu dodatkowo odrzuca kolizje
+fraz i brakujące wrappery VBS.
 
 ## Struktura
 
 ```text
 VoiceLoop\
 ├── docs\
+│   ├── PORTFOLIO_PL.md
 │   ├── VOICELOOP_ARCHITECTURE_HANDOFF.md
 │   └── VOICELOOP_ARCHITECTURE_HANDOFF.pdf
 ├── listener\
@@ -560,6 +576,8 @@ VoiceLoop\
 │   ├── start-all.ps1
 │   ├── start-qdrant.ps1
 │   ├── start-screenpipe.ps1
+│   ├── calibration-phrases\
+│   ├── holding-commands\
 │   ├── send-command.ps1
 │   ├── run-uivision.ps1
 │   ├── sync-uivision.ps1
@@ -584,5 +602,6 @@ VoiceLoop\
   pozostawiając nasłuch i sesję rozmowy aktywne.
 - Globalny STOP w panelu dodatkowo zatrzymuje Deepgram.
 - Obraz trafia do Venice tylko wtedy, gdy request ma `include_screen=true`.
-- SSE i webhook n8n opierają ochronę na lokalnym bindzie; nie wystawiaj portów.
+- Health, SSE i operacje prywatne wymagają lokalnego tokenu.
+- Webhook n8n nadal opiera ochronę na lokalnym bindzie; nie wystawiaj portu.
 - Stary adres `panel\deepgram.html` przekierowuje do aktualnego panelu.

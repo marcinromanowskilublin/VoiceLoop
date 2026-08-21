@@ -157,10 +157,7 @@ class Settings(BaseSettings):
 
     voiceattack_exe: str | None = None
     hume_api_key: SecretStr | None = None
-    hume_secret_key: SecretStr | None = None
-    hume_webhook_signing_key: SecretStr | None = None
     hume_emotion_analysis_enabled: bool = False
-    hume_emotion_base_url: str = "https://api.hume.ai"
     hume_emotion_endpoint: str = "wss://api.hume.ai/v0/evi/chat"
     hume_emotion_timeout_seconds: float = 30.0
     hume_emotion_top_n: int = 3
