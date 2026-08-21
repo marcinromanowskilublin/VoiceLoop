@@ -414,6 +414,6 @@ VoiceLoop/
 
 ## License and portfolio use
 
-This is currently a private portfolio repository without a public open-source
-license. Code, documentation, and local data should not be redistributed
-without explicit permission.
+VoiceLoop is published as a portfolio repository without an open-source
+license. The code and documentation are available for review, but no permission
+to copy, modify, or redistribute them is granted. Local data is not included.
