@@ -7,6 +7,23 @@ from voiceloop.web_search import WebSearchClient, WebSearchError, WebSearchResul
 
 
 @pytest.mark.asyncio
+async def test_web_search_health_is_configuration_only(tmp_path) -> None:
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        web_search_provider="gemini",
+        gemini_api_key="gem-key",
+    )
+    client = WebSearchClient(settings)
+    client.search = AsyncMock(side_effect=AssertionError("health must not search"))
+
+    ok, detail = await client.health()
+
+    assert ok is True
+    assert "skonfigurowane" in detail
+    client.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_web_search_falls_back_to_duckduckgo_when_brave_unavailable(tmp_path) -> None:
     settings = Settings(
         voiceloop_data_dir=str(tmp_path),
@@ -135,6 +152,9 @@ async def test_web_search_gemini_parses_grounded_links(tmp_path) -> None:
     assert results[0].provider == "gemini"
     assert results[0].url == "https://example.com/ai-1"
     assert "podsumowanie" in results[0].snippet
+    request = client._post_json.await_args.kwargs
+    assert request["params"] == {}
+    assert request["headers"]["x-goog-api-key"] == "gem-key"
 
 
 @pytest.mark.asyncio

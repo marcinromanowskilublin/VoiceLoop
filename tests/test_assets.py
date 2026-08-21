@@ -27,6 +27,14 @@ def test_panel_does_not_embed_deepgram_key() -> None:
     assert "DEEPGRAM_API_KEY=" not in "\n".join(panels)
 
 
+def test_panel_authenticates_private_event_stream() -> None:
+    panel = (ROOT / "panel" / "index.html").read_text(encoding="utf-8")
+
+    assert "new EventSource" not in panel
+    assert 'fetch("/api/v1/events"' in panel
+    assert '"X-VoiceLoop-Token": state.token' in panel
+
+
 def test_legacy_deepgram_entrypoints_are_retired() -> None:
     panel = (ROOT / "panel" / "deepgram.html").read_text(encoding="utf-8")
     listener = (ROOT / "listener" / "deepgram_listener.py").read_text(encoding="utf-8")

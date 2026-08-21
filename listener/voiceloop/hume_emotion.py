@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import array
+import asyncio
 import base64
 import json
 import logging
@@ -164,8 +164,12 @@ class HumeEmotionClient:
         }
 
     async def _send_legacy_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        uri = self._endpoint_with_key()
-        async with websockets.connect(uri, max_size=32 * 1024 * 1024) as websocket:
+        uri = self._endpoint_uri()
+        async with websockets.connect(
+            uri,
+            max_size=32 * 1024 * 1024,
+            additional_headers=self._connection_headers(),
+        ) as websocket:
             await websocket.send(json.dumps(payload, separators=(",", ":")))
             raw = await websocket.recv()
         if isinstance(raw, bytes):
@@ -180,10 +184,11 @@ class HumeEmotionClient:
             raise HumeEmotionError(str(parsed["error"]))
         return parsed
 
-    def _endpoint_with_key(self) -> str:
+    def _endpoint_uri(self) -> str:
         parts = urlsplit(self.endpoint)
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
-        query.setdefault("api_key", self._api_key_value())
+        query.pop("api_key", None)
+        query.pop("access_token", None)
         if not self._uses_legacy_stream_models():
             query.setdefault("verbose_transcription", "true")
         return urlunsplit(
@@ -195,6 +200,9 @@ class HumeEmotionClient:
                 parts.fragment,
             )
         )
+
+    def _connection_headers(self) -> dict[str, str]:
+        return {"X-Hume-Api-Key": self._api_key_value()}
 
     def _uses_legacy_stream_models(self) -> bool:
         return "/stream/models" in urlsplit(self.endpoint).path
@@ -254,9 +262,13 @@ class HumeEmotionClient:
         return mono.tobytes()
 
     async def _stream_evi_audio(self, audio: Linear16Audio) -> list[HumeEmotionWindow]:
-        uri = self._endpoint_with_key()
+        uri = self._endpoint_uri()
         windows: list[HumeEmotionWindow] = []
-        async with websockets.connect(uri, max_size=32 * 1024 * 1024) as websocket:
+        async with websockets.connect(
+            uri,
+            max_size=32 * 1024 * 1024,
+            additional_headers=self._connection_headers(),
+        ) as websocket:
             await websocket.send(
                 json.dumps(
                     {
