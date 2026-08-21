@@ -1,7 +1,7 @@
 # VoiceAttack Profile v2 PRO
 
 VoiceAttack pełni rolę niezawodnego przycisku głosowego i warstwy awaryjnej.
-Profil ma 622 jawne polskie warianty fraz: formy naturalne, krótkie skróty,
+Profil ma 656 jawnych polskich wariantów fraz: formy naturalne, krótkie skróty,
 odmiany i typowe warianty bez polskich znaków. Swobodną wypowiedź po komendzie
 **„Asystent”** nadal rozpoznaje Deepgram, nie wildcard VoiceAttack.
 
@@ -10,18 +10,22 @@ Routing komend jest automatyczny:
 - przy wyłączonym Deepgramie znane komendy lecą bezpośrednio przez `CommandId`,
 - przy aktywnym Deepgramie znane komendy VoiceAttack są mapowane na naturalny
   tekst i idą ścieżką tekstową, więc nie rozrywają sesji Venice,
-- wypowiedzi spoza 622 wariantów obsługuje `Asystent` albo ciągły nasłuch.
+- wypowiedzi spoza 656 wariantów obsługuje `Asystent` albo ciągły nasłuch.
 
-Gotowy profil:
+Przed importem wygeneruj profil. Generator osadza aktualną ścieżkę sklonowanego
+repozytorium w akcjach VoiceAttack:
 
-`C:\Users\marci\VoiceLoop\voiceattack\VoiceLoop-v2.vap`
+```powershell
+.\listener\.venv\Scripts\python.exe .\scripts\build-voiceattack-profile.py
+```
 
-Profil nazywa się **VoiceLoop v2 PRO**, zawiera 30 komend i korzysta wyłącznie z
+Wynik zapisuje się w `voiceattack\VoiceLoop-v2.vap`. Profil nazywa się
+**VoiceLoop v2 PRO**, zawiera 33 komendy i korzysta wyłącznie z
 lokalnego API VoiceLoop na `127.0.0.1:8765`.
 
 Generator odrzuca zduplikowane frazy pomiędzy komendami i komendę bez
 istniejącego skryptu `.vbs`. Dzięki temu rozbudowanie słownika nie tworzy
-niejednoznacznego routingu. Pełne 622 warianty są w
+niejednoznacznego routingu. Pełne 656 wariantów jest w
 `scripts\build-voiceattack-profile.py`; niżej są najważniejsze przykłady.
 
 Profil ustawia dla komend VoiceLoop próg rozpoznania `65`. Jeśli w logu
@@ -104,8 +108,8 @@ zdania niż wildcard systemowego silnika VoiceAttack. Stałe polecenia, takie ja
 
 ### Ręczne uruchomienie skryptów minimalizacji
 
-- `Uruchom: C:\Users\marci\VoiceLoop\scripts\va\minimize-window.vbs`
-- `Uruchom: C:\Users\marci\VoiceLoop\scripts\va\minimize-all.vbs`
+- `Uruchom: <ścieżka-do-repozytorium>\scripts\va\minimize-window.vbs`
+- `Uruchom: <ścieżka-do-repozytorium>\scripts\va\minimize-all.vbs`
 
 ## Notatka i pamięć — różnica
 
@@ -137,16 +141,15 @@ Zgoda wygasa po 5 minutach. To zabezpiecza pamięć przed przypadkowym zapisem
 
 ## Instalacja profilu
 
-1. Uruchom cały stos przez `scripts\start-all.ps1`.
-2. Otwórz VoiceAttack.
-3. Wybierz **More Actions → Import Profile**.
-4. Wskaż `C:\Users\marci\VoiceLoop\voiceattack\VoiceLoop-v2.vap`.
-5. Wybierz na liście profil **VoiceLoop v2 PRO**.
-6. Upewnij się, że VoiceAttack słucha i ma ustawiony właściwy mikrofon.
-7. Powiedz **„Test pętli”**, a następnie **„Asystent”**.
-
-Stare profile `VoiceLoop` i `VoiceLoop v2` mogą pozostać jako archiwum, ale
-aktywny powinien być tylko `VoiceLoop v2 PRO`.
+1. Wygeneruj profil powyższą komendą.
+2. Uruchom rdzeń przez `scripts\start-core.bat`; opcjonalne usługi włączaj tylko
+   dla funkcji, które ich wymagają.
+3. Otwórz VoiceAttack.
+4. Wybierz **More Actions → Import Profile**.
+5. Wskaż `voiceattack\VoiceLoop-v2.vap`.
+6. Wybierz na liście profil **VoiceLoop v2 PRO**.
+7. Upewnij się, że VoiceAttack słucha i ma ustawiony właściwy mikrofon.
+8. Powiedz **„Test pętli”**, a następnie **„Asystent”**.
 
 ## Test przyjęcia
 

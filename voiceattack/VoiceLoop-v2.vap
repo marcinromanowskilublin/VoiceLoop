@@ -19,7 +19,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\assistant.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\assistant.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -117,7 +117,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\note.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\note.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -215,7 +215,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\remember.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\remember.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -313,7 +313,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\recent-activity.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\recent-activity.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -411,7 +411,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\active-window.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\active-window.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -509,7 +509,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\check-text-target.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\check-text-target.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -607,7 +607,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\minimize-window.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\minimize-window.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -705,7 +705,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\minimize-window-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\minimize-window-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -803,7 +803,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\minimize-all.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\minimize-all.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -901,7 +901,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\close-window-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\close-window-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -999,7 +999,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-selected-text.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\copy-selected-text.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1097,7 +1097,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-text-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\copy-text-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1195,7 +1195,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-email-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\copy-email-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1293,7 +1293,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-number-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\copy-number-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1391,7 +1391,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\copy-sentence-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\copy-sentence-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1489,7 +1489,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\select-sentence-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\select-sentence-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1587,7 +1587,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\select-paragraph-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\select-paragraph-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1685,7 +1685,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\listen-start.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\listen-start.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1783,7 +1783,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\listen-stop.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\listen-stop.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1881,7 +1881,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\status.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\status.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -1979,7 +1979,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\confirm.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\confirm.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2077,7 +2077,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\cancel.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\cancel.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2175,7 +2175,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\voice-test.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\voice-test.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2273,7 +2273,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\open-calendar.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\open-calendar.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2371,7 +2371,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\open-browser.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\open-browser.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2469,7 +2469,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\search-web.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\search-web.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2567,7 +2567,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\open-chat.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\open-chat.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2665,7 +2665,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\open-gpt-chat.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\open-gpt-chat.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2763,7 +2763,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\open-gemini-chat.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\open-gemini-chat.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2861,7 +2861,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\remember-last-source.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\remember-last-source.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -2959,7 +2959,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\capabilities.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\capabilities.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -3057,7 +3057,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\rename-under-cursor.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\rename-under-cursor.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>
@@ -3155,7 +3155,7 @@
           <Duration>0</Duration>
           <Delay>0</Delay>
           <KeyCodes />
-          <Context>C:\Users\marci\VoiceLoop\scripts\va\stop.vbs</Context>
+          <Context>C:\VoiceLoop\scripts\va\stop.vbs</Context>
           <X>0</X>
           <Y>0</Y>
           <Z>0</Z>

@@ -2,7 +2,7 @@
 
 Wersja: 0.2.0  
 Platforma: Windows (lokalne uruchomienie)  
-Repozytorium: `C:\Users\marci\VoiceLoop`
+Repozytorium: katalog sklonowanego projektu
 
 ## 1. Czym jest VoiceLoop
 
@@ -143,4 +143,4 @@ Scenariusz: kilka stacji, wspólne standardy.
 
 - architektura i handoff: `docs/VOICELOOP_ARCHITECTURE_HANDOFF.md`
 - korpus i ewaluacja: `docs/SAFE_USER_CORPUS.md`
-- higiena drzewa i ostatni audyt: `docs/TREE_HYGIENE_AND_RUNTIME_AUDIT.md`
+- zakres portfolio: `docs/PORTFOLIO_PL.md`

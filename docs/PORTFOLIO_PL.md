@@ -50,7 +50,7 @@ politykę ryzyka.
   development/holdout, ręczne adnotacje i metryki.
 - Bezpieczne uzupełnianie development własnymi fragmentami mikrofonu ze spotkań,
   bez importowania kanału wyjściowego i bez zmiany zamrożonego holdoutu.
-- `541 passed, 1 skipped` w pełnym przebiegu; pomijany jest tylko prywatny
+- `545 passed, 1 skipped` w pełnym przebiegu; pomijany jest tylko prywatny
   replay bez lokalnych transkryptów. Wynik kontroluje również workflow CI.
 
 ## Decyzje inżynierskie

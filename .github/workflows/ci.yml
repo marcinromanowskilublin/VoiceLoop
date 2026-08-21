@@ -46,4 +46,4 @@ jobs:
           ../scripts/calibration-phrases/server.py
 
       - name: Pytest
-        run: python -m pytest -c pyproject.toml -q
+        run: python -m pytest -c ../pytest.ini -q

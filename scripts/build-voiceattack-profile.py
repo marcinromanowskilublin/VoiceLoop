@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import copy
-import shutil
+import os
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_PATH = ROOT / "voiceattack" / "VoiceLoop.vap"
 OUTPUT_PATH = ROOT / "voiceattack" / "VoiceLoop-v2.vap"
-TEXT_COPY_PATH = ROOT / "voiceattack" / "VoiceLoop-v2.vap.txt"
 PROFILE_ID = uuid.UUID("40125479-3df4-4d50-a0cb-1f9450b8fc6b")
 ID_NAMESPACE = uuid.UUID("bb9df565-c7dd-4ae4-a8ed-aa20aa14fa79")
 VOICE_RECOGNITION_CONFIDENCE = 65
@@ -541,8 +541,9 @@ def validate_commands() -> int:
     return phrase_count
 
 
-def build_profile() -> None:
+def build_profile(*, profile_root: str, output_path: Path = OUTPUT_PATH) -> None:
     phrase_count = validate_commands()
+    windows_script_root = PureWindowsPath(profile_root) / "scripts" / "va"
     ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
     ET.register_namespace("xsd", "http://www.w3.org/2001/XMLSchema")
     tree = ET.parse(TEMPLATE_PATH)
@@ -581,19 +582,26 @@ def build_profile() -> None:
         set_text(
             action,
             "Context",
-            str(ROOT / "scripts" / "va" / definition.script),
+            str(windows_script_root / definition.script),
         )
         commands_node.append(command)
 
     set_text(root, "LastEditedCommand", last_command_id)
     ET.indent(tree, space="  ")
-    tree.write(OUTPUT_PATH, encoding="utf-8", xml_declaration=True)
-    shutil.copyfile(OUTPUT_PATH, TEXT_COPY_PATH)
+    tree.write(output_path, encoding="utf-8", xml_declaration=True)
     print(
-        f"Zbudowano {OUTPUT_PATH} "
+        f"Zbudowano {output_path} "
         f"({len(COMMANDS)} komend, {phrase_count} wariantów fraz)."
     )
 
 
 if __name__ == "__main__":
-    build_profile()
+    parser = argparse.ArgumentParser(description="Build the VoiceLoop VoiceAttack profile.")
+    parser.add_argument(
+        "--profile-root",
+        default=str(ROOT) if os.name == "nt" else r"C:\VoiceLoop",
+        help="Windows path to the cloned VoiceLoop repository.",
+    )
+    parser.add_argument("--output", type=Path, default=OUTPUT_PATH)
+    args = parser.parse_args()
+    build_profile(profile_root=args.profile_root, output_path=args.output)

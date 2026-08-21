@@ -40,9 +40,9 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u)
   ../scripts/voice_capture_server.py \
   ../scripts/holding-commands/server.py \
   ../scripts/calibration-phrases/server.py
-./.venv/bin/python -m pytest -c pyproject.toml -q
+./.venv/bin/python -m pytest -c ../pytest.ini -q
 ```
-Baseline: **541 passed, 1 skipped** (the skipped test is the intentional
+Baseline: **545 passed, 1 skipped** (the skipped test is the intentional
 private-data replay).
 
 ### Run the core app

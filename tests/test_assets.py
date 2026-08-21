@@ -58,33 +58,6 @@ def test_panel_explains_cloud_primary_mode() -> None:
     assert "Model lokalny jest używany domyślnie" not in panel
 
 
-def test_voiceattack_profile_points_to_existing_vbs_files() -> None:
-    profile = ET.parse(ROOT / "voiceattack" / "VoiceLoop-profil.vap")
-    commands = profile.findall(".//Command")
-    command_names = {
-        command.findtext("CommandString")
-        for command in commands
-        if command.findtext("CommandString")
-    }
-    paths = [
-        action.findtext("Context")
-        for action in profile.findall(".//CommandAction")
-        if action.findtext("ActionType") == "Launch"
-    ]
-
-    assert {"voice test", "open calendar", "open browser", "open chat"}.issubset(command_names)
-    assert all(
-        action.findtext("ActionType") == "Launch"
-        for action in profile.findall(".//CommandAction")
-    )
-    assert all(path and path.lower().endswith(".vbs") for path in paths)
-    assert all(
-        (ROOT / "scripts" / "va" / PureWindowsPath(path).name).is_file()
-        for path in paths
-        if path
-    )
-
-
 def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
     profile = ET.parse(ROOT / "voiceattack" / "VoiceLoop-v2.vap")
     commands = profile.findall(".//Command")
@@ -128,6 +101,7 @@ def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
         for action in profile.findall(".//CommandAction")
     )
     assert all(path.parent.name.casefold() == "va" for path in paths)
+    assert all("users" not in str(path).casefold() for path in paths)
     assert all(
         (ROOT / "scripts" / "va" / path.name).is_file() and path.suffix == ".vbs"
         for path in paths
