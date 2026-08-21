@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceLoop — lokalne próbki głosu</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1a1d24;
+      --line: #303642;
+      --text: #edf0f5;
+      --muted: #9da7b7;
+      --accent: #78aef8;
+      --ok: #77c997;
+      --danger: #e07d87;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 system-ui, "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0; font-size: 18px; }
+    #meta { color: var(--muted); font-size: 12px; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 34%) 1fr;
+      min-height: calc(100vh - 58px);
+    }
+    aside {
+      padding: 10px;
+      border-right: 1px solid var(--line);
+      overflow: auto;
+    }
+    .phrase-row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      gap: 8px;
+      padding: 9px;
+      margin-bottom: 5px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .phrase-row:hover, .phrase-row.active {
+      background: var(--panel);
+      border-color: var(--line);
+    }
+    .phrase-row.done .phrase-text { color: var(--ok); }
+    .count, .label { color: var(--muted); font-size: 12px; }
+    section { padding: 28px; }
+    #phrase { margin: 4px 0 8px; font-size: clamp(24px, 4vw, 36px); }
+    .actions { display: flex; flex-wrap: wrap; gap: 9px; margin: 20px 0; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px 15px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+    }
+    button:disabled { opacity: .45; cursor: default; }
+    #record.live { border-color: var(--danger); color: var(--danger); }
+    #banner {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+    }
+    #banner.ok { color: var(--ok); }
+    #banner.error { color: var(--danger); }
+    audio { width: min(680px, 100%); margin-top: 16px; }
+    @media (max-width: 760px) {
+      main { grid-template-columns: 1fr; }
+      aside { max-height: 38vh; border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">VoiceLoop — lokalne próbki głosu</h1>
+    <div id="meta">tylko localhost</div>
+  </header>
+  <main>
+    <aside id="phrases"></aside>
+    <section>
+      <div class="label" id="family">Wybierz frazę</div>
+      <h2 id="phrase">Ładowanie…</h2>
+      <div class="actions">
+        <button id="draw">Wylosuj</button>
+        <button id="record" disabled>Nagraj</button>
+        <button id="stop" disabled>Stop</button>
+        <button id="play" disabled>Odsłuch</button>
+        <button id="next" disabled>Zapisz i następna</button>
+      </div>
+      <div id="banner">Nagrania zostają wyłącznie w lokalnym katalogu data/.</div>
+      <audio id="audio" controls hidden></audio>
+    </section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const state = {
+      phrases: [],
+      selected: null,
+      stream: null,
+      recorder: null,
+      chunks: [],
+      blob: null,
+      objectUrl: "",
+      startedAt: 0,
+      saved: false
+    };
+
+    function setBanner(message, kind = "") {
+      $("banner").textContent = message;
+      $("banner").className = kind;
+    }
+
+    function selectedPhrase() {
+      return state.phrases.find(item => item.id === state.selected) || null;
+    }
+
+    function renderList() {
+      const rows = state.phrases.map(item => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "phrase-row"
+          + (item.done ? " done" : "")
+          + (item.id === state.selected ? " active" : "");
+        const marker = document.createElement("span");
+        marker.textContent = item.done ? "✓" : "·";
+        const content = document.createElement("span");
+        const text = document.createElement("span");
+        text.className = "phrase-text";
+        text.textContent = item.text;
+        const label = document.createElement("span");
+        label.className = "label";
+        label.textContent = item.label || item.family || "próbka";
+        content.append(text, document.createElement("br"), label);
+        const count = document.createElement("span");
+        count.className = "count";
+        count.textContent = item.files && item.files.length ? String(item.files.length) : "";
+        row.append(marker, content, count);
+        row.onclick = () => selectPhrase(item.id);
+        return row;
+      });
+      $("phrases").replaceChildren(...rows);
+    }
+
+    function selectPhrase(id) {
+      state.selected = id;
+      state.saved = false;
+      const item = selectedPhrase();
+      $("phrase").textContent = item ? item.text : "Wybierz frazę";
+      $("family").textContent = item ? (item.label || item.family) : "";
+      $("record").disabled = !item || Boolean(state.recorder);
+      $("next").disabled = true;
+      renderList();
+    }
+
+    function applySnapshot(data) {
+      state.phrases = Array.isArray(data.phrases) ? data.phrases : [];
+      $("title").textContent = data.title || "VoiceLoop — próbki głosu";
+      $("meta").textContent = `lokalny zapis: ${data.save_dir || "data/"} · tylko localhost`;
+      if (!state.selected && state.phrases.length) state.selected = state.phrases[0].id;
+      selectPhrase(state.selected);
+    }
+
+    function metadataHeader(metadata) {
+      const bytes = new TextEncoder().encode(JSON.stringify(metadata));
+      let binary = "";
+      bytes.forEach(value => { binary += String.fromCharCode(value); });
+      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
+
+    function preferredMime() {
+      return [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus"
+      ].find(type => MediaRecorder.isTypeSupported(type)) || "";
+    }
+
+    function extensionFor(mime) {
+      if (mime.includes("ogg")) return "ogg";
+      if (mime.includes("wav")) return "wav";
+      return "webm";
+    }
+
+    async function saveRecording(blob, durationMs) {
+      const item = selectedPhrase();
+      if (!item) throw new Error("Najpierw wybierz frazę.");
+      const metadata = {
+        id: item.id,
+        text: item.text,
+        family: item.family,
+        label: item.label,
+        ext: extensionFor(blob.type),
+        duration_ms: durationMs
+      };
+      const response = await fetch("/api/record", {
+        method: "POST",
+        headers: {
+          "Content-Type": blob.type || "application/octet-stream",
+          "X-VoiceLoop-Metadata": metadataHeader(metadata)
+        },
+        body: blob
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok || !data.saved) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      applySnapshot(data);
+      state.saved = true;
+      $("next").disabled = false;
+      const take = data.take || {};
+      setBanner(
+        `${take.ok ? "OK" : "Do poprawy"}: ${take.reason || "zapisano"} · ${take.file}`,
+        take.ok ? "ok" : "error"
+      );
+    }
+
+    $("record").onclick = async () => {
+      try {
+        state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = preferredMime();
+        state.chunks = [];
+        state.recorder = mime
+          ? new MediaRecorder(state.stream, { mimeType: mime })
+          : new MediaRecorder(state.stream);
+        state.recorder.ondataavailable = event => {
+          if (event.data && event.data.size) state.chunks.push(event.data);
+        };
+        state.recorder.onstop = async () => {
+          const durationMs = Date.now() - state.startedAt;
+          const mimeType = state.recorder.mimeType || "audio/webm";
+          state.recorder = null;
+          state.stream.getTracks().forEach(track => track.stop());
+          state.stream = null;
+          state.blob = new Blob(state.chunks, { type: mimeType });
+          if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+          state.objectUrl = URL.createObjectURL(state.blob);
+          $("audio").src = state.objectUrl;
+          $("audio").hidden = false;
+          $("play").disabled = false;
+          $("record").classList.remove("live");
+          $("record").disabled = false;
+          $("stop").disabled = true;
+          try {
+            await saveRecording(state.blob, durationMs);
+          } catch (error) {
+            setBanner("Błąd zapisu: " + error.message, "error");
+          }
+        };
+        state.startedAt = Date.now();
+        state.recorder.start(200);
+        $("record").classList.add("live");
+        $("record").disabled = true;
+        $("stop").disabled = false;
+        setBanner("Nagrywanie… powiedz frazę i kliknij Stop.");
+      } catch (error) {
+        setBanner("Mikrofon niedostępny: " + error.message, "error");
+      }
+    };
+
+    $("stop").onclick = () => {
+      if (state.recorder && state.recorder.state !== "inactive") state.recorder.stop();
+    };
+    $("play").onclick = () => {
+      if (state.objectUrl) $("audio").play();
+    };
+    $("draw").onclick = async () => {
+      const response = await fetch("/api/draw");
+      const data = await response.json();
+      applySnapshot(data);
+      if (data.phrase) selectPhrase(data.phrase.id);
+      setBanner("Wylosowano nową frazę.");
+    };
+    $("next").onclick = async () => {
+      const item = selectedPhrase();
+      if (!item || !state.saved) return;
+      await fetch("/api/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id, done: true })
+      });
+      const currentIndex = state.phrases.findIndex(row => row.id === item.id);
+      const next = state.phrases[(currentIndex + 1) % state.phrases.length];
+      const snapshot = await (await fetch("/api/state")).json();
+      applySnapshot(snapshot);
+      if (next) selectPhrase(next.id);
+      setBanner("Próbka oznaczona jako zakończona.", "ok");
+    };
+
+    fetch("/api/state")
+      .then(response => response.json())
+      .then(applySnapshot)
+      .catch(error => setBanner("Serwer nie odpowiada: " + error.message, "error"));
+  </script>
+</body>
+</html>
