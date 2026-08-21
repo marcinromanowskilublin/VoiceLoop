@@ -1,8 +1,8 @@
 # VoiceLoop
 
-**What it is.** VoiceLoop is a local-first Polish voice assistant for Windows,
-built around a FastAPI core and a strict boundary between language models and
-operating-system actions.
+**What it is.** VoiceLoop is a local-control-first Polish voice assistant for
+Windows, built around a FastAPI core and a strict boundary between language
+models and operating-system actions.
 
 **What it does.** It turns speech into either a natural conversation or a
 validated, typed action plan; executes only allowlisted actions; speaks the
@@ -18,6 +18,15 @@ about making that loop controllable, inspectable, and testable.
 > **Portfolio status:** the core, safety model, voice-evaluation pipeline, API,
 > and local tooling are verified. Hume and n8n are explicitly optional or
 > experimental and are not presented as production features.
+
+## At a glance
+
+- **Focus:** applied AI, safe tool use, Polish voice UX, and measurable quality.
+- **Proof:** 541 tests pass; one private-data replay is intentionally skipped;
+  full Ruff and Windows CI pass.
+- **Platform:** Windows and Python 3.11, with a local FastAPI control plane.
+- **Cloud boundary:** Deepgram and optional model/TTS providers may use cloud
+  APIs; execution policy, state, secrets, and private datasets stay local.
 
 ## Why this project matters
 
@@ -72,15 +81,15 @@ This makes the project useful as a case study in:
 
 ### Evaluation instead of demo-only claims
 
-- More than 500 unit and integration tests.
-- Current baseline: **541 passed, 1 skipped**.
-- The skipped test requires a private local replay dataset that is intentionally
-  not committed.
 - Frozen voice-evaluation split: 30 development and 90 holdout samples.
 - Audio provenance, hashes, deduplication, speaker confirmation, and manual
   annotations.
 - Atomic metadata publication when adding meeting-microphone samples.
 - Windows CI on Python 3.11 with full Ruff and pytest runs.
+
+This repository verifies the evaluation infrastructure and its invariants. It
+does not publish WER, routing-accuracy, or prosody scores from the private local
+corpus, so this README makes no model-quality claim based on those results.
 
 ## Architecture
 
@@ -383,21 +392,6 @@ VoiceLoop/
 ├── data/                     local runtime data, ignored
 └── logs/                     local runtime logs, ignored
 ```
-
-## Verified status
-
-The current portfolio branch has been checked with:
-
-- **541 passed, 1 skipped**;
-- full Ruff validation;
-- Windows GitHub Actions CI;
-- authenticated health and SSE tests;
-- a safe `voice_test` API smoke test;
-- a manual panel test without microphone or cloud activity;
-- secret-pattern scanning.
-
-The skipped test requires a private local transcript replay and is expected to
-skip when that data is absent.
 
 ## Known limitations
 
