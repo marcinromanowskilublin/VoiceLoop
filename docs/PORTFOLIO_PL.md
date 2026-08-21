@@ -50,8 +50,8 @@ politykę ryzyka.
   development/holdout, ręczne adnotacje i metryki.
 - Bezpieczne uzupełnianie development własnymi fragmentami mikrofonu ze spotkań,
   bez importowania kanału wyjściowego i bez zmiany zamrożonego holdoutu.
-- Ponad 500 testów jednostkowych i integracyjnych; aktualny wynik jest
-  publikowany przez workflow CI na branchu.
+- `541 passed, 1 skipped` w pełnym przebiegu; pomijany jest tylko prywatny
+  replay bez lokalnych transkryptów. Wynik kontroluje również workflow CI.
 
 ## Decyzje inżynierskie
 

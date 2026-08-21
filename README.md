@@ -553,9 +553,10 @@ cd listener
 
 Zestaw obejmuje routing, normalizację języka polskiego, pamięć, politykę ryzyka,
 potwierdzenia, kolejkę, routing modeli, embeddingi, worker Screenpipe oraz profil
-VoiceAttack. Pakiet zawiera ponad 500 testów; dokładny wynik i pełny Ruff są
-weryfikowane przez workflow CI. Generator profilu dodatkowo odrzuca kolizje
-fraz i brakujące wrappery VBS.
+VoiceAttack. Aktualny czysty przebieg to `541 passed, 1 skipped`; pomijany jest
+wyłącznie prywatny replay, gdy lokalne transkrypty nie istnieją. Pełny Ruff i
+pytest weryfikuje workflow CI. Generator profilu dodatkowo odrzuca kolizje fraz
+i brakujące wrappery VBS.
 
 ## Struktura
 

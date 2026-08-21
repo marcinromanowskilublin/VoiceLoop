@@ -118,8 +118,8 @@ Aktualne modele:
 - lokalny fallback: `qwen2.5-14b-instruct-1m-abliterated`,
 - embeddingi: `text-embedding-nomic-embed-text-v2-moe`.
 
-Pakiet zawiera ponad 500 testów. Dokładny wynik pytest i Ruff publikuje workflow
-CI; lokalny wynik należy zawsze potwierdzić przed przekazaniem wersji.
+Aktualny przebieg to `541 passed, 1 skipped`; pomijany jest prywatny replay bez
+lokalnych transkryptów. Wynik pytest i Ruff publikuje również workflow CI.
 
 ---
 
