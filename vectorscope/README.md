@@ -185,20 +185,68 @@ indziej i próg ustawiony na jego podstawie byłby ustawiony na ślepo.
 Ten sam tekst po obu stronach retrievalu daje tylko **0.775**, nie 1.000 —
 prefiksy rozsuwają nawet identyczną treść.
 
-Wnioski dla konfiguracji:
+Powyższe liczby opisują jednak **gołe zdania**, a VoiceLoop nigdy nie embeduje
+gołych zdań. Obie strony owija w szablony, i dopiero pomiar na nich mówi coś
+o realnej konfiguracji.
 
-- `vector_memory_min_score = 0.15` **nie jest martwy**. Leży mniej więcej na
-  medianie szumu (0.164), więc odrzuca około połowy treści bez związku.
-- Prawdziwy problem jest inny i poważniejszy: **sygnał i szum niemal się
-  pokrywają**. Piąty percentyl par powiązanych (0.146) leży *poniżej* mediany
-  par niepowiązanych. Podniesienie progu do 95. percentyla szumu (0.273)
-  wycięłoby **64%** par faktycznie powiązanych.
-- Na tym modelu żaden pojedynczy próg cosinusa nie rozdzieli sygnału od szumu.
-  Sensowniejsze jest ograniczanie liczby wyników i sortowanie niż odcinanie
-  wartością.
-- `screenpipe_duplicate_min_score = 0.92` leży wysoko ponad szumem przestrzeni
-  dokument–dokument (max 0.672), więc jako filtr duplikatów jest ustawiony
-  sensownie.
+## Progi mierzone w ich własnej przestrzeni
+
+To jest trzecia wersja tego rozdziału i warto wiedzieć dlaczego. Pierwsza
+orzekała o dnie skali z jednej kotwiki. Druga poprawiła to na rozkład, ale
+liczyła go na gołych zdaniach. Dopiero trzecia używa produkcyjnych funkcji
+`memory_vector_documents` i `memory_query_documents`, więc mierzy to, co
+naprawdę trafia do Qdranta. Dwa pierwsze wnioski były nieprawdziwe.
+
+Kluczowy fakt konstrukcyjny: `vector_memory_min_score` jest stosowany do
+**surowego cosinusa każdej osi osobno, przed fuzją RRF** — raz jako
+`score_threshold` w zapytaniu Qdranta, drugi raz przy zbieraniu wyników
+(`qdrant_memory.py`). Każda oś ma przy tym własny stały nagłówek po stronie
+dokumentu i inny po stronie zapytania. Nagłówek działa jak prefiks: przesuwa
+cały rozkład tej osi.
+
+| Oś | Waga | Szum p50 | Sygnał p50 | Rozstaw |
+| --- | --- | --- | --- | --- |
+| semantic | 0.40 | 0.365 | 0.421 | 0.055 |
+| topic | 0.20 | 0.352 | 0.422 | 0.070 |
+| intent | 0.15 | 0.414 | 0.469 | 0.055 |
+| decision | 0.15 | 0.443 | 0.503 | 0.060 |
+| person_context | 0.10 | 0.368 | 0.416 | 0.049 |
+
+Dwie rzeczy widać od razu:
+
+- **Rozstaw między osiami (0.091) jest większy niż rozstaw sygnału i szumu
+  wewnątrz najlepszej osi (0.070).** Pozycja punktu w skali mówi więc więcej
+  o tym, którego nagłówka użyto, niż o tym, czy treść pasuje do pytania.
+- Nagłówki *zmniejszają* rozdzielczość. Na gołych zdaniach rozstaw wynosił
+  0.082, po owinięciu w szablony spada do 0.049–0.070.
+
+Werdykty o progach wydaje `measure_threshold_reachability`, które dla każdego
+progu liczy **sufit** (cosinus dla identycznej treści po obu stronach) i
+**podłogę** (rozkład par bez związku) w przestrzeni tego konkretnego progu:
+
+| Próg | Wartość | Sufit | Podłoga min | Werdykt |
+| --- | --- | --- | --- | --- |
+| `vector_memory_min_score` | 0.15 | 0.781 | 0.162 | **martwy** |
+| `screenpipe_duplicate_min_score` | 0.92 | 0.789 | 0.007 | **nieosiągalny** |
+
+- `vector_memory_min_score = 0.15` leży poniżej najniższej zmierzonej pary bez
+  związku (0.162) we wszystkich pięciu osiach. Nie odrzuca niczego.
+- `screenpipe_duplicate_min_score = 0.92` **nie może zadziałać nigdy**. Ścieżka
+  deduplikacji porównuje surową treść puszczoną przez `embed_query` z wektorem
+  `semantic` zapisanego dokumentu, który ma własny nagłówek. Identyczna treść
+  osiąga tam medianę 0.679 i maksimum 0.789. `_is_duplicate_activity` zawsze
+  zwraca fałsz, więc kubełki aktywności nigdy się nie deduplikują.
+
+Panel świadomie **nie orzeka** o `capability_match_min_score` ani
+`screenpipe_related_history_min_score`: działają na innym korpusie i innych
+szablonach, których nie zmierzono. Zgadywanie byłoby tu gorsze od milczenia.
+
+Wniosek architektoniczny: RRF łączy **rangi** właśnie po to, żeby nie zależeć
+od bezwzględnych wartości. Bramka na bezwzględnym cosinusie *przed* fuzją
+działa wbrew tej konstrukcji — może wyciąć oś, w której dokument miał rangę
+pierwszą, tylko dlatego że ta oś ma niżej położony rozkład. Jeśli próg ma
+zostać, powinien być wyrażony percentylem rozkładu danej osi, a nie jedną
+liczbą dla pięciu różnych przestrzeni.
 
 Osobna obserwacja z kotwic: antonimy („wysoki" / „niski") dostają 0.721, wyżej
 niż większość par niepowiązanych. Embedding łapie wymiar znaczeniowy, nie znak.

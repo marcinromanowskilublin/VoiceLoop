@@ -39,7 +39,7 @@ from .config import (
 from .diagnostics import DiagnosticsRequest, run_diagnostics
 from .fragments import LEVELS, SEGMENTATION_RULE, SEGMENTATION_VERSION
 from .prefix_check import run_prefix_check
-from .scale import measure_scale
+from .scale import measure_axis_floors, measure_scale, measure_threshold_reachability
 from .store import RecordingStore, transcript_hash
 from .transcribe import (
     TranscriptionError,
@@ -393,6 +393,16 @@ async def api_prefix_check(payload: PrefixCheckPayload) -> JSONResponse:
 async def api_scale_floor(payload: ScaleFloorPayload) -> JSONResponse:
     result = await measure_scale(prefix=payload.prefix)
     return JSONResponse(result)
+
+
+@app.post("/api/threshold-reachability")
+async def api_threshold_reachability() -> JSONResponse:
+    return JSONResponse(await measure_threshold_reachability())
+
+
+@app.post("/api/axis-floor")
+async def api_axis_floor() -> JSONResponse:
+    return JSONResponse(await measure_axis_floors())
 
 
 class NoCacheStaticFiles(StaticFiles):
