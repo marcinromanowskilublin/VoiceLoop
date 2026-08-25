@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from voiceloop.embeddings import EmbeddingUnavailableError
@@ -27,6 +27,7 @@ from .analysis import (
 from .anchors import anchor_pair_payload
 from .config import (
     EMBEDDING_CONTEXT_TOKENS,
+    PREFIX_DOCUMENT,
     PREFIXES,
     VECTORSCOPE_HOST,
     VECTORSCOPE_PORT,
@@ -38,6 +39,7 @@ from .config import (
 from .diagnostics import DiagnosticsRequest, run_diagnostics
 from .fragments import LEVELS, SEGMENTATION_RULE, SEGMENTATION_VERSION
 from .prefix_check import run_prefix_check
+from .scale import measure_scale
 from .store import RecordingStore, transcript_hash
 from .transcribe import (
     TranscriptionError,
@@ -79,9 +81,26 @@ class PrefixCheckPayload(BaseModel):
     min_score: float | None = Field(default=None, ge=-1.0, le=1.0)
 
 
+class ScaleFloorPayload(BaseModel):
+    prefix: str = Field(default=PREFIX_DOCUMENT)
+
+
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+async def index() -> HTMLResponse:
+    """Doklejamy do zasobów znacznik zmiany pliku.
+
+    Same nagłówki `no-store` nie wystarczają: osadzone przeglądarki potrafią
+    trzymać stary `app.js` mimo nich, a wtedy panel liczy nowe dane i rysuje je
+    starym kodem. Przy narzędziu pomiarowym to błąd nie do wykrycia okiem.
+    """
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for asset in ("app.js", "styles.css"):
+        path = STATIC_DIR / asset
+        if path.exists():
+            stamp = int(path.stat().st_mtime)
+            html = html.replace(f"/static/{asset}", f"/static/{asset}?v={stamp}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.get("/api/config")
@@ -370,7 +389,30 @@ async def api_prefix_check(payload: PrefixCheckPayload) -> JSONResponse:
     return JSONResponse(result)
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+@app.post("/api/scale-floor")
+async def api_scale_floor(payload: ScaleFloorPayload) -> JSONResponse:
+    result = await measure_scale(prefix=payload.prefix)
+    return JSONResponse(result)
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Panel jest narzędziem diagnostycznym, nie stroną produkcyjną.
+
+    Bez tego przeglądarka trzyma stary `app.js` po każdej zmianie kodu i pokazuje
+    wnioski wyliczone poprzednią wersją — a to najgorszy możliwy rodzaj błędu
+    w przyrządzie pomiarowym.
+    """
+
+    def is_not_modified(self, response_headers, request_headers) -> bool:  # noqa: ANN001
+        return False
+
+    async def get_response(self, path: str, scope):  # noqa: ANN001, ANN201
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 
 
 def main() -> None:

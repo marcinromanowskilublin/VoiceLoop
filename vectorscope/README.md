@@ -165,26 +165,66 @@ sąsiadów z obrazka jest sąsiadami naprawdę), continuity (ile prawdziwych
 sąsiadów przetrwało), stress Kruskala i diagram Sheparda. Wielkość punktu na
 rzucie to udział sąsiedztwa, który przeżył spłaszczenie.
 
-## Pierwszy pomiar: skala nie zaczyna się od zera
+## Pomiar skali: dwie różne przestrzenie, jeden próg
 
-Kotwice o znanej relacji, zmierzone na `nomic-embed-text-v2-moe` po polsku:
+Kotwice o znanej relacji pokazują, *co* znaczy dana wysokość cosinusa, ale nie
+nadają się do orzekania, gdzie leży dno skali — to próba o liczności jeden.
+Dno liczy `scale.py` na korpusie ośmiu rozłącznych dziedzin, traktując każdą
+parę z różnych dziedzin jako niepowiązaną.
 
-| Relacja | Cosinus |
-| --- | --- |
-| identyczny tekst | 1.000 |
-| parafraza | 0.859 |
-| ta sama dziedzina (lekarz / pacjent) | 0.847 |
-| synonimy (lęk / niepokój) | 0.778 |
-| antonimy (wysoki / niski) | 0.721 |
-| **bez związku (lęk / silnik wysokoprężny)** | **0.585** |
+Rozstrzygające jest to, **którą przestrzeń się mierzy**. VoiceLoop porównuje
+zapytanie (`search_query: `) z dokumentem (`search_document: `), więc operacyjny
+cosinus jest międzyprefiksowy. Rozkład dokument–dokument leży zupełnie gdzie
+indziej i próg ustawiony na jego podstawie byłby ustawiony na ślepo.
 
-Dno skali tego modelu to **0.585**, nie zero. Wniosek dotyczy wprost
-konfiguracji: `vector_memory_min_score = 0.15` leży 0.43 **poniżej** dna, więc
-nie odcina niczego — dowolny niepowiązany tekst przechodzi ten filtr. Cały
-użyteczny sygnał mieści się w przedziale 0.585–1.000.
+| Rozkład | Dno p50 | Dno p95 | Sygnał p50 | Rozstaw |
+| --- | --- | --- | --- | --- |
+| **operacyjny** (zapytanie → dokument), 2016 par | 0.164 | 0.273 | 0.245 | 0.082 |
+| dokument–dokument z `search_document: `, 1008 par | 0.477 | 0.578 | 0.563 | 0.086 |
 
-Drugi wniosek: antonimy dostają 0.721, wyżej niż wynosi dno. Embedding łapie
-wymiar znaczeniowy, nie znak — „wysoki" i „niski" są dla niego blisko.
+Ten sam tekst po obu stronach retrievalu daje tylko **0.775**, nie 1.000 —
+prefiksy rozsuwają nawet identyczną treść.
+
+Wnioski dla konfiguracji:
+
+- `vector_memory_min_score = 0.15` **nie jest martwy**. Leży mniej więcej na
+  medianie szumu (0.164), więc odrzuca około połowy treści bez związku.
+- Prawdziwy problem jest inny i poważniejszy: **sygnał i szum niemal się
+  pokrywają**. Piąty percentyl par powiązanych (0.146) leży *poniżej* mediany
+  par niepowiązanych. Podniesienie progu do 95. percentyla szumu (0.273)
+  wycięłoby **64%** par faktycznie powiązanych.
+- Na tym modelu żaden pojedynczy próg cosinusa nie rozdzieli sygnału od szumu.
+  Sensowniejsze jest ograniczanie liczby wyników i sortowanie niż odcinanie
+  wartością.
+- `screenpipe_duplicate_min_score = 0.92` leży wysoko ponad szumem przestrzeni
+  dokument–dokument (max 0.672), więc jako filtr duplikatów jest ustawiony
+  sensownie.
+
+Osobna obserwacja z kotwic: antonimy („wysoki" / „niski") dostają 0.721, wyżej
+niż większość par niepowiązanych. Embedding łapie wymiar znaczeniowy, nie znak.
+
+## Niespójność prefiksów: mierzona rankingiem, nie cosinusem
+
+Karta modelu wymaga `search_query: ` przed pytaniami i `search_document: ` przed
+dokumentami. Stara ścieżka Screenpipe zapisuje dokumenty bez prefiksu.
+
+`prefix_check.py` porównuje konwencje **trafieniem w pierwszym wyniku**, a nie
+średnim cosinusem, i to jest istotne: prefiks przesuwa całą chmurę wektorów, więc
+konwencja o niższych cosinusach może mieć lepszy retrieval. Pierwsza wersja tego
+modułu porównywała średnie i wyciągnęła z tego fałszywy wniosek.
+
+Na 24 sondach wszystkie cztery konwencje trafiają 22–23 razy na 24. Różnica
+jednej sondy to szum, więc **niespójność prefiksów nie psuje tu rankingu**.
+Psuje natomiast dwie inne rzeczy:
+
+- Ten sam tekst pod dwoma prefiksami ma cosinus 0.835, nie 1.000 — wektory nie
+  są wymienne, więc porównywanie ich wprost jest błędem.
+- Tekst bez prefiksu leży bardzo blisko wariantu `search_query: ` (cosinus
+  0.968). Stara ścieżka de facto zapisuje dokumenty tak, jakby były zapytaniami,
+  i stąd biorą się jej pozornie wyższe cosinusy — porównuje zapytanie
+  z zapytaniem.
+- Prefiks `search_document: ` podnosi wzajemne podobieństwo niepowiązanych
+  dokumentów z 0.302 do 0.574, czyli dokłada wspólny kierunek i ściska zakres.
 
 ## Znane problemy środowiska
 

@@ -61,6 +61,8 @@ const state = {
   selected: new Set(),
   levels: new Set(["word"]),
   analysis: null,
+  scaleFloor: null,
+  scaleFloorPending: false,
   colourByGroup: new Map(),
   cy: null,
   recorder: null,
@@ -698,9 +700,40 @@ function interpretCosine(value) {
 function renderScale() {
   const result = state.analysis;
   renderAnchors(result.anchors);
-  renderThresholds(result.thresholds, result.anchors);
+  renderThresholds(result.thresholds, state.scaleFloor);
   renderVerdict(result);
   renderHistogram(result);
+  loadScaleFloor();
+}
+
+/**
+ * Dno skali z rozkładu, nie z jednej kotwicy.
+ *
+ * Pojedyncza para „bez związku" pokazuje, jak wygląda brak podobieństwa, ale
+ * nie mówi, gdzie leży dno — to próba o liczności jeden. Pomiar na korpusie
+ * dziedzin liczy ponad dwa tysiące par i dopiero na tym można ustawiać próg.
+ */
+async function loadScaleFloor() {
+  if (state.scaleFloor || state.scaleFloorPending) return;
+  state.scaleFloorPending = true;
+  try {
+    const measured = await api("/api/scale-floor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (measured.ok) {
+      state.scaleFloor = measured;
+      if (state.analysis) {
+        renderThresholds(state.analysis.thresholds, state.scaleFloor);
+        renderVerdict(state.analysis);
+      }
+    }
+  } catch (error) {
+    /* Werdykt zostaje przy kotwicach i sam o tym mówi. */
+  } finally {
+    state.scaleFloorPending = false;
+  }
 }
 
 function renderAnchors(anchors) {
@@ -723,19 +756,32 @@ function renderAnchors(anchors) {
     .join("");
 }
 
-function renderThresholds(thresholds, anchors = null) {
+const THRESHOLD_POSITIONS = {
+  ponizej_dna: ["nie odrzuca niczego", "var(--bad)"],
+  wewnatrz_szumu: ["wewnątrz szumu", "var(--warn, #d08b28)"],
+  na_krawedzi_szumu: ["na krawędzi szumu", "var(--warn, #d08b28)"],
+  powyzej_szumu: ["ponad szumem", "var(--good)"],
+};
+
+function renderThresholds(thresholds, measured = null) {
   const host = $("#thresholds");
   if (!thresholds?.length) {
     host.innerHTML = '<p class="empty">Brak progów.</p>';
     return;
   }
-  const floor = anchors?.find((item) => item.key === "bez_zwiazku");
+  const positions = new Map(
+    (measured?.thresholds || []).map((item) => [item.key, item.position]),
+  );
   host.innerHTML = thresholds
     .map((item) => {
-      const dead = floor && item.key.includes("min_score") && item.value < floor.cosine;
+      const position = positions.get(item.key);
+      const [text, colour] = THRESHOLD_POSITIONS[position] || [];
+      const badge = text
+        ? ` <em style="color:${colour};font-style:normal">${text}</em>`
+        : "";
       return `<div class="threshold-row">
         <div>
-          <div class="label">${escapeHtml(item.label)}${dead ? ' <em style="color:var(--bad);font-style:normal">poniżej dna skali</em>' : ""}</div>
+          <div class="label">${escapeHtml(item.label)}${badge}</div>
           <div class="origin">${escapeHtml(item.key)} · ${escapeHtml(item.origin)}</div>
         </div>
         <div class="value">${num(item.value, 2)}</div>
@@ -746,52 +792,60 @@ function renderThresholds(thresholds, anchors = null) {
 
 function renderVerdict(result) {
   const host = $("#verdict");
-  const anchors = result.anchors || [];
-  const floor = anchors.find((item) => item.key === "bez_zwiazku");
-  const identical = anchors.find((item) => item.key === "identyczne");
-  const synonyms = anchors.find((item) => item.key === "synonimy");
   const minScore = (result.thresholds || []).find((item) => item.key === "vector_memory_min_score");
-
-  if (!floor || !minScore) {
+  if (!minScore) {
     host.className = "verdict";
-    host.innerHTML = '<p class="subtle">Włącz kotwice skali, żeby ocenić progi.</p>';
+    host.innerHTML = '<p class="subtle">Brak progu vector_memory_min_score w ustawieniach.</p>';
     return;
   }
 
-  const centres = result.histogram.centres || [];
-  const counts = result.histogram.counts || [];
-  const total = counts.reduce((sum, value) => sum + value, 0);
-  const above = counts.reduce(
-    (sum, value, index) => (centres[index] >= minScore.value ? sum + value : sum),
-    0,
-  );
-  const share = total ? (above / total) * 100 : 0;
-  const range = 1 - floor.cosine;
-  const dead = floor.cosine > minScore.value;
+  const measured = state.scaleFloor;
+  if (!measured) {
+    host.className = "verdict";
+    host.innerHTML = `<p class="subtle">Mierzę dno skali na korpusie ośmiu dziedzin…
+      Kotwice pokazują, <em>co</em> znaczy dana wysokość cosinusa, ale pojedyncza para
+      nie wystarczy, żeby orzec, gdzie leży dno.</p>`;
+    return;
+  }
 
-  host.className = `verdict ${dead ? "is-alarm" : "is-fine"}`;
+  const retrieval = measured.retrieval;
+  const floor = retrieval.floor;
+  const signal = retrieval.signal;
+  const position = (measured.thresholds || []).find((item) => item.key === minScore.key)?.position;
+  const cost = retrieval.signal_below_floor_p95;
+  const overlapping = retrieval.separation < 0.15;
+
+  const headline = {
+    ponizej_dna: "Próg odcięcia nie odcina niczego",
+    wewnatrz_szumu: "Próg leży w środku szumu",
+    na_krawedzi_szumu: "Próg ociera się o szum",
+    powyzej_szumu: "Próg mieści się ponad szumem",
+  }[position] || "Położenie progu";
+
+  host.className = `verdict ${position === "powyzej_szumu" ? "is-fine" : "is-alarm"}`;
   host.innerHTML = `
-    <div class="verdict-title">${dead ? "Próg odcięcia nie odcina niczego" : "Próg mieści się w zakresie roboczym"}</div>
+    <div class="verdict-title">${headline}</div>
     <p>
-      Kompletnie niepowiązana para („${escapeHtml(floor.left)}” ↔ „${escapeHtml(floor.right)}”)
-      dostaje <span class="num">${num(floor.cosine)}</span>. To dno skali tego modelu — nie zero.
-      Próg <code>${escapeHtml(minScore.key)}</code> wynosi <span class="num">${num(minScore.value, 2)}</span>,
-      czyli ${dead
-        ? `leży <strong>${num(floor.cosine - minScore.value, 2)} poniżej dna</strong>. Każdy tekst,
-           nawet o silniku wysokoprężnym, przechodzi ten filtr.`
-        : "faktycznie rozróżnia trafienia."}
+      Dno zmierzone na <strong>${retrieval.pairs_unrelated}</strong> parach z różnych dziedzin,
+      w układzie takim jak w retrievalu: zapytanie z prefiksem <code>search_query</code>
+      kontra dokument z <code>search_document</code>. Mediana szumu wynosi
+      <span class="num">${num(floor.p50)}</span>, 95. percentyl <span class="num">${num(floor.p95)}</span>,
+      maksimum <span class="num">${num(floor.max)}</span>. Próg
+      <code>${escapeHtml(minScore.key)}</code> = <span class="num">${num(minScore.value, 2)}</span>.
     </p>
     <p>
-      Cały użyteczny sygnał mieści się między <span class="num">${num(floor.cosine, 2)}</span>
-      a <span class="num">${num(identical ? identical.cosine : 1, 2)}</span>, więc realny zakres to
-      <strong>${num(range, 2)}</strong> z teoretycznego 1.00.
-      ${synonyms ? `Synonimy siadają na <span class="num">${num(synonyms.cosine, 2)}</span>, i to jest
-      wysokość, na której zaczyna się prawdziwe podobieństwo znaczeń.` : ""}
-      W tym zbiorze <strong>${num(share, 1)}%</strong> wszystkich par przechodzi obecny próg.
+      Pary faktycznie powiązane mają medianę <span class="num">${num(signal.p50)}</span>, czyli tylko
+      <strong>${num(retrieval.separation)}</strong> nad szumem. Ten sam tekst po obu stronach
+      dostaje <span class="num">${num(retrieval.identical_text.p50)}</span>, nie 1.000 — prefiksy
+      rozsuwają nawet identyczną treść.
     </p>
-    ${dead ? `<p>Sensowne odcięcie dla tego modelu zaczyna się dopiero powyżej
-      <span class="num">${num(floor.cosine + range * 0.35, 2)}</span> — ta wartość leży między dnem skali
-      a poziomem synonimów.</p>` : ""}`;
+    ${overlapping ? `<p><strong>Rozkłady niemal się pokrywają.</strong> Podniesienie progu do
+      95. percentyla szumu (<span class="num">${num(floor.p95)}</span>) wycięłoby
+      <strong>${num(cost * 100, 0)}%</strong> par prawdziwie powiązanych. Na tym modelu żaden
+      pojedynczy próg cosinusa nie rozdzieli sygnału od szumu — skuteczniejsze jest ograniczanie
+      liczby wyników i sortowanie niż odcinanie wartością.</p>` : ""}
+    <p class="hint">Kotwice obok pokazują, <em>co</em> znaczy dana wysokość cosinusa.
+      Dno skali bierze się jednak z rozkładu, nie z jednej pary.</p>`;
 }
 
 function renderHistogram(result) {
@@ -1226,29 +1280,35 @@ function renderPrefixCheck(result) {
     return;
   }
 
-  const summary = result.summary || {};
-  const severe = summary.lost_below_threshold > 0 || summary.mean_delta > 0.02;
+  const displacement = result.displacement || {};
+  const identity = displacement.same_text_across_prefixes || {};
+  const official = (result.conventions || []).find((item) => item.key === "official");
+  const legacy = (result.conventions || []).find((item) => item.key === "legacy_raw");
+  const gap = official && legacy ? Math.abs(official.hits_at_1 - legacy.hits_at_1) : 0;
+  const severe = gap > Math.max(1, Math.floor(result.probe_count / 20));
 
   const notes = (result.interpretation || [])
     .map((item) => `<div class="note ${severe ? "is-bad" : "is-good"}">${escapeHtml(item)}</div>`)
     .join("");
 
   const cards = [
-    metricCard("Ten sam tekst, inny prefiks", summary.mean_same_text_similarity, "1.000 = prefiks nic nie zmienia", [0.99, 0.95]),
-    metricCard("Średnia strata cosinusa", summary.mean_delta, "ile traci stara ścieżka", [0.01, 0.03], true),
-    metricCard("Sondy tracące próg", summary.lost_below_threshold, `z ${result.probe_count} sond`, [0, 1], true),
+    metricCard("Ten sam tekst, inny prefiks", identity.median, "1.000 = prefiks nic nie zmienia", [0.99, 0.95]),
+    metricCard("Konwencja nomica: trafienia", official ? official.hit_at_1 : null, `${official?.hits_at_1 ?? "—"} z ${result.probe_count} sond`, [0.9, 0.75]),
+    metricCard("Stara ścieżka: trafienia", legacy ? legacy.hit_at_1 : null, `${legacy?.hits_at_1 ?? "—"} z ${result.probe_count} sond`, [0.9, 0.75]),
   ].join("");
 
-  const rows = (result.rows || [])
+  const rows = (result.conventions || [])
     .map(
       (row) => `<div class="prefix-row">
-        <div class="probe">„${escapeHtml(row.query)}” ↔ „${escapeHtml(row.document)}”</div>
+        <div class="probe">${escapeHtml(row.label)}
+          <span class="origin">zapytanie: ${escapeHtml(row.query_prefix)} · dokument: ${escapeHtml(row.document_prefix)}</span>
+        </div>
         <div class="numbers">
-          <span>z prefiksem: <b>${num(row.cosine_with_prefix)}</b></span>
-          <span>bez prefiksu: <b>${num(row.cosine_without_prefix)}</b></span>
-          <span>różnica: <b style="color:${row.delta > 0 ? "var(--bad)" : "var(--good)"}">${num(row.delta)}</b></span>
-          <span>ten sam tekst: <b>${num(row.same_text_across_prefixes)}</b></span>
-          <span>próg: <b>${row.passes_with_prefix ? "✓" : "✕"} / ${row.passes_without_prefix ? "✓" : "✕"}</b></span>
+          <span>trafienie 1.: <b>${row.hits_at_1}/${row.of_total}</b></span>
+          <span>MRR: <b>${num(row.mrr)}</b></span>
+          <span>margines: <b>${num(row.margin.median)}</b></span>
+          <span>cosinus par: <b>${num(row.correct_pair_cosine.median)}</b></span>
+          <span>najgorsza pozycja: <b>${row.worst_rank}</b></span>
         </div>
       </div>`,
     )
@@ -1257,8 +1317,8 @@ function renderPrefixCheck(result) {
   host.innerHTML = `
     <div class="metrics">${cards}</div>
     ${notes}
-    <p class="hint">Kolumna „próg” pokazuje, czy sonda przechodzi odcięcie ${num(result.threshold, 2)}
-      z prefiksem i bez niego. Model: ${escapeHtml(result.model)}, ${result.dimension}D.</p>
+    <p class="hint">${escapeHtml(result.method_note || "")}
+      Model: ${escapeHtml(result.model)}, ${result.dimension}D, ${result.probe_count} sond.</p>
     ${rows}`;
 }
 

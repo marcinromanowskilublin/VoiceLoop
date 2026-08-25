@@ -52,6 +52,42 @@ class AnalysisRequest:
     merge_identical: bool = False
 
 
+def nearest_shown_ancestor(
+    fragment_id: str,
+    parent_of: dict[str, str | None],
+    index_by_id: dict[str, int],
+) -> int | None:
+    """Najbliższy przodek obecny na wykresie, także gdy poziomy nie sąsiadują.
+
+    Przy wyborze samych słów i zdań rodzicem słowa jest fraza, której na
+    wykresie nie ma. Bez wspinaczki po łańcuchu linie rodzic–dziecko zniknęłyby
+    zupełnie, choć hierarchia istnieje. Zbiór odwiedzonych chroni przed
+    zapętleniem, gdyby dane na dysku okazały się uszkodzone.
+    """
+
+    seen: set[str] = {fragment_id}
+    current = parent_of.get(fragment_id)
+    while current and current not in seen:
+        if current in index_by_id:
+            return index_by_id[current]
+        seen.add(current)
+        current = parent_of.get(current)
+    return None
+
+
+def hierarchy_edges(
+    fragment_ids: list[str],
+    parent_of: dict[str, str | None],
+    index_by_id: dict[str, int],
+) -> list[dict[str, int]]:
+    edges: list[dict[str, int]] = []
+    for fragment_id in fragment_ids:
+        ancestor = nearest_shown_ancestor(fragment_id, parent_of, index_by_id)
+        if ancestor is not None and ancestor != index_by_id[fragment_id]:
+            edges.append({"source": index_by_id[fragment_id], "target": ancestor})
+    return edges
+
+
 async def run_analysis(
     request: AnalysisRequest,
     store: RecordingStore,
@@ -283,29 +319,9 @@ async def run_analysis(
         )
 
     index_by_id = {fragment.id: index for index, fragment in enumerate(fragments)}
-
-    def nearest_shown_ancestor(fragment_id: str) -> int | None:
-        """Najbliższy przodek obecny na wykresie, także gdy poziomy nie sąsiadują.
-
-        Przy wyborze samych słów i zdań rodzicem słowa jest fraza, której na
-        wykresie nie ma. Bez wspinaczki po łańcuchu linie rodzic–dziecko
-        zniknęłyby zupełnie, choć hierarchia istnieje.
-        """
-
-        seen: set[str] = set()
-        current = parent_of.get(fragment_id)
-        while current and current not in seen:
-            if current in index_by_id:
-                return index_by_id[current]
-            seen.add(current)
-            current = parent_of.get(current)
-        return None
-
-    hierarchy: list[dict[str, int]] = []
-    for fragment in fragments:
-        ancestor = nearest_shown_ancestor(fragment.id)
-        if ancestor is not None and ancestor != index_by_id[fragment.id]:
-            hierarchy.append({"source": index_by_id[fragment.id], "target": ancestor})
+    hierarchy = hierarchy_edges(
+        [fragment.id for fragment in fragments], parent_of, index_by_id
+    )
 
     return {
         "ok": True,

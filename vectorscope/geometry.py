@@ -303,7 +303,8 @@ def smacof(
 
     previous: float | None = None
     iterations = 0
-    for iterations in range(1, max_iterations + 1):
+    for step in range(1, max_iterations + 1):
+        iterations = step
         current = pairwise_euclidean(coords)
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(current > 1e-12, target / current, 0.0)
