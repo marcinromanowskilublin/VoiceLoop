@@ -17,3 +17,8 @@ uivision/runtime/
 n8n/backups/
 *.bak
 *.tmp
+
+# Kopie awaryjne vectorscope z kolizji dwóch równoległych sesji (2026-08-24).
+# Trzymane lokalnie do porównania, nie należą do historii projektu.
+.vectorscope-backup-*/
+.vectorscope-druga-sesja-*/

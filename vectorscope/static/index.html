@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vectorscope — laboratorium embeddingów VoiceLoopa</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">VS</span>
+    <div>
+      <h1>Vectorscope</h1>
+      <p>nagranie → Deepgram → LM Studio → geometria 768D</p>
+    </div>
+  </div>
+  <div class="health" id="health">
+    <span class="pill pill-idle" data-service="embeddings">LM Studio</span>
+    <span class="pill pill-idle" data-service="deepgram">Deepgram</span>
+    <span class="pill pill-idle" data-service="qdrant">Qdrant</span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+
+    <section class="card">
+      <h2>1. Nagraj</h2>
+      <div class="recorder">
+        <button id="record-button" class="btn btn-record">
+          <span class="dot"></span><span id="record-label">Nagrywaj</span>
+        </button>
+        <div class="timer" id="record-timer">00:00</div>
+      </div>
+      <label class="field">
+        <span>Etykieta nagrania</span>
+        <input type="text" id="record-name" placeholder="np. lęk i niepokój">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="record-processing">
+        <span>Przetwarzanie mikrofonu <em>(redukcja szumu, AGC)</em></span>
+      </label>
+      <p class="hint" id="record-hint">
+        Domyślnie surowy sygnał: bez redukcji szumu i bez AGC, żeby transkrypcja
+        opisywała twój głos, a nie filtr przeglądarki.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>2. Nagrania</h2>
+        <button class="btn btn-ghost btn-small" id="refresh-recordings">Odśwież</button>
+      </div>
+      <div id="recordings" class="recordings"></div>
+    </section>
+
+    <section class="card">
+      <h2>3. Analiza</h2>
+
+      <div class="field">
+        <span>Poziom fragmentów</span>
+        <div class="levels" id="levels"></div>
+        <p class="hint">
+          Każdy fragment to osobny punkt. Zaznacz kilka poziomów, żeby zobaczyć,
+          na którym z nich pojawia się sens.
+        </p>
+      </div>
+
+      <label class="field">
+        <span>Prefiks embeddingu</span>
+        <select id="prefix"></select>
+      </label>
+
+      <label class="field">
+        <span>Sąsiedzi kNN: <strong id="neighbours-value">4</strong></span>
+        <input type="range" id="neighbours" min="1" max="12" step="1" value="4">
+      </label>
+
+      <label class="field">
+        <span>Próg cosinusa: <strong id="threshold-value">0.15</strong></span>
+        <input type="range" id="threshold" min="0" max="0.99" step="0.01" value="0.15">
+      </label>
+
+      <label class="field">
+        <span>Rzut 2D</span>
+        <select id="projection">
+          <option value="mds">MDS (wierny odległościom)</option>
+          <option value="pca">PCA (wierny kierunkom)</option>
+        </select>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="include-anchors" checked>
+        <span>Kotwice skali <em>(co znaczy dany cosinus)</em></span>
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="merge-identical">
+        <span>Scal identyczne teksty</span>
+      </label>
+
+      <label class="field">
+        <span>Teksty referencyjne <em>(jeden na linię)</em></span>
+        <textarea id="reference-texts" rows="3"
+          placeholder="otwórz dokument pacjenta&#10;zwiększ dawkę leku"></textarea>
+      </label>
+
+      <button class="btn btn-primary btn-wide" id="analyze">Analizuj</button>
+      <p class="hint" id="analyze-hint"></p>
+    </section>
+
+  </aside>
+
+  <main class="main">
+
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-tab="graph">Graf podobieństw</button>
+      <button class="tab" data-tab="scale">Skala i progi</button>
+      <button class="tab" data-tab="matrix">Macierz i grupy</button>
+      <button class="tab" data-tab="projection">Rzut 2D</button>
+      <button class="tab" data-tab="voiceloop">Pamięć VoiceLoopa</button>
+    </nav>
+
+    <section class="panel is-active" data-panel="graph">
+      <div class="panel-head">
+        <div>
+          <h2>Graf najbliższych sąsiadów</h2>
+          <p class="subtle" id="graph-summary">
+            Uruchom analizę, żeby zobaczyć graf. Krawędzie i wartości cosinusa są
+            liczone w pełnych 768 wymiarach — bez rzutowania.
+          </p>
+        </div>
+        <div class="panel-actions">
+          <label class="check check-inline">
+            <input type="checkbox" id="show-edge-labels">
+            <span>Wartości na krawędziach</span>
+          </label>
+          <label class="check check-inline">
+            <input type="checkbox" id="show-hierarchy" checked>
+            <span>Linie rodzic–dziecko</span>
+          </label>
+          <button class="btn btn-ghost btn-small" id="graph-refit">Wyśrodkuj</button>
+        </div>
+      </div>
+      <div class="graph-wrap">
+        <div id="cy"></div>
+        <div class="inspector" id="inspector">
+          <p class="subtle">Kliknij węzeł, żeby zobaczyć fragment, jego rodziców i sąsiadów.</p>
+        </div>
+      </div>
+      <div class="legend" id="graph-legend"></div>
+    </section>
+
+    <section class="panel" data-panel="scale">
+      <div class="panel-head">
+        <div>
+          <h2>Co właściwie znaczy ten cosinus</h2>
+          <p class="subtle">
+            Rozkład wszystkich par, progi z <code>settings.py</code> i kotwice
+            o znanej relacji. Dopiero razem mówią, czy próg cokolwiek odcina.
+          </p>
+        </div>
+      </div>
+      <div id="verdict" class="verdict"></div>
+      <div class="chart" id="histogram"></div>
+      <div class="two-col">
+        <div>
+          <h3>Kotwice skali</h3>
+          <div id="anchors" class="anchors"></div>
+        </div>
+        <div>
+          <h3>Progi z konfiguracji VoiceLoopa</h3>
+          <div id="thresholds" class="thresholds"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="matrix">
+      <div class="panel-head">
+        <div>
+          <h2>Macierz podobieństw i hierarchia grup</h2>
+          <p class="subtle" id="matrix-note">
+            Kolejność wierszy pochodzi z dendrogramu, więc bloki na przekątnej to
+            realne grupy, a nie efekt sortowania alfabetycznego.
+          </p>
+        </div>
+      </div>
+      <div class="chart" id="dendrogram"></div>
+      <div class="chart chart-tall" id="heatmap"></div>
+    </section>
+
+    <section class="panel" data-panel="projection">
+      <div class="panel-head">
+        <div>
+          <h2>Rzut 2D — obraz poglądowy</h2>
+          <p class="subtle">
+            Ten obrazek zawsze kłamie, bo spłaszcza 768 wymiarów do dwóch.
+            Poniżej pokazane jest, jak bardzo.
+          </p>
+        </div>
+      </div>
+      <div id="distortion" class="metrics"></div>
+      <div class="chart chart-tall" id="scatter"></div>
+      <div class="two-col">
+        <div class="chart" id="shepard"></div>
+        <div>
+          <h3>Jak to czytać</h3>
+          <ul class="reading">
+            <li><strong>Trustworthiness</strong> — ile z sąsiadów widocznych na obrazku jest sąsiadami także w 768D. Niskie oznacza fałszywe zbliżenia.</li>
+            <li><strong>Continuity</strong> — ile z prawdziwych sąsiadów przetrwało rzut. Niskie oznacza rozerwane grupy.</li>
+            <li><strong>Stress</strong> — łączny błąd odległości. 0 to ideał, powyżej 0.2 obrazek traktuj wyłącznie orientacyjnie.</li>
+            <li><strong>Diagram Sheparda</strong> — każdy punkt to jedna para. Im bliżej przekątnej, tym uczciwszy rzut.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="voiceloop">
+      <div class="panel-head">
+        <div>
+          <h2>Pamięć VoiceLoopa — pięć osi i fuzja RRF</h2>
+          <p class="subtle">
+            Vectorscope tylko <strong>odpytuje</strong> Qdranta. Zapisu nie robi —
+            pamięć zapisuje VoiceLoop, panel patrzy jej na ręce.
+          </p>
+        </div>
+      </div>
+
+      <div class="query-row">
+        <input type="text" id="diagnose-query" placeholder="np. co ustaliliśmy z pacjentem w sprawie dawki">
+        <button class="btn btn-primary" id="diagnose">Odpytaj pamięć</button>
+      </div>
+      <div id="diagnose-result" class="diagnose"></div>
+
+      <div class="divider"></div>
+
+      <div class="panel-head">
+        <div>
+          <h3>Spójność prefiksów</h3>
+          <p class="subtle">
+            Ten sam tekst zapisany z innym prefiksem to inny punkt w przestrzeni.
+            Ten test mierzy, ile score'u traci retrieval na tej niespójności.
+          </p>
+        </div>
+        <button class="btn btn-ghost" id="prefix-check">Zmierz wpływ prefiksów</button>
+      </div>
+      <div id="prefix-result" class="prefix"></div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/vendor/layout-base.js"></script>
+<script src="/static/vendor/cose-base.js"></script>
+<script src="/static/vendor/cytoscape-fcose.js"></script>
+<script src="/static/vendor/plotly-cartesian.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
