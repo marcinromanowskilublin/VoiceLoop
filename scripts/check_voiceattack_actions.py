@@ -177,7 +177,8 @@ def audit_voiceattack_actions(
             errors.append(f"Komenda {command_phrases!r} nie używa bezpiecznego Launch.")
         context = str(action.findtext("Context") or "")
         script_path = Path(context)
-        if not script_path.is_file():
+        repo_script_path = SCRIPTS_DIR / script_path.name
+        if not script_path.is_file() and not repo_script_path.is_file():
             errors.append(f"Brak skryptu profilu: {context}")
         if script_path.name:
             profile_scripts.add(script_path.name)
