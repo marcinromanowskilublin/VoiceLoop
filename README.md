@@ -1,7 +1,7 @@
 # VoiceLoop
 
-**VoiceLoop is a local-first Windows voice assistant for Polish speech, safe
-computer control, private context memory, and measurable voice-agent quality.**
+**VoiceLoop is a local-first assistant for Windows automation, Polish-language
+voice interaction, private context memory, and measurable voice-agent quality.**
 
 It is not a generic "LLM with tools" demo. The project is built around a stricter
 idea: a language model may interpret intent, but it must not become a shell, a
@@ -13,14 +13,15 @@ sequential executor.
 
 ## What The Program Is
 
-VoiceLoop is a Windows-first Python 3.11 application with a FastAPI control core,
-a local browser panel, speech-to-text integration, local and cloud-compatible LLM
-planners, optional Qdrant vector memory, Screenpipe context ingestion, VoiceAttack
-command support, and a testable evaluation pipeline.
+VoiceLoop is a Python 3.11 application designed for local Windows workflows. It
+combines a FastAPI control core, a local browser panel, speech-to-text
+integration, local and cloud-compatible LLM planners, optional Qdrant vector
+memory, Screenpipe context ingestion, VoiceAttack command support, and a
+testable evaluation pipeline.
 
 In practice, it lets the user:
 
-- speak Polish commands and questions;
+- speak commands and questions naturally in Polish;
 - hold a short voice conversation with interruption and STOP control;
 - execute only known, allowlisted Windows actions;
 - inspect health, routing, memory, and component readiness from a local panel;
@@ -35,8 +36,8 @@ harder engineering questions:
 
 - How do you let an LLM help with desktop actions without giving it arbitrary
   control of the computer?
-- How do you keep Polish voice interaction usable when speech recognition is
-  imperfect?
+- How do you keep Polish-language voice interaction usable when speech
+  recognition is imperfect?
 - How do you stop the system immediately when the user interrupts?
 - How do you preserve privacy while still building useful context memory?
 - How do you measure whether vector thresholds, deduplication, routing, and
@@ -54,7 +55,7 @@ Private runtime data is intentionally excluded.
 Verified or implemented areas include:
 
 - FastAPI core and local web panel;
-- Deepgram Polish STT integration;
+- Deepgram STT configured for Polish;
 - conversation/task separation;
 - typed action planning with allowlisted `action_id` values;
 - fail-closed Gemini task planning for unknown actions and invalid dependencies;
@@ -102,7 +103,7 @@ execute partially valid plans.
 
 ```mermaid
 flowchart LR
-    Voice["Polish voice"] --> STT["Deepgram STT"]
+    Voice["Polish-language input"] --> STT["Deepgram STT"]
     Panel["Local browser panel"] --> Core["FastAPI core"]
     VA["VoiceAttack"] --> Core
     STT --> Core
@@ -226,7 +227,7 @@ Diagnostics are a first-class part of the system:
 Examples of supported or designed capabilities:
 
 - start, pause, resume, and stop voice listening;
-- hold a short Polish conversation;
+- hold a short conversation in Polish;
 - open selected local apps and URLs;
 - describe the active window;
 - summarize recent local activity from Screenpipe context;
