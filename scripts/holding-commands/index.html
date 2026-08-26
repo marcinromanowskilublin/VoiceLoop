@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Holding — nagrania fraz</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1a1d24;
+      --line: #2a2f3a;
+      --text: #e8eaed;
+      --muted: #9aa3b2;
+      --accent: #7eb6ff;
+      --ok: #7dcea0;
+      --danger: #e07a7a;
+      --btn: #2b3240;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.4 system-ui, Segoe UI, sans-serif;
+    }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+    h1 { margin: 0; font-size: 16px; font-weight: 650; }
+    .meta { color: var(--muted); font-size: 12px; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 38%) 1fr;
+      min-height: 0;
+    }
+    .list {
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      padding: 8px;
+    }
+    .sep {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      padding: 10px 8px 4px;
+    }
+    .item {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      margin-bottom: 4px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .item:hover { background: #222632; }
+    .item.active { background: var(--panel); border-color: #3a4458; }
+    .item.done .phrase { color: var(--ok); }
+    .item input { margin: 0; }
+    .count { color: var(--muted); font-size: 12px; }
+    .stage { padding: 20px 24px; overflow: auto; }
+    .phrase-big { font-size: 28px; margin: 0 0 8px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+    button.act {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 16px;
+      background: var(--btn);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+    button.act:disabled { opacity: .45; cursor: default; }
+    button.rec { background: #6b2430; }
+    button.rec.live { background: #b43344; }
+    button.next { background: #1f4a36; }
+    .banner {
+      margin-top: 8px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #1c2028;
+      border: 1px solid var(--line);
+    }
+    .banner.ok { background: #163224; border-color: #2f6b4a; color: var(--ok); }
+    .banner.err { background: #3a1b1f; border-color: #7a3038; color: var(--danger); }
+    .banner.wait { background: #2a2416; border-color: #6a5a2a; color: #e6c36a; }
+    .banner strong { display: block; font-size: 18px; margin-bottom: 4px; }
+    .banner .detail { color: var(--text); font-size: 13px; }
+    audio { width: 100%; margin-top: 12px; }
+    .files { margin-top: 18px; color: var(--muted); font-size: 13px; }
+    .files a { color: var(--accent); }
+    .empty { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Holding — nagrania fraz</h1>
+    <div class="meta" id="meta">osobne okno · port 8791 · nie Lite</div>
+  </header>
+  <main>
+    <aside class="list" id="list"></aside>
+    <section class="stage">
+      <p class="empty" id="hint">Wybierz frazę albo wylosuj polecenie.</p>
+      <h2 class="phrase-big" id="current" hidden></h2>
+      <div class="row">
+        <button class="act" id="draw">Wylosuj</button>
+        <button class="act rec" id="rec" disabled>Nagraj</button>
+        <button class="act" id="stop" disabled>Stop</button>
+        <button class="act" id="play" disabled>Odsłuch</button>
+        <button class="act next" id="next" disabled>Odhacz i następna</button>
+      </div>
+      <div class="banner" id="banner">
+        <strong id="bannerTitle">Czekam</strong>
+        <div class="detail" id="bannerDetail">Po stopie widać tu ZAPISANE albo BŁĄD. Checkbox nie oznacza zapisu.</div>
+      </div>
+      <audio id="player" controls hidden></audio>
+      <div class="files" id="files"></div>
+    </section>
+  </main>
+  <script>
+    const listEl = document.getElementById("list");
+    const currentEl = document.getElementById("current");
+    const hintEl = document.getElementById("hint");
+    const recBtn = document.getElementById("rec");
+    const stopBtn = document.getElementById("stop");
+    const playBtn = document.getElementById("play");
+    const nextBtn = document.getElementById("next");
+    const drawBtn = document.getElementById("draw");
+    const bannerEl = document.getElementById("banner");
+    const bannerTitle = document.getElementById("bannerTitle");
+    const bannerDetail = document.getElementById("bannerDetail");
+    const player = document.getElementById("player");
+    const filesEl = document.getElementById("files");
+    const metaEl = document.getElementById("meta");
+
+    let phrases = [];
+    let selected = null;
+    let mediaStream = null;
+    let recorder = null;
+    let chunks = [];
+    let lastBlob = null;
+    let lastUrl = "";
+    let saveOk = false;
+    let savedFile = "";
+
+    function banner(kind, title, detail) {
+      bannerEl.className = "banner" + (kind ? " " + kind : "");
+      bannerTitle.textContent = title;
+      bannerDetail.textContent = detail;
+    }
+
+    function pickMime() {
+      const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+      return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+    }
+
+    function extFor(mime) {
+      if (mime.includes("wav")) return "wav";
+      if (mime.includes("ogg")) return "ogg";
+      return "webm";
+    }
+
+    function kb(bytes) {
+      return (bytes / 1024).toFixed(1) + " KB";
+    }
+
+    function currentItem() {
+      return phrases.find((p) => p.id === selected) || null;
+    }
+
+    function filesNewestFirst(files) {
+      return [...(files || [])].sort().reverse();
+    }
+
+    function renderDisk() {
+      const item = currentItem();
+      const files = item ? filesNewestFirst(item.files) : [];
+      filesEl.innerHTML = files.length
+        ? "Na dysku: " + files.map((name) =>
+            `<a href="/files/${name}" target="_blank" rel="noreferrer">${name}</a>`
+          ).join("<br>")
+        : "Brak plików tej frazy na dysku.";
+    }
+
+    function mergeState(data) {
+      if (data && data.save_dir) {
+        metaEl.textContent = `zapis: ${data.save_dir} · port 8791 · nie Lite`;
+      }
+      if (data && Array.isArray(data.phrases)) phrases = data.phrases;
+      renderList();
+      renderDisk();
+    }
+
+    function applySavedFile(name) {
+      const item = currentItem();
+      if (!item || !name) return;
+      item.files = [name, ...item.files.filter((f) => f !== name)];
+      renderList();
+      renderDisk();
+    }
+
+    function nextId(fromId) {
+      if (!phrases.length) return fromId;
+      const i = Math.max(0, phrases.findIndex((p) => p.id === fromId));
+      const ring = phrases.slice(i + 1).concat(phrases.slice(0, i));
+      const unchecked = ring.find((p) => !p.done);
+      if (unchecked) return unchecked.id;
+      return ring[0] ? ring[0].id : fromId;
+    }
+
+    function canGoNext(item) {
+      return saveOk || !!(item && item.files && item.files.length);
+    }
+
+    function renderList() {
+      listEl.innerHTML = "";
+      const base = phrases.filter((p) => !p.generated);
+      const extra = phrases.filter((p) => p.generated);
+      const groups = [
+        ["Lista", base],
+        extra.length ? ["Wylosowane", extra] : null,
+      ].filter(Boolean);
+      for (const [label, items] of groups) {
+        const sep = document.createElement("div");
+        sep.className = "sep";
+        sep.textContent = label;
+        listEl.appendChild(sep);
+        for (const item of items) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "item" + (item.done ? " done" : "") + (selected === item.id ? " active" : "");
+          row.innerHTML = `
+            <input type="checkbox" ${item.done ? "checked" : ""} />
+            <span class="phrase">${item.text}</span>
+            <span class="count">${item.files.length || ""}</span>
+          `;
+          const box = row.querySelector("input");
+          box.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            const res = await fetch("/api/check", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: item.id, done: box.checked, text: item.text }),
+            });
+            const data = await res.json();
+            mergeState(data);
+            selected = item.id;
+            renderList();
+            renderDisk();
+          });
+          row.addEventListener("click", () => select(item.id));
+          listEl.appendChild(row);
+        }
+      }
+    }
+
+    function select(id, opts = {}) {
+      selected = id;
+      const item = currentItem();
+      hintEl.hidden = true;
+      currentEl.hidden = false;
+      currentEl.textContent = item ? item.text : "";
+      recBtn.disabled = !item || !!recorder;
+      stopBtn.disabled = !recorder;
+      if (!opts.keepTake) {
+        saveOk = false;
+        savedFile = "";
+        lastBlob = null;
+        if (lastUrl) URL.revokeObjectURL(lastUrl);
+        lastUrl = "";
+        nextBtn.disabled = !canGoNext(item);
+        if (item && item.files.length) {
+          banner("", "Ta fraza ma pliki", "Odsłuch z dysku albo dograj. Dalej = następna fraza.");
+        } else {
+          banner("", "Czekam na nagranie", "Po stopie: ZAPISANE = lista się dopisze i możesz iść dalej.");
+        }
+      } else {
+        nextBtn.disabled = !canGoNext(item);
+      }
+      playBtn.disabled = !lastBlob && !(item && item.files.length);
+      renderDisk();
+      renderList();
+    }
+
+    async function loadState(keepId, opts = {}) {
+      const res = await fetch("/api/state");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      mergeState(await res.json());
+      if (keepId) select(keepId, opts);
+    }
+
+    async function postRecord(blob, item) {
+      const ext = extFor(blob.type);
+      const url = `/api/record?id=${encodeURIComponent(item.id)}&ext=${ext}&text=${encodeURIComponent(item.text)}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": blob.type || "application/octet-stream" },
+        body: blob,
+      });
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = { ok: false, saved: false, error: "serwer nie zwrócił JSON" };
+      }
+      return { res, data };
+    }
+
+    recBtn.addEventListener("click", async () => {
+      const item = currentItem();
+      if (!item) return;
+      saveOk = false;
+      savedFile = "";
+      nextBtn.disabled = true;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = pickMime();
+        chunks = [];
+        recorder = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
+        recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+        recorder.onstop = async () => {
+          const mimeNow = recorder.mimeType || "audio/webm";
+          recorder = null;
+          if (mediaStream) {
+            mediaStream.getTracks().forEach((t) => t.stop());
+            mediaStream = null;
+          }
+          recBtn.classList.remove("live");
+          recBtn.textContent = "Nagraj";
+          recBtn.disabled = false;
+          stopBtn.disabled = true;
+          lastBlob = new Blob(chunks, { type: mimeNow });
+          if (lastUrl) URL.revokeObjectURL(lastUrl);
+          lastUrl = lastBlob.size ? URL.createObjectURL(lastBlob) : "";
+          if (lastUrl) {
+            player.src = lastUrl;
+            player.hidden = false;
+            playBtn.disabled = false;
+          }
+          if (lastBlob.size < 64) {
+            saveOk = false;
+            nextBtn.disabled = true;
+            banner("err", "BŁĄD — nie zapisano", "Puste nagranie. Nie idź dalej. Nagraj ponownie.");
+            return;
+          }
+          banner("wait", "Zapisuję…", "Czekam na potwierdzenie pliku na dysku.");
+          try {
+            const { res, data } = await postRecord(lastBlob, item);
+            if (!res.ok || !data.ok || !data.saved || !data.file) {
+              saveOk = false;
+              nextBtn.disabled = true;
+              banner("err", "BŁĄD ZAPISU — zostań", data.error || ("HTTP " + res.status + ". Nie odhaczaj."));
+              return;
+            }
+            saveOk = true;
+            savedFile = data.file;
+            player.src = "/files/" + data.file;
+            player.hidden = false;
+            playBtn.disabled = false;
+            nextBtn.disabled = false;
+            if (data.phrases) mergeState(data);
+            applySavedFile(data.file);
+            banner(
+              "ok",
+              "ZAPISANE — możesz iść dalej",
+              `${data.file} · ${kb(data.bytes)} · na liście od razu. Kliknij „Odhacz i następna”.`
+            );
+          } catch (err) {
+            saveOk = false;
+            nextBtn.disabled = true;
+            banner("err", "BŁĄD ZAPISU — zostań", "POST nie przeszedł: " + err.message);
+          }
+        };
+        recorder.start(250);
+        recBtn.classList.add("live");
+        recBtn.textContent = "Nagrywa…";
+        recBtn.disabled = true;
+        stopBtn.disabled = false;
+        banner("wait", "Nagrywanie", "Powiedz frazę, potem Stop.");
+      } catch (err) {
+        banner("err", "BŁĄD mikrofonu", err.message);
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (recorder && recorder.state !== "inactive") {
+        if (recorder.requestData) recorder.requestData();
+        recorder.stop();
+      }
+    });
+
+    playBtn.addEventListener("click", () => {
+      const item = currentItem();
+      if (savedFile) {
+        player.hidden = false;
+        player.src = "/files/" + savedFile;
+        player.play();
+        return;
+      }
+      if (lastUrl) {
+        player.hidden = false;
+        player.src = lastUrl;
+        player.play();
+        return;
+      }
+      if (item && item.files.length) {
+        player.hidden = false;
+        player.src = "/files/" + filesNewestFirst(item.files)[0];
+        player.play();
+      }
+    });
+
+    nextBtn.addEventListener("click", async () => {
+      const item = currentItem();
+      if (!selected || !canGoNext(item)) {
+        banner("err", "Nie idź dalej", "Najpierw ZAPISANE albo fraza z plikami.");
+        return;
+      }
+      const goingTo = nextId(selected);
+      try {
+        const res = await fetch("/api/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: selected, done: true, text: item ? item.text : "" }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          banner("err", "Odhaczenie nie weszło", data.error || ("HTTP " + res.status));
+          return;
+        }
+        mergeState(data);
+      } catch (err) {
+        banner("err", "Odhaczenie nie weszło", err.message);
+        return;
+      }
+      saveOk = false;
+      savedFile = "";
+      lastBlob = null;
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = "";
+      select(goingTo);
+      const landed = currentItem();
+      nextBtn.disabled = !canGoNext(landed);
+      banner("", "Następna", landed ? landed.text + " — nagraj albo znów Dalej." : "Koniec listy.");
+    });
+
+    drawBtn.addEventListener("click", async () => {
+      const res = await fetch("/api/draw");
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        banner("err", "Losowanie nie wyszło", data.error || ("HTTP " + res.status));
+        return;
+      }
+      mergeState(data);
+      saveOk = false;
+      select(data.id);
+      banner("", "Wylosowane", "Nagraj tę komendę. Sukces tylko po ZAPISANE.");
+    });
+
+    loadState().catch((err) => banner("err", "Brak serwera 8791", err.message));
+  </script>
+</body>
+</html>

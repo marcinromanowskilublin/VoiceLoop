@@ -59,7 +59,7 @@ else {
     }
     docker run --detach `
         --name $containerName `
-        --restart unless-stopped `
+        --restart no `
         --publish '127.0.0.1:6333:6333' `
         --publish '127.0.0.1:6334:6334' `
         --volume "${volumeName}:/qdrant/storage" `

@@ -102,7 +102,11 @@ class AssistantService:
         vector_context_limit: int,
         vector_query_adaptive_weights: bool = True,
         vector_query_weights: dict[str, float] | None = None,
-        vector_memory_min_score: float = 0.15,
+        # Zero, nie 0.15, i to samo w Settings oraz .env.example. Zmierzone dno
+        # tego modelu na realnych danych to 0.441, więc 0.15 nigdy niczego nie
+        # odrzucało. Rozjazd domyślnych wartości między konstruktorem a Settings
+        # znaczyłby, że testy pracują na innym progu niż produkcja.
+        vector_memory_min_score: float = 0.0,
         vector_memory_rrf_k: int = 60,
         qdrant_shadow: QdrantVectorStore | None = None,
         capability_index: CapabilityIndex | None = None,
@@ -1035,9 +1039,23 @@ class AssistantService:
                 or ""
             )
             confidence = provenance.get("confidence", metadata.get("confidence"))
+            # `hit.score` to fusion_score, czyli klucz sortowania z RRF, a nie
+            # miara podobieństwa. Dokument z najwyższym cosinusem, znaleziony
+            # przez jedną oś, dostaje niższy fusion_score niż dokument słabszy,
+            # znaleziony przez dwie. Model czyta to jako pewność, więc obok
+            # podajemy najwyższy realny cosinus.
+            # Tą ścieżką idą też trafienia z zapasowego magazynu SQLite, które
+            # nie mają rozbicia na osie — wtedy zostaje sam wynik.
+            vector_scores = getattr(hit, "vector_scores", None)
+            best_cosine = (
+                max(vector_scores.values())
+                if isinstance(vector_scores, dict) and vector_scores
+                else float(hit.score)
+            )
             contexts.append(
                 (
-                    f"Local vector memory score={hit.score:.3f}; "
+                    f"Local vector memory rank_fusion={hit.score:.3f}; "
+                    f"best_cosine={best_cosine:.3f}; "
                     f"spaces={space_names}; source={hit.source}; source_id={hit.source_id}; "
                     f"time={source_time or 'unknown'}; confidence={confidence}; "
                     f"title={hit.title}; content={hit.content[:900]}"

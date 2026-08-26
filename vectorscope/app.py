@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
 from voiceloop.embeddings import EmbeddingUnavailableError
 from voiceloop.qdrant_memory import QdrantVectorStore
 
@@ -38,6 +39,7 @@ from .config import (
 )
 from .diagnostics import DiagnosticsRequest, run_diagnostics
 from .fragments import LEVELS, SEGMENTATION_RULE, SEGMENTATION_VERSION
+from .live import measure_dedup_probe, measure_live_collection
 from .prefix_check import run_prefix_check
 from .scale import measure_axis_floors, measure_scale, measure_threshold_reachability
 from .store import RecordingStore, transcript_hash
@@ -77,12 +79,17 @@ class DiagnosePayload(BaseModel):
     adaptive: bool | None = None
 
 
-class PrefixCheckPayload(BaseModel):
-    min_score: float | None = Field(default=None, ge=-1.0, le=1.0)
-
-
 class ScaleFloorPayload(BaseModel):
     prefix: str = Field(default=PREFIX_DOCUMENT)
+
+
+class LiveCollectionPayload(BaseModel):
+    probes: int = Field(default=30, ge=5, le=120)
+    depth: int = Field(default=200, ge=20, le=1000)
+
+
+class DedupProbePayload(BaseModel):
+    sample: int = Field(default=60, ge=10, le=300)
 
 
 @app.get("/")
@@ -384,9 +391,10 @@ async def api_diagnose(payload: DiagnosePayload) -> JSONResponse:
 
 
 @app.post("/api/prefix-check")
-async def api_prefix_check(payload: PrefixCheckPayload) -> JSONResponse:
-    result = await run_prefix_check(min_score=payload.min_score)
-    return JSONResponse(result)
+async def api_prefix_check() -> JSONResponse:
+    # Bez `min_score`: ten pomiar dotyczy geometrii przestrzeni, a nie tego,
+    # co przy jakimś progu przechodzi. Progi rozstrzyga scale.py i live.py.
+    return JSONResponse(await run_prefix_check())
 
 
 @app.post("/api/scale-floor")
@@ -398,6 +406,21 @@ async def api_scale_floor(payload: ScaleFloorPayload) -> JSONResponse:
 @app.post("/api/threshold-reachability")
 async def api_threshold_reachability() -> JSONResponse:
     return JSONResponse(await measure_threshold_reachability())
+
+
+@app.post("/api/live-collection")
+async def api_live_collection(payload: LiveCollectionPayload) -> JSONResponse:
+    # Tylko odczyt: `scroll` i `query_points`. Panel nigdy nie pisze do pamięci
+    # VoiceLoopa, bo przyrząd pomiarowy, który zmienia mierzony obiekt, jest
+    # bezużyteczny.
+    return JSONResponse(
+        await measure_live_collection(probe_count=payload.probes, depth=payload.depth)
+    )
+
+
+@app.post("/api/dedup-probe")
+async def api_dedup_probe(payload: DedupProbePayload) -> JSONResponse:
+    return JSONResponse(await measure_dedup_probe(sample=payload.sample))
 
 
 @app.post("/api/axis-floor")

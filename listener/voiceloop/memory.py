@@ -663,7 +663,7 @@ class MemoryStore:
         *,
         limit: int = 8,
         source: str | None = None,
-        min_score: float = 0.15,
+        min_score: float = 0.0,
         candidate_limit: int = 2000,
     ) -> list[VectorMemoryHit]:
         if not query_embedding:

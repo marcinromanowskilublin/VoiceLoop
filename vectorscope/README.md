@@ -220,59 +220,162 @@ Dwie rzeczy widać od razu:
 - Nagłówki *zmniejszają* rozdzielczość. Na gołych zdaniach rozstaw wynosił
   0.082, po owinięciu w szablony spada do 0.049–0.070.
 
-Werdykty o progach wydaje `measure_threshold_reachability`, które dla każdego
-progu liczy **sufit** (cosinus dla identycznej treści po obu stronach) i
-**podłogę** (rozkład par bez związku) w przestrzeni tego konkretnego progu:
-
-| Próg | Wartość | Sufit | Podłoga min | Werdykt |
-| --- | --- | --- | --- | --- |
-| `vector_memory_min_score` | 0.15 | 0.781 | 0.162 | **martwy** |
-| `screenpipe_duplicate_min_score` | 0.92 | 0.789 | 0.007 | **nieosiągalny** |
-
-- `vector_memory_min_score = 0.15` leży poniżej najniższej zmierzonej pary bez
-  związku (0.162) we wszystkich pięciu osiach. Nie odrzuca niczego.
-- `screenpipe_duplicate_min_score = 0.92` **nie może zadziałać nigdy**. Ścieżka
-  deduplikacji porównuje surową treść puszczoną przez `embed_query` z wektorem
-  `semantic` zapisanego dokumentu, który ma własny nagłówek. Identyczna treść
-  osiąga tam medianę 0.679 i maksimum 0.789. `_is_duplicate_activity` zawsze
-  zwraca fałsz, więc kubełki aktywności nigdy się nie deduplikują.
-
 Panel świadomie **nie orzeka** o `capability_match_min_score` ani
 `screenpipe_related_history_min_score`: działają na innym korpusie i innych
 szablonach, których nie zmierzono. Zgadywanie byłoby tu gorsze od milczenia.
 
-Wniosek architektoniczny: RRF łączy **rangi** właśnie po to, żeby nie zależeć
-od bezwzględnych wartości. Bramka na bezwzględnym cosinusie *przed* fuzją
-działa wbrew tej konstrukcji — może wyciąć oś, w której dokument miał rangę
-pierwszą, tylko dlatego że ta oś ma niżej położony rozkład. Jeśli próg ma
-zostać, powinien być wyrażony percentylem rozkładu danej osi, a nie jedną
-liczbą dla pięciu różnych przestrzeni.
-
 Osobna obserwacja z kotwic: antonimy („wysoki" / „niski") dostają 0.721, wyżej
 niż większość par niepowiązanych. Embedding łapie wymiar znaczeniowy, nie znak.
 
-## Niespójność prefiksów: mierzona rankingiem, nie cosinusem
+## Pomiar na żywej kolekcji (`live.py`)
+
+Wszystko powyżej opiera się na korpusie napisanym na potrzeby pomiaru. To
+wystarcza, żeby orzec o właściwościach *modelu*, ale nie o właściwościach *tej*
+pamięci. `live.py` pyta kolekcję produkcyjną, wyłącznie odczytem.
+
+Metoda nie potrzebuje etykiet: bierzemy treść zapisanych dokumentów, budujemy
+z niej zapytania produkcyjną funkcją i odpytujemy Qdranta **bez progu**. Dla
+każdego zapytania znamy jedną poprawną odpowiedź — punkt, z którego treść
+pochodzi. Zapytanie wywiedzione z dokumentu jest łatwiejsze niż prawdziwe
+pytanie, więc sygnał jest górnym oszacowaniem; rozkład szumu jest prawdziwy.
+
+Kolekcja: 1204 punkty, 1090 z `screenpipe_behavior`, 113 z `screenpipe_activity`,
+1 ręczny.
+
+### Kolekcja jest mieszanką trzech generacji
+
+| Punktów | Schemat | Profil wektorów |
+| --- | --- | --- |
+| 611 | brak | brak |
+| 338 | brak | `three_vectors_core` |
+| 141 | `memory-documents-v2` | `dynamic_named_subset_v2` |
+| 113 | `memory-documents-v2` | `legacy_semantic_only_v2` |
+
+Obecnym schematem zwektoryzowano **12% zbioru**. Stąd nierówne pokrycie osi:
+
+| Oś | Waga | Punktów | Pokrycie |
+| --- | --- | --- | --- |
+| semantic | 0.40 | 1204 | 100% |
+| topic | 0.20 | 753 | 63% |
+| intent | 0.15 | 1091 | 91% |
+| decision | 0.15 | 668 | 55% |
+| person_context | 0.10 | 1090 | 91% |
+
+113 punktów ma **tylko** `semantic`, więc żadna inna oś nie może ich znaleźć.
+To nie przypadek brzegowy, to niemal połowa zbioru — i stąd poprawka
+normalizacji RRF oraz pole `coverage` w dowodach wyszukiwania.
+
+### Rozkłady per oś, bez progu
+
+| Oś | Szum p50 | Szum p95 | Szum max | Sygnał p50 | Ranga 1 |
+| --- | --- | --- | --- | --- | --- |
+| semantic | 0.611 | 0.936 | 0.944 | 0.826 | 50% |
+| topic | 0.567 | 0.649 | 0.808 | 0.702 | 36% |
+| intent | 0.646 | 0.867 | 0.878 | 0.849 | 56% |
+| decision | 0.631 | 0.912 | 0.918 | 0.882 | 17% |
+| person_context | 0.647 | 0.884 | 0.894 | 0.846 | 36% |
+
+- Najniższy cosinus na realnych danych: **0.441**. Próg `0.15` przepuszczał 100%
+  szumu w każdej osi. Nie odrzucał niczego i nie mógł.
+- Mediany szumu rozjeżdżają się o 0.080 między osiami, więc jedna liczba progu
+  znaczyłaby w każdej osi co innego.
+- Kolumna „ranga 1" wygląda katastrofalnie: dokument źródłowy wychodzi na
+  pierwsze miejsce w 17–56% przypadków, mimo że zapytanie pochodzi wprost z jego
+  treści. Wyjaśnienie jest niżej i nie dotyczy wyszukiwania.
+
+### 48% kolekcji to nadmiarowe kopie
+
+Deduplikacja Screenpipe wektoryzowała surową treść jako `search_query`,
+a porównywała ją z dokumentem zapisanym jako `search_document` wraz z nagłówkiem
+szablonu semantycznego. Pomiar na 120 punktach obecnego schematu, gdzie zapisany
+dokument da się odtworzyć dokładnie:
+
+| Wariant | min | p50 | max | ≥ 0.92 |
+| --- | --- | --- | --- | --- |
+| dokument + szablon (jak zapis) | 1.000 | 1.000 | 1.000 | 100% |
+| **zapytanie + sama treść (produkcja)** | 0.669 | 0.801 | **0.898** | **0%** |
+| dokument + sama treść | 0.682 | 0.878 | 0.936 | 6% |
+| zapytanie + szablon | 0.940 | 0.969 | 0.984 | 100% |
+
+Tekst **identyczny bajt w bajt** osiągał w wariancie produkcyjnym najwyżej
+0.898 przy progu 0.92. Bramka nie mogła zadziałać nigdy. Skutek:
+
+- 71 grup punktów niemal identycznych (cosinus ≥ 0.999), największa liczy **146**
+- 594 z 1090 punktów ma bliźniaka, czyli **523 punkty to nadmiarowe kopie (48%)**
+
+To wyjaśnia kolumnę „ranga 1": poprawna odpowiedź konkurowała z własnymi
+bliźniakami. Wyszukiwanie działało — dane były zepsute.
+
+Nowy próg wyznaczono z rozkładu. Po zwinięciu grup ≥ 0.999 do reprezentantów
+zostaje 567 różnych dokumentów; ich pary mają p50 = 0.552, p99 = 0.874,
+p99.9 = 0.992. Próg **0.97** jest więc osiągalny dla duplikatu (identyczny tekst
+= 1.000) i leży daleko nad rozkładem treści nowych.
+
+Ważne, gdzie ten próg wolno przyłożyć. Przed digestem mamy surowy OCR, a w
+Qdrancie leży podsumowanie modelu owinięte w szablon — to dwa różne rodzaje
+tekstu i dla tej pary żaden próg nie jest skalibrowany. Dlatego deduplikacja jest
+dwuetapowa:
+
+1. **Przed digestem: sam odcisk treści.** Darmowy, bez wektorów, łapie kubełek
+   powtórzony bajt w bajt — czyli dokładnie to, co zapchało kolekcję.
+2. **Po digeście: porównanie semantyczne gotowym wektorem.** Używa tego samego
+   wektora `semantic`, którym punkt zostałby zapisany, więc obie strony leżą
+   w identycznej przestrzeni i nie ma dodatkowego kosztu embeddingu. Dopiero
+   tutaj 0.97 znaczy to, co zmierzono.
+
+Etap semantyczny przed digestem świadomie usunięto. Próg dla pary
+„surowy OCR ↔ podsumowanie" byłby zgadnięty, a to dokładnie ten błąd
+unieruchomił poprzednią wersję.
+
+## Geometria prefiksów (`prefix_check.py`)
 
 Karta modelu wymaga `search_query: ` przed pytaniami i `search_document: ` przed
 dokumentami. Stara ścieżka Screenpipe zapisuje dokumenty bez prefiksu.
 
-`prefix_check.py` porównuje konwencje **trafieniem w pierwszym wyniku**, a nie
-średnim cosinusem, i to jest istotne: prefiks przesuwa całą chmurę wektorów, więc
-konwencja o niższych cosinusach może mieć lepszy retrieval. Pierwsza wersja tego
-modułu porównywała średnie i wyciągnęła z tego fałszywy wniosek.
+Ten moduł mierzy wyłącznie geometrię. Wcześniej liczył jeszcze trafienie
+w pierwszym wyniku i MRR na 24 ręcznie napisanych parach — mikro-benchmark,
+którego wnioski sam musiał opatrywać ostrzeżeniem, że różnica jednej sondy to
+szum. Pytania o trafność mają teraz właściwe miejsce w `live.py`, na prawdziwych
+wektorach.
 
-Na 24 sondach wszystkie cztery konwencje trafiają 22–23 razy na 24. Różnica
-jednej sondy to szum, więc **niespójność prefiksów nie psuje tu rankingu**.
-Psuje natomiast dwie inne rzeczy:
+Na 48 zdaniach z 8 dziedzin (1128 par):
 
-- Ten sam tekst pod dwoma prefiksami ma cosinus 0.835, nie 1.000 — wektory nie
-  są wymienne, więc porównywanie ich wprost jest błędem.
-- Tekst bez prefiksu leży bardzo blisko wariantu `search_query: ` (cosinus
-  0.968). Stara ścieżka de facto zapisuje dokumenty tak, jakby były zapytaniami,
-  i stąd biorą się jej pozornie wyższe cosinusy — porównuje zapytanie
-  z zapytaniem.
-- Prefiks `search_document: ` podnosi wzajemne podobieństwo niepowiązanych
-  dokumentów z 0.302 do 0.574, czyli dokłada wspólny kierunek i ściska zakres.
+| Konwencja | Ta sama dziedzina | Różne dziedziny | Zakres użyteczny | Dno (p95) |
+| --- | --- | --- | --- | --- |
+| `search_document` | 0.563 | 0.477 | 0.085 | 0.578 |
+| `search_query` | 0.252 | 0.167 | 0.085 | 0.279 |
+| bez prefiksu | 0.245 | 0.143 | 0.102 | 0.270 |
+
+- **Prefiks przesuwa chmurę, nie rozsuwa jej.** Dno rośnie o 0.334
+  (0.143 → 0.477), a zakres użyteczny zostaje ten sam (0.085 vs 0.102). Prefiks
+  dokłada wszystkim wektorom wspólny kierunek i nic więcej.
+- **Zakres użyteczny to 0.085.** Cały odstęp między „ta sama dziedzina" i „różne
+  dziedziny" mieści się w ośmiu setnych. Na tym modelu bezwzględny próg cosinusa
+  jest narzędziem tępym, niezależnie od wartości.
+- Ten sam tekst jako dokument i jako zapytanie: **0.775**, nie 1.000. To cena
+  pomyłki prefiksu i dokładnie ona unieruchomiła deduplikację.
+- Tekst bez prefiksu leży blisko `search_query` (0.946). Stara ścieżka de facto
+  zapisuje dokumenty tak, jakby były zapytaniami — stąd jej pozornie wyższe
+  cosinusy: porównuje zapytanie z zapytaniem.
+
+Kontrola spójności: dno `search_document` zmierzone na korpusie (0.578) zgadza
+się z medianami szumu na żywej kolekcji (0.567–0.647). Dwa niezależne pomiary
+wskazują to samo miejsce skali.
+
+### Wniosek o bramce przed fuzją
+
+RRF łączy **rangi** właśnie po to, żeby nie zależeć od wartości bezwzględnych.
+Bramka na bezwzględnym cosinusie *przed* fuzją działa wbrew tej konstrukcji: może
+wyciąć oś, w której dokument miał rangę pierwszą, tylko dlatego że ta oś ma
+niżej położony rozkład. Przy zakresie użytecznym 0.085 i rozjeździe osi 0.080
+kalibracja jednej liczby na pięć przestrzeni jest niewykonalna.
+
+Decyzja: `vector_memory_min_score` schodzi do **0.0**. Na tych danych to zmiana
+bez żadnego skutku (minimum obserwowane 0.441), ale kod przestaje obiecywać
+bramkę, której nie ma. Progi absolutne zostają tam, gdzie są skalibrowane — przy
+deduplikacji. Dowody wyszukiwania dostają pole `gate` z najniższym przepuszczonym
+cosinusem, żeby skutek dowolnej przyszłej wartości był widoczny w danych zamiast
+zgadywany.
 
 ## Znane problemy środowiska
 
@@ -297,6 +400,8 @@ Psuje natomiast dwie inne rzeczy:
 | `analysis.py` | orkiestracja całej analizy |
 | `anchors.py` | kotwice skali |
 | `diagnostics.py` | pięć osi pamięci VoiceLoopa i fuzja RRF |
-| `prefix_check.py` | pomiar skutku niespójnych prefiksów |
+| `scale.py` | dno skali i osiągalność progów na korpusie |
+| `live.py` | pomiar na kolekcji produkcyjnej, tylko odczyt |
+| `prefix_check.py` | geometria prefiksów zadania |
 | `_validate_geometry.py` | walidacja matematyki |
 | `_smoke.py` | test całej drogi na syntetycznym transkrypcie |

@@ -1,7 +1,7 @@
 # VoiceAttack Profile v2 PRO
 
 VoiceAttack pełni rolę niezawodnego przycisku głosowego i warstwy awaryjnej.
-Profil ma 622 jawne polskie warianty fraz: formy naturalne, krótkie skróty,
+Profil ma 656 jawnych polskich wariantów fraz: formy naturalne, krótkie skróty,
 odmiany i typowe warianty bez polskich znaków. Swobodną wypowiedź po komendzie
 **„Asystent”** nadal rozpoznaje Deepgram, nie wildcard VoiceAttack.
 
@@ -10,18 +10,18 @@ Routing komend jest automatyczny:
 - przy wyłączonym Deepgramie znane komendy lecą bezpośrednio przez `CommandId`,
 - przy aktywnym Deepgramie znane komendy VoiceAttack są mapowane na naturalny
   tekst i idą ścieżką tekstową, więc nie rozrywają sesji Venice,
-- wypowiedzi spoza 622 wariantów obsługuje `Asystent` albo ciągły nasłuch.
+- wypowiedzi spoza 656 wariantów obsługuje `Asystent` albo ciągły nasłuch.
 
 Gotowy profil:
 
 `C:\Users\marci\VoiceLoop\voiceattack\VoiceLoop-v2.vap`
 
-Profil nazywa się **VoiceLoop v2 PRO**, zawiera 30 komend i korzysta wyłącznie z
+Profil nazywa się **VoiceLoop v2 PRO**, zawiera 33 komendy i korzysta wyłącznie z
 lokalnego API VoiceLoop na `127.0.0.1:8765`.
 
 Generator odrzuca zduplikowane frazy pomiędzy komendami i komendę bez
 istniejącego skryptu `.vbs`. Dzięki temu rozbudowanie słownika nie tworzy
-niejednoznacznego routingu. Pełne 622 warianty są w
+niejednoznacznego routingu. Pełne 656 wariantów jest w
 `scripts\build-voiceattack-profile.py`; niżej są najważniejsze przykłady.
 
 Profil ustawia dla komend VoiceLoop próg rozpoznania `65`. Jeśli w logu
@@ -67,7 +67,7 @@ Dwustopniowy tryb jest celowy. Polski Deepgram znacznie lepiej rozpoznaje dowoln
 zdania niż wildcard systemowego silnika VoiceAttack. Stałe polecenia, takie jak
 „otwórz kalendarz”, wypowiadaj bez poprzedzania ich słowem „Asystent”.
 
-## Pakiet komend (30) z parafrazami
+## Pakiet komend (33) z parafrazami
 
 | Komenda główna | Przykładowe parafrazy | Działanie |
 |---|---|---|
@@ -78,6 +78,7 @@ zdania niż wildcard systemowego silnika VoiceAttack. Stałe polecenia, takie ja
 | `Opisz aktywne okno` | `Co mam otwarte`, `Jakie okno jest aktywne`, `Na jakim oknie jestem`, skrót: `Aktywne okno` | Lokalnie odczytuje aktywne okno i program. |
 | `Sprawdź pole tekstowe` | `Gdzie teraz piszę`, `Czy to pasek adresu`, `Gdzie trafi tekst` | Sprawdza, czy wpisywanie trafi do właściwego pola, a nie np. paska adresu. |
 | `Zminimalizuj okno` | `Schowaj okno`, `Ukryj okno`, `Zwiń aktywne okno`, skrót: `Zwiń` | Minimalizuje aktualnie aktywne okno. |
+| `Zminimalizuj okno pod kursorem` | `Schowaj okno pod kursorem`, `Zwiń okno pod myszką` | Minimalizuje okno wskazywane kursorem. |
 | `Zminimalizuj wszystkie` | `Pokaż pulpit`, `Minimalizuj wszystko`, `Zwiń wszystkie okna`, skrót: `Pulpit` | Minimalizuje wszystkie okna i pokazuje pulpit. |
 | `Wyłącz aplikację pod kursorem` | `Zamknij wskazane okno`, `Zamknij program który wskazuję`, `Zamknij to okno` | Po potwierdzeniu wysyła `WM_CLOSE`; nie zabija procesu i pozostawia pytanie o zapis. |
 | `Kopiuj zaznaczony tekst` | `Skopiuj zaznaczony tekst`, `Kopiuj zaznaczony fragment`, skrót: `Kopiuj zaznaczenie` | Kopiuje aktualnie zaznaczony tekst do schowka. |
@@ -100,7 +101,25 @@ zdania niż wildcard systemowego silnika VoiceAttack. Stałe polecenia, takie ja
 | `Otwórz Gemini` | `Open Gemini`, `Czat Gemini`, `Uruchom Gemini` | Otwiera osobny czat Gemini. |
 | `Wyszukaj w internecie` | `Sprawdź w necie`, `Szukaj online` | Uruchamia szybkie wyszukiwanie internetowe (potem doprecyzuj zapytanie). |
 | `Zapamiętaj ostatnie źródło` | `Zapisz ostatni link`, `Zachowaj wynik wyszukiwania`, `Zapisz to źródło` | Przygotowuje zapis ostatniego wyniku internetowego i wymaga potwierdzenia. |
+| `Co potrafisz` | `Jakie masz możliwości`, `Lista komend` | Czyta możliwości VoiceAttack i dodatkowe akcje VoiceLoop. |
+| `Zmień nazwę` | `Zmień nazwę pod kursorem`, `Przemianuj to` | Przygotowuje zmianę nazwy elementu pod kursorem i wymaga potwierdzenia. |
 | `Stop teraz` | `Przerwij wszystko`, `Awaryjnie stop`, `Panic stop`, skrót: `Stop` | Natychmiast zatrzymuje nasłuch, TTS, kolejkę i bieżącą akcję. |
+
+## Bezpieczny audyt akcji
+
+Audyt nie uruchamia żadnej komendy ani akcji ekranowej. Porównuje generator,
+profil `.vap`, wrappery `.vbs` oraz żywy katalog allowlisty VoiceLoop:
+
+```powershell
+.\listener\.venv\Scripts\python.exe .\scripts\check_voiceattack_actions.py
+```
+
+Raport jest zapisywany w `logs\voiceattack-action-audit.json`. Tryb bez
+uruchomionego listenera:
+
+```powershell
+.\listener\.venv\Scripts\python.exe .\scripts\check_voiceattack_actions.py --offline
+```
 
 ### Ręczne uruchomienie skryptów minimalizacji
 

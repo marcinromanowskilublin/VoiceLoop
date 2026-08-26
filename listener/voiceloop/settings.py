@@ -69,7 +69,14 @@ class Settings(BaseSettings):
     local_embeddings_model: str | None = None
     local_embeddings_timeout_seconds: float = 30.0
     vector_memory_context_limit: int = 8
-    vector_memory_min_score: float = 0.15
+    # Zmierzone na kolekcji produkcyjnej: najniższy cosinus, jaki nomic-v2-moe
+    # w ogóle produkuje dla tych danych, to 0.441, a mediany szumu per oś leżą
+    # między 0.567 i 0.647. Próg 0.15 nie odrzucał niczego i nie mógł, a jedna
+    # liczba na pięć osi znaczyłaby w każdej co innego. Zostaje 0.0, żeby kod nie
+    # obiecywał bramki, której nie ma. RRF działa na rangach, więc jej nie
+    # potrzebuje. Absolutne progi trzymamy tam, gdzie są skalibrowane — przy
+    # deduplikacji.
+    vector_memory_min_score: float = 0.0
     vector_memory_adaptive_query_weights: bool = True
     vector_memory_weight_semantic: float = 0.40
     vector_memory_weight_topic: float = 0.20
@@ -77,6 +84,13 @@ class Settings(BaseSettings):
     vector_memory_weight_decision: float = 0.15
     vector_memory_weight_person_context: float = 0.10
     vector_memory_rrf_k: int = 60
+    # Strażnik progów. Powstał, bo trzy progi w tym projekcie stały martwe
+    # miesiącami, choć jedna trzecia kodu zajmuje się mierzeniem systemu — pomiar
+    # nie miał konsumenta. Doba wystarcza: rozkłady w kolekcji zmieniają się
+    # w tempie napływu pamięci, nie zapytań.
+    threshold_guard_enabled: bool = True
+    threshold_guard_interval_seconds: int = 86400
+    threshold_guard_sample: int = 40
     capability_embeddings_enabled: bool = True
     capability_match_limit: int = 5
     capability_match_min_score: float = 0.20

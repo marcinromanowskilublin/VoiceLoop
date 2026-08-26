@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -16,6 +17,8 @@ from .memory import VectorMemoryHit
 from .memory_vectorization import MEMORY_VECTOR_NAMES, MEMORY_VECTOR_WEIGHTS
 from .settings import Settings
 
+LOGGER = logging.getLogger(__name__)
+
 VECTOR_NAMES = MEMORY_VECTOR_NAMES
 VECTOR_WEIGHTS = MEMORY_VECTOR_WEIGHTS
 WEIGHTED_RRF_VERSION = "weighted-rrf-v1"
@@ -24,6 +27,14 @@ DEFAULT_RRF_K = 60
 
 class QdrantMemoryError(RuntimeError):
     pass
+
+
+class QdrantUnavailableError(QdrantMemoryError):
+    """Qdrant nie odpowiedział — nie mylić z brakiem punktu.
+
+    `False` / `None` znaczy „nie ma". Ten wyjątek znaczy „nie wiem". Worker
+    indeksujący musi przy nim pominąć przebieg, a nie zapisać kolejną kopię.
+    """
 
 
 @dataclass(frozen=True)
@@ -202,8 +213,14 @@ class QdrantVectorStore:
                 with_payload=content_hash is not None,
                 with_vectors=False,
             )
-        except Exception:
-            return False
+        except Exception as exc:
+            LOGGER.warning(
+                "has_memory: Qdrant niedostępny (%s) — nie mylić z brakiem punktu",
+                type(exc).__name__,
+            )
+            raise QdrantUnavailableError(
+                f"Nie udało się sprawdzić pamięci w Qdrant: {type(exc).__name__}"
+            ) from exc
         if not records:
             return False
         if content_hash is None:
@@ -218,13 +235,63 @@ class QdrantVectorStore:
                 stored_hash = metadata.get("content_hash")
         return str(stored_hash or "") == content_hash
 
+    async def has_content_hash(
+        self,
+        *,
+        content_hash: str,
+        source: str | None = None,
+    ) -> bool:
+        """Czy ta sama treść już leży w kolekcji, niezależnie od source_id.
+
+        `has_memory` wymaga znanego `source_id`, a kubełki aktywności Screenpipe
+        mają go ze znacznika czasu, więc za każdym razem inny. Bez pytania o sam
+        odcisk treści identyczny kubełek zawsze wygląda na nowy.
+
+        Przy awarii Qdranta rzuca `QdrantUnavailableError`, a nie `False`.
+        `False` znaczy wyłącznie „tej treści nie ma".
+        """
+
+        if not self.enabled or not content_hash.strip():
+            return False
+        conditions: list[models.Condition] = [
+            models.FieldCondition(
+                key="content_hash",
+                match=models.MatchValue(value=content_hash),
+            )
+        ]
+        if source:
+            conditions.append(
+                models.FieldCondition(key="source", match=models.MatchValue(value=source))
+            )
+        try:
+            records, _ = await self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=models.Filter(must=conditions),
+                limit=1,
+                with_payload=False,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "has_content_hash: Qdrant niedostępny (%s) — nie mylić z brakiem treści",
+                type(exc).__name__,
+            )
+            raise QdrantUnavailableError(
+                f"Nie udało się sprawdzić odcisku treści w Qdrant: {type(exc).__name__}"
+            ) from exc
+        return bool(records)
+
     async def get_memory_payload(
         self,
         *,
         source: str,
         source_id: str,
     ) -> dict[str, Any] | None:
-        """Read one payload without vectors, returning None on an unavailable store."""
+        """Odczyt payloadu bez wektorów.
+
+        `None` znaczy „punktu nie ma". Niedostępny magazyn to
+        `QdrantUnavailableError` — wcześniej obie sytuacje wyglądały tak samo.
+        """
 
         if not self.enabled:
             return None
@@ -235,8 +302,14 @@ class QdrantVectorStore:
                 with_payload=True,
                 with_vectors=False,
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            LOGGER.warning(
+                "get_memory_payload: Qdrant niedostępny (%s) — nie mylić z brakiem punktu",
+                type(exc).__name__,
+            )
+            raise QdrantUnavailableError(
+                f"Nie udało się odczytać payloadu z Qdrant: {type(exc).__name__}"
+            ) from exc
         if not records:
             return None
         payload = getattr(records[0], "payload", None)
@@ -365,7 +438,7 @@ class QdrantVectorStore:
         query_vectors: Mapping[str, Sequence[float]] | None = None,
         limit: int = 8,
         source: str | None = None,
-        min_score: float = 0.15,
+        min_score: float = 0.0,
         vector_names: tuple[str, ...] = VECTOR_NAMES,
         query_weights: Mapping[str, float] | None = None,
         rrf_k: int = DEFAULT_RRF_K,
@@ -444,18 +517,31 @@ class QdrantVectorStore:
 
         requests = [_query(name) for name in normalized_query_vectors]
         responses = await asyncio.gather(*requests, return_exceptions=True)
+        failures = [item for item in responses if isinstance(item, Exception)]
+        if failures and len(failures) == len(responses):
+            # Wszystkie osie milczą — to awaria magazynu, nie pusty wynik wyszukiwania.
+            # Pusta lista wyglądałaby jak „nic nie znaleziono" i otwierała zapis kopii.
+            raise QdrantUnavailableError(
+                "Qdrant nie odpowiedział w żadnej przestrzeni wektorowej: "
+                f"{type(failures[0]).__name__}"
+            ) from failures[0]
         aggregate: dict[str, dict[str, Any]] = {}
-        successful_spaces: set[str] = set()
+        answering_spaces: set[str] = set()
+        contributing_spaces: set[str] = set()
+        # Bramka `min_score` była lata ustawiona na wartość, której żaden wynik nie
+        # naruszał. Zapisujemy najniższy cosinus, jaki przeszedł, żeby dało się to
+        # zobaczyć w danych zamiast zgadywać.
+        lowest_kept = float("inf")
         for response in responses:
             if isinstance(response, Exception):
                 continue
             name, result = response
-            successful_spaces.add(name)
+            answering_spaces.add(name)
             weight = effective_weights[name]
             for rank, point in enumerate(result.points, start=1):
                 similarity = float(point.score)
-                if similarity < min_score:
-                    continue
+                lowest_kept = min(lowest_kept, similarity)
+                contributing_spaces.add(name)
                 key = str(point.id)
                 entry = aggregate.setdefault(
                     key,
@@ -474,8 +560,13 @@ class QdrantVectorStore:
                     "rrf_contribution": contribution,
                 }
 
+        # Mianownik z osi, które faktycznie coś zwróciły. Oś, która odpowiedziała
+        # pustą listą, podnosiła wcześniej maksimum, choć żaden dokument nie mógł
+        # z niej dostać punktów — wynik 1.0 stawał się nieosiągalny bez powodu.
+        # Mianownik zostaje stały dla całego zapytania, więc kolejność wyników się
+        # nie zmienia; naprawiamy czytelność liczby, nie ranking.
         maximum_rrf = sum(
-            effective_weights[name] / (rrf_k + 1) for name in successful_spaces
+            effective_weights[name] / (rrf_k + 1) for name in contributing_spaces
         )
         if maximum_rrf <= 0:
             return []
@@ -501,11 +592,36 @@ class QdrantVectorStore:
                 name: float(item["score"]) for name, item in evidence.items()
             }
             vector_ranks = {name: int(item["rank"]) for name, item in evidence.items()}
+            # Bez tego niski `fusion_score` jest nieczytelny: nie wiadomo, czy
+            # dokument wypadł słabo, czy po prostu nie ma wektora w połowie osi.
+            # W kolekcji produkcyjnej `decision` istnieje dla 55% punktów, więc to
+            # nie jest przypadek brzegowy.
+            stored_spaces = metadata.get("vector_spaces")
+            available = (
+                [str(name) for name in stored_spaces if str(name) in VECTOR_WEIGHTS]
+                if isinstance(stored_spaces, list)
+                else []
+            )
+            reachable = [name for name in available if name in contributing_spaces]
             metadata["retrieval_evidence"] = {
                 "method": WEIGHTED_RRF_VERSION,
                 "fusion_score": fusion_score,
                 "weighted_similarity": weighted_similarity,
                 "spaces": evidence,
+                "coverage": {
+                    "queried": sorted(normalized_query_vectors),
+                    "answered": sorted(answering_spaces),
+                    "contributed": sorted(contributing_spaces),
+                    "document_spaces": available,
+                    "matched_of_reachable": (
+                        f"{len(evidence)}/{len(reachable)}" if reachable else ""
+                    ),
+                },
+                "gate": {
+                    "min_score": min_score,
+                    "lowest_kept": None if lowest_kept == float("inf") else lowest_kept,
+                    "bound": min_score > 0.0 and lowest_kept < min_score + 0.01,
+                },
             }
             created_at_raw = str(payload.get("created_at") or "")
             try:

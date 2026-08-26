@@ -6,6 +6,7 @@ import pytest
 from voiceloop.qdrant_memory import (
     VECTOR_NAMES,
     WEIGHTED_RRF_VERSION,
+    QdrantUnavailableError,
     QdrantVectorStore,
 )
 from voiceloop.settings import Settings
@@ -239,6 +240,214 @@ async def test_qdrant_has_memory_compares_content_hash(tmp_path) -> None:
         )
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_qdrant_finds_content_hash_without_knowing_source_id(tmp_path) -> None:
+    scroll = AsyncMock(return_value=([SimpleNamespace(id="point-a")], None))
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(scroll=scroll),  # type: ignore[arg-type]
+    )
+
+    assert (
+        await store.has_content_hash(
+            content_hash="abc",
+            source="screenpipe_behavior",
+        )
+        is True
+    )
+    conditions = scroll.await_args.kwargs["scroll_filter"].must
+    assert [item.key for item in conditions] == ["content_hash", "source"]
+    assert conditions[0].match.value == "abc"
+    assert scroll.await_args.kwargs["with_vectors"] is False
+
+    scroll.return_value = ([], None)
+    assert await store.has_content_hash(content_hash="abc") is False
+    assert await store.has_content_hash(content_hash="   ") is False
+
+
+@pytest.mark.asyncio
+async def test_qdrant_has_memory_raises_when_store_is_down(tmp_path) -> None:
+    """Awaria magazynu nie może wyglądać jak brak punktu."""
+
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(retrieve=AsyncMock(side_effect=RuntimeError("down"))),
+    )
+
+    with pytest.raises(QdrantUnavailableError):
+        await store.has_memory(source="meeting", source_id="1")
+
+
+@pytest.mark.asyncio
+async def test_qdrant_has_content_hash_raises_when_store_is_down(tmp_path) -> None:
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(scroll=AsyncMock(side_effect=RuntimeError("down"))),
+    )
+
+    with pytest.raises(QdrantUnavailableError):
+        await store.has_content_hash(content_hash="abc")
+
+
+@pytest.mark.asyncio
+async def test_qdrant_get_memory_payload_raises_when_store_is_down(tmp_path) -> None:
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(retrieve=AsyncMock(side_effect=RuntimeError("down"))),
+    )
+
+    with pytest.raises(QdrantUnavailableError):
+        await store.get_memory_payload(source="meeting", source_id="1")
+
+
+@pytest.mark.asyncio
+async def test_qdrant_search_raises_when_every_axis_fails(tmp_path) -> None:
+    """Pusta lista przy całkowitej awarii wyglądałaby jak „nic nie znaleziono"."""
+
+    async def boom(**_kwargs):
+        raise RuntimeError("down")
+
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(query_points=boom),
+    )
+
+    with pytest.raises(QdrantUnavailableError):
+        await store.search([1.0, 0.0, 0.0], vector_names=("semantic",))
+
+
+@pytest.mark.asyncio
+async def test_qdrant_empty_axis_does_not_make_top_score_unreachable(tmp_path) -> None:
+    """Oś, która odpowiedziała pustą listą, nie może zabierać punktów innym.
+
+    Wcześniej mianownik brał wszystkie osie, które nie rzuciły wyjątkiem, więc
+    dokument pierwszy w jedynej działającej osi dostawał ułamek zamiast 1.0 —
+    a przy 55% pokrycia osi `decision` w kolekcji produkcyjnej to reguła,
+    nie wyjątek.
+    """
+
+    def payload() -> dict[str, object]:
+        return {
+            "source": "screenpipe_behavior",
+            "source_id": "activity:a",
+            "title": "VoiceLoop",
+            "content": "Praca nad pamięcią.",
+            "metadata": {"vector_spaces": ["semantic"]},
+            "created_at": "2026-08-10T00:00:00+00:00",
+        }
+
+    async def query_points(**kwargs):
+        if kwargs["using"] == "semantic":
+            return SimpleNamespace(
+                points=[SimpleNamespace(id="point-a", score=0.91, payload=payload())]
+            )
+        return SimpleNamespace(points=[])
+
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(query_points=query_points),  # type: ignore[arg-type]
+    )
+
+    hits = await store.search(
+        query_vectors={name: [1.0, 0.0, 0.0] for name in VECTOR_NAMES},
+        vector_names=VECTOR_NAMES,
+    )
+
+    assert len(hits) == 1
+    assert hits[0].fusion_score == pytest.approx(1.0)
+    coverage = hits[0].metadata["retrieval_evidence"]["coverage"]
+    assert coverage["answered"] == sorted(VECTOR_NAMES)
+    assert coverage["contributed"] == ["semantic"]
+    assert coverage["document_spaces"] == ["semantic"]
+    assert coverage["matched_of_reachable"] == "1/1"
+
+
+@pytest.mark.asyncio
+async def test_qdrant_reports_whether_the_score_gate_bound_anything(tmp_path) -> None:
+    """Bramka, której nie widać w danych, obiecuje jakość, której nie dostarcza."""
+
+    async def query_points(**kwargs):
+        assert kwargs["score_threshold"] == 0.0
+        return SimpleNamespace(
+            points=[
+                SimpleNamespace(
+                    id="point-a",
+                    score=0.44,
+                    payload={
+                        "source": "screenpipe_behavior",
+                        "source_id": "activity:a",
+                        "title": "VoiceLoop",
+                        "content": "Praca.",
+                        "metadata": {},
+                        "created_at": "2026-08-10T00:00:00+00:00",
+                    },
+                )
+            ]
+        )
+
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(query_points=query_points),  # type: ignore[arg-type]
+    )
+
+    hits = await store.search(query_vectors={"semantic": [1.0, 0.0]}, vector_names=("semantic",))
+    gate = hits[0].metadata["retrieval_evidence"]["gate"]
+
+    assert gate["min_score"] == 0.0
+    assert gate["lowest_kept"] == pytest.approx(0.44)
+    assert gate["bound"] is False
+
+
+def test_default_score_gate_is_off_because_it_never_bound(tmp_path) -> None:
+    # 0.15 leżało poniżej najniższego cosinusa, jaki model produkuje dla tych
+    # danych (0.441), więc nie odrzucało niczego. Zero mówi to wprost.
+    assert Settings(voiceloop_data_dir=str(tmp_path)).vector_memory_min_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_qdrant_coverage_separates_weak_match_from_missing_vector(tmp_path) -> None:
+    def payload(spaces: list[str]) -> dict[str, object]:
+        return {
+            "source": "screenpipe_behavior",
+            "source_id": "activity:" + "-".join(spaces),
+            "title": "VoiceLoop",
+            "content": "Praca nad pamięcią.",
+            "metadata": {"vector_spaces": spaces},
+            "created_at": "2026-08-10T00:00:00+00:00",
+        }
+
+    async def query_points(**kwargs):
+        if kwargs["using"] == "semantic":
+            return SimpleNamespace(
+                points=[
+                    SimpleNamespace(id="full", score=0.9, payload=payload(["semantic", "topic"])),
+                    SimpleNamespace(id="thin", score=0.8, payload=payload(["semantic"])),
+                ]
+            )
+        return SimpleNamespace(
+            points=[SimpleNamespace(id="full", score=0.7, payload=payload(["semantic", "topic"]))]
+        )
+
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=SimpleNamespace(query_points=query_points),  # type: ignore[arg-type]
+    )
+
+    hits = await store.search(
+        query_vectors={"semantic": [1.0, 0.0], "topic": [0.0, 1.0]},
+        vector_names=("semantic", "topic"),
+    )
+    by_id = {hit.source_id: hit for hit in hits}
+
+    thin = by_id["activity:semantic"].metadata["retrieval_evidence"]["coverage"]
+    full = by_id["activity:semantic-topic"].metadata["retrieval_evidence"]["coverage"]
+    # Dokument bez wektora `topic` wykorzystał wszystko, co miał; dokument z obu
+    # osiami też. Sam `fusion_score` tego nie odróżnia, więc pokrycie musi.
+    assert thin["matched_of_reachable"] == "1/1"
+    assert full["matched_of_reachable"] == "2/2"
+    assert thin["document_spaces"] == ["semantic"]
 
 
 @pytest.mark.asyncio

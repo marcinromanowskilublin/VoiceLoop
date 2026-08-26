@@ -1,5 +1,6 @@
 import json
 import re
+import runpy
 import xml.etree.ElementTree as ET
 from pathlib import Path, PureWindowsPath
 
@@ -132,6 +133,39 @@ def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
         (ROOT / "scripts" / "va" / path.name).is_file() and path.suffix == ".vbs"
         for path in paths
     )
+
+
+def test_voiceattack_action_audit_validates_profile_without_execution() -> None:
+    namespace = runpy.run_path(str(ROOT / "scripts" / "check_voiceattack_actions.py"))
+
+    report = namespace["audit_voiceattack_actions"](live=False)
+
+    assert report["safe_mode"] is True
+    assert report["status"] == "ok"
+    assert report["errors"] == []
+    assert report["profile"]["name"] == "VoiceLoop v2 PRO"
+    assert report["profile"]["command_count"] == 33
+    assert report["profile"]["phrase_count"] == 656
+    assert report["profile"]["missing_scripts"] == 0
+    assert len(report["inventory"]) == 33
+
+
+def test_one_click_launcher_starts_safe_complete_stack() -> None:
+    launcher = (ROOT / "Start-VoiceLoop.bat").read_text(encoding="utf-8")
+    start_all = (ROOT / "scripts" / "start-all.ps1").read_text(encoding="utf-8")
+    screenpipe = (ROOT / "scripts" / "start-screenpipe.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "scripts\\start-all.ps1" in launcher
+    assert "check_voiceattack_actions.py" in start_all
+    assert "VoiceAttack" in start_all
+    assert "-ContextOnly" in start_all
+    assert "FullScreenpipeCapture" in start_all
+    assert "--disable-audio" in screenpipe
+    assert "--disable-keyboard-capture" in screenpipe
+    assert "--disable-clipboard-capture" in screenpipe
+    assert "--disable-click-capture" in screenpipe
 
 
 def test_voiceattack_dispatcher_preserves_fixed_command_ids() -> None:

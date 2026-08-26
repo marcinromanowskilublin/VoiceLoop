@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+
 from voiceloop.embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 
 from .config import (

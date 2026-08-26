@@ -1,0 +1,7 @@
+# Narzędzia testowe i lint. Wcześniej istniały tylko w lokalnym .venv i w README,
+# przez co CI nie miał z czego ich wziąć, a wersja u każdego mogła być inna.
+# Wersje przypięte do tych, na których przechodzi obecny zestaw testów.
+-r requirements.lock
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.16.2

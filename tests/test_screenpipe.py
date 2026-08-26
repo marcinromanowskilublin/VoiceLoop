@@ -6,10 +6,230 @@ import pytest
 from voiceloop.actions import ActionRegistry
 from voiceloop.behavior_digest import DigestedMemory
 from voiceloop.memory import MemoryStore
+from voiceloop.qdrant_memory import QdrantUnavailableError
 from voiceloop.screenpipe import ScreenpipeClient, ScreenpipeContext, ScreenpipeTextItem
-from voiceloop.screenpipe_memory import ScreenpipeVectorMemoryWorker
+from voiceloop.screenpipe_memory import (
+    ACTIVITY_DUPLICATE_MIN_SCORE,
+    ScreenpipeVectorMemoryWorker,
+)
 from voiceloop.settings import Settings
 from voiceloop.tts import WindowsTTS
+
+
+def _dedup_worker(tmp_path, *, qdrant, embeddings):
+    settings = Settings(voiceloop_data_dir=str(tmp_path))
+    return ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=ScreenpipeClient(settings),
+        memory=MemoryStore(tmp_path / "voice.db"),
+        embeddings=embeddings,  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.asyncio
+async def test_duplicate_bucket_is_caught_by_content_hash_without_embedding(tmp_path) -> None:
+    """Kubełek powtórzony bajt w bajt nie powinien kosztować ani jednego wektora."""
+
+    embed_calls: list[list[str]] = []
+
+    class FakeEmbeddings:
+        enabled = True
+
+        async def embed_documents(self, texts):
+            embed_calls.append(list(texts))
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "has_content_hash": AsyncMock(return_value=True),
+            "search": AsyncMock(return_value=[]),
+        },
+    )()
+    worker = _dedup_worker(tmp_path, qdrant=qdrant, embeddings=FakeEmbeddings())
+
+    assert await worker._looks_like_duplicate("Praca nad pamięcią VoiceLoop.") is True
+    assert embed_calls == []
+    qdrant.search.assert_not_awaited()
+    hashed = qdrant.has_content_hash.await_args.kwargs
+    assert len(hashed["content_hash"]) == 64
+    assert hashed["source"] == "screenpipe_behavior"
+
+
+@pytest.mark.asyncio
+async def test_cheap_stage_does_not_guess_at_paraphrases(tmp_path) -> None:
+    """Przed digestem mamy surowy OCR, w bazie podsumowanie modelu.
+
+    To dwa różne rodzaje tekstu, więc żaden próg dla tej pary nie jest
+    skalibrowany. Tani etap sprawdza wyłącznie odcisk treści i nie udaje, że
+    umie więcej — porównanie semantyczne należy do etapu po digeście.
+    """
+
+    class FakeEmbeddings:
+        enabled = True
+
+        async def embed_documents(self, texts):
+            raise AssertionError("Tani etap nie ma prawa wektoryzować.")
+
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "has_content_hash": AsyncMock(return_value=False),
+            "search": AsyncMock(return_value=[object()]),
+        },
+    )()
+    worker = _dedup_worker(tmp_path, qdrant=qdrant, embeddings=FakeEmbeddings())
+
+    assert await worker._looks_like_duplicate("Zupełnie nowa treść.") is False
+    assert await worker._looks_like_duplicate("   ") is False
+    qdrant.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_check_does_not_pretend_absence_when_qdrant_is_down(
+    tmp_path,
+) -> None:
+    """Awaria magazynu ≠ „duplikatu nie ma" — indeksowanie musi się zatrzymać."""
+
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "has_content_hash": AsyncMock(
+                side_effect=QdrantUnavailableError("down")
+            ),
+            "search": AsyncMock(return_value=[]),
+        },
+    )()
+    worker = _dedup_worker(
+        tmp_path,
+        qdrant=qdrant,
+        embeddings=type("E", (), {"enabled": True})(),
+    )
+
+    with pytest.raises(QdrantUnavailableError):
+        await worker._looks_like_duplicate("Treść, której nie umiemy sprawdzić.")
+    qdrant.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_semantic_duplicate_propagates_unavailable_instead_of_writing(
+    tmp_path,
+) -> None:
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "search": AsyncMock(side_effect=QdrantUnavailableError("down")),
+        },
+    )()
+    worker = _dedup_worker(
+        tmp_path,
+        qdrant=qdrant,
+        embeddings=type("E", (), {"enabled": True})(),
+    )
+
+    with pytest.raises(QdrantUnavailableError):
+        await worker._semantic_duplicate_exists(
+            source="screenpipe_behavior",
+            semantic_vector=[1.0, 0.0, 0.0],
+        )
+
+
+@pytest.mark.asyncio
+async def test_semantic_duplicate_uses_the_vector_it_is_about_to_store(tmp_path) -> None:
+    """Porównanie idzie dokument do dokumentu i nie kosztuje embeddingu.
+
+    Wektor jest ten sam, którym zaraz zapisalibyśmy punkt, więc obie strony leżą
+    w identycznej przestrzeni. Dopiero tutaj próg 0.97 ma sens: tekst identyczny
+    wraca na 1.000, a dokumenty faktycznie różne mają p99 = 0.874.
+    """
+
+    class FakeEmbeddings:
+        enabled = True
+
+        async def embed_documents(self, texts):
+            raise AssertionError("Ten etap ma używać gotowego wektora.")
+
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {"enabled": True, "search": AsyncMock(return_value=[object()])},
+    )()
+    worker = _dedup_worker(tmp_path, qdrant=qdrant, embeddings=FakeEmbeddings())
+
+    vector = [1.0, 0.0, 0.0]
+    assert (
+        await worker._semantic_duplicate_exists(
+            source="screenpipe_behavior",
+            semantic_vector=vector,
+        )
+        is True
+    )
+    call = qdrant.search.await_args
+    assert call.args[0] is vector
+    assert call.kwargs["vector_names"] == ("semantic",)
+    assert call.kwargs["min_score"] == ACTIVITY_DUPLICATE_MIN_SCORE
+    assert call.kwargs["source"] == "screenpipe_behavior"
+
+    qdrant.search.return_value = []
+    assert (
+        await worker._semantic_duplicate_exists(
+            source="screenpipe_behavior",
+            semantic_vector=vector,
+        )
+        is False
+    )
+    assert (
+        await worker._semantic_duplicate_exists(
+            source="screenpipe_behavior",
+            semantic_vector=[],
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_related_history_reports_cosine_not_rank_artifact(tmp_path) -> None:
+    """Przy jednej osi `fusion_score` jest funkcją rangi, nie podobieństwa.
+
+    Pierwszy wynik dostaje 1.000 niezależnie od tego, jak daleko leży, a ta
+    liczba trafiała wprost do kontekstu modelu jako „score".
+    """
+
+    class FakeEmbeddings:
+        enabled = True
+
+        async def embed_query(self, text):
+            return [1.0, 0.0, 0.0]
+
+    hit = type(
+        "Hit",
+        (),
+        {
+            "title": "Wcześniejsza aktywność",
+            "content": "Praca nad pamięcią.",
+            "score": 1.0,
+            "vector_scores": {"semantic": 0.61},
+        },
+    )()
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {"enabled": True, "search": AsyncMock(return_value=[hit])},
+    )()
+    worker = _dedup_worker(tmp_path, qdrant=qdrant, embeddings=FakeEmbeddings())
+
+    history = await worker._related_history("Praca nad pamięcią.")
+
+    assert history == ["Wcześniejsza aktywność: Praca nad pamięcią. (cosinus=0.610)"]
 
 
 @pytest.mark.asyncio

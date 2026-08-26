@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
 from voiceloop.settings import Settings
 
 DEEPGRAM_URL = "https://api.deepgram.com/v1/listen"

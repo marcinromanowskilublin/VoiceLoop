@@ -1280,35 +1280,39 @@ function renderPrefixCheck(result) {
     return;
   }
 
-  const displacement = result.displacement || {};
-  const identity = displacement.same_text_across_prefixes || {};
-  const official = (result.conventions || []).find((item) => item.key === "official");
-  const legacy = (result.conventions || []).find((item) => item.key === "legacy_raw");
-  const gap = official && legacy ? Math.abs(official.hits_at_1 - legacy.hits_at_1) : 0;
-  const severe = gap > Math.max(1, Math.floor(result.probe_count / 20));
+  const clouds = result.clouds || [];
+  const pairs = (result.displacement || {}).same_text_between_prefixes || {};
+  // Kluczowa liczba: ten sam tekst raz jako dokument, raz jako zapytanie.
+  // To dokładnie ta rozbieżność, która unieruchomiła próg deduplikacji.
+  const mismatch = pairs["search_document|search_query"] || {};
+  const narrowest = clouds.reduce(
+    (worst, item) => (!worst || item.usable_range < worst.usable_range ? item : worst),
+    null,
+  );
+  const severe = (mismatch.median ?? 1) < 0.95;
 
   const notes = (result.interpretation || [])
     .map((item) => `<div class="note ${severe ? "is-bad" : "is-good"}">${escapeHtml(item)}</div>`)
     .join("");
 
   const cards = [
-    metricCard("Ten sam tekst, inny prefiks", identity.median, "1.000 = prefiks nic nie zmienia", [0.99, 0.95]),
-    metricCard("Konwencja nomica: trafienia", official ? official.hit_at_1 : null, `${official?.hits_at_1 ?? "—"} z ${result.probe_count} sond`, [0.9, 0.75]),
-    metricCard("Stara ścieżka: trafienia", legacy ? legacy.hit_at_1 : null, `${legacy?.hits_at_1 ?? "—"} z ${result.probe_count} sond`, [0.9, 0.75]),
+    metricCard("Dokument kontra zapytanie", mismatch.median, "ten sam tekst, 1.000 = bez różnicy", [0.99, 0.95]),
+    metricCard("Najwęższy zakres użyteczny", narrowest ? narrowest.usable_range : null, narrowest ? escapeHtml(narrowest.label) : "—", [0.2, 0.1]),
+    metricCard("Najwyższe dno", clouds.length ? Math.max(...clouds.map((item) => item.floor)) : null, "95. percentyl par z różnych dziedzin", [0.6, 0.75], true),
   ].join("");
 
-  const rows = (result.conventions || [])
+  const rows = clouds
     .map(
       (row) => `<div class="prefix-row">
         <div class="probe">${escapeHtml(row.label)}
-          <span class="origin">zapytanie: ${escapeHtml(row.query_prefix)} · dokument: ${escapeHtml(row.document_prefix)}</span>
+          <span class="origin">${escapeHtml(row.note)}</span>
         </div>
         <div class="numbers">
-          <span>trafienie 1.: <b>${row.hits_at_1}/${row.of_total}</b></span>
-          <span>MRR: <b>${num(row.mrr)}</b></span>
-          <span>margines: <b>${num(row.margin.median)}</b></span>
-          <span>cosinus par: <b>${num(row.correct_pair_cosine.median)}</b></span>
-          <span>najgorsza pozycja: <b>${row.worst_rank}</b></span>
+          <span>ta sama dziedzina: <b>${num(row.same_domain.median)}</b></span>
+          <span>różne dziedziny: <b>${num(row.cross_domain.median)}</b></span>
+          <span>zakres użyteczny: <b>${num(row.usable_range)}</b></span>
+          <span>dno: <b>${num(row.floor)}</b></span>
+          <span>par: <b>${row.pairs.same}+${row.pairs.cross}</b></span>
         </div>
       </div>`,
     )
@@ -1317,8 +1321,9 @@ function renderPrefixCheck(result) {
   host.innerHTML = `
     <div class="metrics">${cards}</div>
     ${notes}
-    <p class="hint">${escapeHtml(result.method_note || "")}
-      Model: ${escapeHtml(result.model)}, ${result.dimension}D, ${result.probe_count} sond.</p>
+    <p class="hint">${escapeHtml(result.scope_note || "")}
+      Model: ${escapeHtml(result.model)}, ${result.dimension}D,
+      ${result.text_count} zdań z ${result.domain_count} dziedzin.</p>
     ${rows}`;
 }
 

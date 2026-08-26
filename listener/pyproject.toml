@@ -6,7 +6,7 @@ requires-python = ">=3.11,<3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["../tests"]
-pythonpath = ["."]
+pythonpath = [".", ".."]
 asyncio_mode = "auto"
 
 [tool.ruff]
@@ -16,5 +16,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# Bez tego ruff bierze `voiceloop` i `vectorscope` za paczki zewnętrzne i zgłasza
+# I001 w plikach, których nikt nie ruszał — zależnie od katalogu uruchomienia.
 [tool.ruff.lint.isort]
-known-first-party = ["voiceloop"]
+known-first-party = ["voiceloop", "vectorscope"]

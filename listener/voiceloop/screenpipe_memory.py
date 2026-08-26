@@ -14,13 +14,22 @@ from .corpus.privacy import redact_text
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 from .memory import MemoryStore
 from .memory_vectorization import MEMORY_DOCUMENT_SCHEMA_VERSION
-from .qdrant_memory import QdrantMemoryError, QdrantVectorStore
+from .qdrant_memory import QdrantMemoryError, QdrantUnavailableError, QdrantVectorStore
 from .screenpipe import ScreenpipeClient, ScreenpipeContext, ScreenpipeError
 from .settings import Settings
 
 LOGGER = logging.getLogger("voiceloop.screenpipe_memory")
 ACTIVITY_BUCKET_MINUTES = 10
-ACTIVITY_DUPLICATE_MIN_SCORE = 0.92
+
+# Zmierzone na kolekcji produkcyjnej (1090 kubełków Screenpipe). Poprzedni próg 0.92
+# porównywał surową treść jako `search_query` z dokumentem zapisanym jako
+# `search_document` wraz z nagłówkiem szablonu. Tekst identyczny bajt w bajt
+# osiągał w tym układzie najwyżej 0.898, więc bramka nie mogła zadziałać nigdy —
+# i nie zadziałała: 48% kolekcji to nadmiarowe kopie, największa grupa liczy 146
+# punktów. Po zrównaniu przestrzeni ten sam tekst wraca dokładnie na 1.000,
+# a dokumenty faktycznie różne mają p99 = 0.874. Stąd 0.97: osiągalne dla
+# duplikatu, z zapasem nad rozkładem treści nowych.
+ACTIVITY_DUPLICATE_MIN_SCORE = 0.97
 OCR_NOISE_LINES = {
     "add this tab to bookmarks",
     "close",
@@ -133,6 +142,12 @@ class ScreenpipeVectorMemoryWorker:
                 backoff_seconds = float(self.poll_seconds)
             except asyncio.CancelledError:
                 raise
+            except QdrantUnavailableError as exc:
+                # Awaria magazynu ≠ „duplikatu nie ma". Lepiej stracić kubełek
+                # niż dopisać kopię, gdy nie umiemy sprawdzić, czy już leży.
+                self._last_error = str(exc)[:500]
+                LOGGER.warning("Screenpipe vector memory paused: %s", exc)
+                backoff_seconds = min(max(backoff_seconds * 2, self.poll_seconds), 600.0)
             except ScreenpipeError as exc:
                 self._last_error = str(exc)[:500]
                 LOGGER.warning("Screenpipe vector memory paused: %s", exc)
@@ -313,8 +328,12 @@ class ScreenpipeVectorMemoryWorker:
             )
         except (EmbeddingUnavailableError, QdrantMemoryError, AttributeError):
             return []
+        # `hit.score` to fusion_score, a przy jednej osi jest funkcją samej rangi:
+        # pierwszy wynik zawsze dostaje 1.000, choćby leżał daleko. Podajemy
+        # rzeczywisty cosinus, bo ta liczba trafia do kontekstu modelu.
         return [
-            f"{hit.title}: {hit.content[:1200]} (score={hit.score:.3f})"
+            f"{hit.title}: {hit.content[:1200]} "
+            f"(cosinus={hit.vector_scores.get('semantic', hit.score):.3f})"
             for hit in hits
         ]
 
@@ -372,6 +391,17 @@ class ScreenpipeVectorMemoryWorker:
         if len(vectors) != len(vector_names):
             raise EmbeddingUnavailableError("embedding count mismatch for named vectors")
         named_vectors = dict(zip(vector_names, vectors, strict=True))
+        semantic_vector = named_vectors.get("semantic")
+        if semantic_vector and await self._semantic_duplicate_exists(
+            source=source,
+            semantic_vector=semantic_vector,
+        ):
+            LOGGER.info(
+                "Skipping semantic duplicate source=%s source_id=%s",
+                source,
+                source_id,
+            )
+            return False
         digest_model = self._component_model(self.digester)
         if fallback_used:
             digest_model = "deterministic-fallback-v2"
@@ -636,17 +666,61 @@ class ScreenpipeVectorMemoryWorker:
         return "\n".join(cleaned_lines).strip()
 
     async def _looks_like_duplicate(self, content: str) -> bool:
+        """Czy ten kubełek aktywności już jest w pamięci, sprawdzone na tanio.
+
+        Sam odcisk treści, bez wektorów. To właśnie powtórzony bajt w bajt kubełek
+        zapchał kolekcję (największa grupa identycznych punktów liczyła 146), a
+        wykrycie go nie wymaga ani jednego wywołania modelu.
+
+        Parafrazy tu nie sprawdzamy, i to jest decyzja, nie przeoczenie. Przed
+        digestem mamy surowy OCR, a w Qdrancie leży podsumowanie od modelu owinięte
+        w szablon. To dwa różne rodzaje tekstu, więc żaden próg dla tej pary nie
+        jest skalibrowany — a to dokładnie ten błąd unieruchomił poprzednią wersję.
+        Porównanie semantyczne robimy po digeście, w `_semantic_duplicate_exists`,
+        gdzie oba teksty są tego samego rodzaju i gdzie i tak mamy już gotowy wektor.
+        """
+
         if self.qdrant is None or not content.strip():
             return False
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         try:
-            query = await self.embeddings.embed_query(redact_text(content)[0][:2000])
-            hits = await self.qdrant.search(
-                query,
-                limit=1,
+            return await self.qdrant.has_content_hash(
+                content_hash=content_hash,
                 source="screenpipe_behavior",
+            )
+        except AttributeError:
+            return False
+
+    async def _semantic_duplicate_exists(
+        self,
+        *,
+        source: str,
+        semantic_vector: list[float],
+    ) -> bool:
+        """Czy w pamięci leży już dokument o tym samym znaczeniu.
+
+        Wektor jest ten sam, którym zaraz zapiszemy punkt, więc porównanie idzie
+        dokument do dokumentu w identycznej przestrzeni i nie kosztuje dodatkowego
+        embeddingu. Dopiero w tym układzie próg da się skalibrować: tekst
+        identyczny wraca dokładnie na 1.000, a dokumenty faktycznie różne mają
+        p99 = 0.874.
+
+        Przy niedostępności Qdranta rzuca `QdrantUnavailableError` — wcześniej
+        zwracaliśmy `False` i zapisywaliśmy punkt mimo braku sprawdzenia.
+        """
+
+        if self.qdrant is None or not semantic_vector:
+            return False
+        try:
+            hits = await self.qdrant.search(
+                semantic_vector,
+                limit=1,
+                source=source,
                 min_score=ACTIVITY_DUPLICATE_MIN_SCORE,
                 vector_names=("semantic",),
             )
-        except (EmbeddingUnavailableError, QdrantMemoryError, AttributeError):
+        except QdrantUnavailableError:
+            raise
+        except AttributeError:
             return False
         return bool(hits)

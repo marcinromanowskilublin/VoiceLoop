@@ -60,6 +60,7 @@ from .screenpipe import ScreenpipeClient
 from .screenpipe_deepgram import ScreenpipeMeetingTranscriber
 from .screenpipe_memory import ScreenpipeVectorMemoryWorker
 from .settings import Settings, get_settings
+from .threshold_guard import ThresholdGuard
 from .tts import WindowsTTS
 from .voice_conversation import VoiceConversationCoordinator
 from .web_search import WebSearchClient
@@ -91,6 +92,7 @@ class Services:
     manual_memory: ManualMemoryService
     behavior_digester: LocalBehaviorDigestClient
     screenpipe_vector_memory: ScreenpipeVectorMemoryWorker
+    threshold_guard: ThresholdGuard
     actions: ActionRegistry
     capability_index: CapabilityIndex
     routing_v2: RoutingV2Service
@@ -195,6 +197,11 @@ def build_services(settings: Settings) -> Services:
         embeddings=embeddings,
         qdrant=qdrant,
         digester=behavior_digester,
+    )
+    threshold_guard = ThresholdGuard(
+        settings,
+        embeddings=embeddings,
+        qdrant=qdrant,
     )
     actions = ActionRegistry(
         settings,
@@ -423,6 +430,7 @@ def build_services(settings: Settings) -> Services:
         manual_memory=manual_memory,
         behavior_digester=behavior_digester,
         screenpipe_vector_memory=screenpipe_vector_memory,
+        threshold_guard=threshold_guard,
         actions=actions,
         capability_index=capability_index,
         routing_v2=routing_v2,
@@ -470,6 +478,7 @@ async def lifespan(app: FastAPI):
     await services.executor.start()
     await services.screenpipe_transcriber.start()
     await services.screenpipe_vector_memory.start()
+    await services.threshold_guard.start()
     listen_watch_task: asyncio.Task[None] | None = None
     conversation_start_task: asyncio.Task[dict[str, str]] | None = None
 
@@ -522,6 +531,7 @@ async def lifespan(app: FastAPI):
             conversation_start_task.cancel()
             await asyncio.gather(conversation_start_task, return_exceptions=True)
         await services.meeting_recorder.close()
+        await services.threshold_guard.stop()
         await services.screenpipe_vector_memory.stop()
         await services.screenpipe_transcriber.stop()
         await services.conversation.close()
@@ -658,6 +668,7 @@ async def health(
     meeting_ok, meeting_detail = services.meeting_recorder.health()
     hume_ok, hume_detail = services.meeting_recorder.emotion_analyzer.health()
     memory_worker_ok, memory_worker_detail = services.screenpipe_vector_memory.health()
+    guard_ok, guard_detail = services.threshold_guard.health()
     capability_index_ok, capability_index_detail = services.capability_index.health()
     routing_v2_ok, routing_v2_detail = services.routing_v2.health()
     telemetry_ok, telemetry_detail = services.telemetry.health()
@@ -693,6 +704,16 @@ async def health(
         "capability_embeddings": HealthComponent(
             status="ok" if capability_index_ok else "stopped",
             detail=capability_index_detail,
+        ),
+        # Strażnik jest "error", a nie "stopped", gdy któryś próg okaże się martwy
+        # albo nieosiągalny. Cichy próg to dokładnie ten błąd, który go tu wstawił.
+        "threshold_guard": HealthComponent(
+            status=(
+                "ok"
+                if guard_ok
+                else ("stopped" if not services.threshold_guard.enabled else "error")
+            ),
+            detail=guard_detail,
         ),
         "routing_v2": HealthComponent(
             status="ok" if routing_v2_ok else "stopped",

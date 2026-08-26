@@ -4,6 +4,7 @@ param(
     [int]$IdleCaptureIntervalMs = 5000,
     [int]$VisualCheckIntervalMs = 1000,
     [int]$MinCaptureIntervalMs = 1500,
+    [switch]$ContextOnly,
     [switch]$Restart
 )
 
@@ -121,6 +122,36 @@ $env:SCREENPIPE_KEEP_NORMAL_PRIORITY = '1'
 $token = (& screenpipe auth token 2>$null | Out-String).Trim()
 if ($token) {
     Set-EnvValue -Path $envPath -Name 'SCREENPIPE_API_TOKEN' -Value $token
+}
+
+if ($ContextOnly) {
+    $arguments = @(
+        'record',
+        '--port', '3030',
+        '--data-dir', $dataDir,
+        '--disable-audio',
+        '--use-all-monitors',
+        '--language', 'polish',
+        '--app-context', 'memory',
+        '--ignore-incognito-windows=true',
+        '--disable-telemetry',
+        '--api-auth',
+        '--use-pii-removal=true',
+        '--retention-days', [string][Math]::Max(1, $RetentionDays),
+        '--retention-mode', 'media',
+        '--disable-clipboard-capture',
+        '--disable-keyboard-capture',
+        '--disable-click-capture',
+        '--idle-capture-interval-ms', [string][Math]::Max(1000, $IdleCaptureIntervalMs),
+        '--visual-check-interval-ms', [string][Math]::Max(250, $VisualCheckIntervalMs),
+        '--min-capture-interval-ms', [string][Math]::Max(500, $MinCaptureIntervalMs)
+    )
+    Write-Output (
+        "Uruchamiam Screenpipe w trybie kontekstowym: OCR/accessibility, " +
+        "bez audio, klawiatury, schowka i klikniec; retencja mediow $RetentionDays dni."
+    )
+    & screenpipe @arguments
+    exit $LASTEXITCODE
 }
 
 $deviceLines = @(& screenpipe audio list 2>$null)
