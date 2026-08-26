@@ -2,7 +2,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from voiceloop.qdrant_memory import (
     VECTOR_NAMES,
     WEIGHTED_RRF_VERSION,
@@ -48,6 +47,9 @@ async def test_qdrant_creates_schema_and_upserts_partial_named_vectors(tmp_path)
     assert point.payload["content_hash"] == "hash-v1"
     assert point.payload["metadata"]["content_hash"] == "hash-v1"
     assert point.payload["expires_at"] == point.payload["metadata"]["expires_at"]
+    assert point.payload["embedding_prefix_policy"] == "nomic-search-prefixes-v1"
+    assert point.payload["embedding_input_kind"] == "document"
+    assert point.payload["metadata"]["embedding_prefix"] == "search_document:"
 
 
 @pytest.mark.asyncio
@@ -121,6 +123,8 @@ async def test_qdrant_ensures_payload_indexes_on_existing_collection(tmp_path) -
         "visit_id",
         "meeting_id",
         "content_hash",
+        "embedding_prefix_policy",
+        "embedding_input_kind",
         "expires_at",
     }
 

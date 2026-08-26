@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
-
 from voiceloop.actions import ActionRegistry
 from voiceloop.behavior_digest import DigestedMemory
 from voiceloop.memory import MemoryStore
@@ -359,8 +358,11 @@ async def test_screenpipe_vector_memory_indexes_recent_activity(tmp_path) -> Non
     class FakeEmbeddings:
         enabled = True
 
-        async def embed_texts(self, texts):
+        async def embed_documents(self, texts):
             return [[1.0, 0.0, 0.0] for _ in texts]
+
+        async def embed_texts(self, texts):
+            raise AssertionError("Screenpipe memory must use document-prefixed embeddings")
 
     worker = ScreenpipeVectorMemoryWorker(
         settings=settings,
@@ -375,6 +377,8 @@ async def test_screenpipe_vector_memory_indexes_recent_activity(tmp_path) -> Non
     assert indexed == 1
     assert hits[0].source == "screenpipe_activity"
     assert "VoiceLoop" in hits[0].content
+    assert hits[0].metadata["embedding_prefix_policy"] == "nomic-search-prefixes-v1"
+    assert hits[0].metadata["embedding_input_kind"] == "document"
 
 
 @pytest.mark.asyncio

@@ -1,15 +1,45 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import SecretStr
 
 from .corpus.local_only import LocalOnlyViolation, require_loopback_url
 
+EMBEDDING_PREFIX_POLICY_VERSION = "nomic-search-prefixes-v1"
+EMBEDDING_QUERY_INPUT_KIND = "query"
+EMBEDDING_DOCUMENT_INPUT_KIND = "document"
+EMBEDDING_QUERY_PREFIX = "search_query:"
+EMBEDDING_DOCUMENT_PREFIX = "search_document:"
+EmbeddingInputKind = Literal["query", "document"]
+
 
 class EmbeddingUnavailableError(RuntimeError):
     pass
+
+
+def with_embedding_prefix(text: str, prefix: str) -> str:
+    """Apply an embedding-model prefix once, preserving already-prefixed inputs."""
+
+    clean = text.strip()
+    normalized_prefix = prefix.strip()
+    if not normalized_prefix.endswith(":"):
+        normalized_prefix = f"{normalized_prefix}:"
+    if clean.casefold().startswith(normalized_prefix.casefold()):
+        return clean
+    return f"{normalized_prefix} {clean}"
+
+
+def embedding_prefix_metadata(kind: EmbeddingInputKind) -> dict[str, str]:
+    prefix = (
+        EMBEDDING_QUERY_PREFIX if kind == EMBEDDING_QUERY_INPUT_KIND else EMBEDDING_DOCUMENT_PREFIX
+    )
+    return {
+        "embedding_prefix_policy": EMBEDDING_PREFIX_POLICY_VERSION,
+        "embedding_input_kind": kind,
+        "embedding_prefix": prefix,
+    }
 
 
 class OpenAICompatibleEmbeddingClient:
@@ -91,7 +121,7 @@ class OpenAICompatibleEmbeddingClient:
 
     async def embed_queries(self, texts: list[str]) -> list[list[float]]:
         queries = [
-            text if text.casefold().startswith("search_query:") else f"search_query: {text}"
+            with_embedding_prefix(text, EMBEDDING_QUERY_PREFIX)
             for text in texts
             if text.strip()
         ]
@@ -99,8 +129,9 @@ class OpenAICompatibleEmbeddingClient:
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         documents = [
-            text if text.casefold().startswith("search_document:") else f"search_document: {text}"
+            with_embedding_prefix(text, EMBEDDING_DOCUMENT_PREFIX)
             for text in texts
+            if text.strip()
         ]
         return await self.embed_texts(documents)
 

@@ -11,7 +11,11 @@ from typing import Any
 
 from .behavior_digest import BehaviorDigestError, DigestedMemory, LocalBehaviorDigestClient
 from .corpus.privacy import redact_text
-from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
+from .embeddings import (
+    EmbeddingUnavailableError,
+    OpenAICompatibleEmbeddingClient,
+    embedding_prefix_metadata,
+)
 from .memory import MemoryStore
 from .memory_vectorization import MEMORY_DOCUMENT_SCHEMA_VERSION
 from .qdrant_memory import QdrantMemoryError, QdrantUnavailableError, QdrantVectorStore
@@ -242,7 +246,7 @@ class ScreenpipeVectorMemoryWorker:
         if not documents:
             return 0
 
-        vectors = await self.embeddings.embed_texts([document[3] for document in documents])
+        vectors = await self.embeddings.embed_documents([document[3] for document in documents])
         if len(vectors) != len(documents):
             raise EmbeddingUnavailableError("embedding count mismatch for Screenpipe documents")
 
@@ -262,6 +266,7 @@ class ScreenpipeVectorMemoryWorker:
                     "timestamp": context.timestamp,
                     "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                     "expires_at": expires_at.isoformat() if expires_at is not None else "",
+                    **embedding_prefix_metadata("document"),
                 },
             )
             indexed += 1

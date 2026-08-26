@@ -13,6 +13,11 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import AsyncQdrantClient, models
 
 from .corpus.local_only import LocalOnlyViolation, require_loopback_url
+from .embeddings import (
+    EMBEDDING_DOCUMENT_INPUT_KIND,
+    EMBEDDING_DOCUMENT_PREFIX,
+    EMBEDDING_PREFIX_POLICY_VERSION,
+)
 from .memory import VectorMemoryHit
 from .memory_vectorization import MEMORY_VECTOR_NAMES, MEMORY_VECTOR_WEIGHTS
 from .settings import Settings
@@ -140,6 +145,8 @@ class QdrantVectorStore:
                     "visit_id",
                     "meeting_id",
                     "content_hash",
+                    "embedding_prefix_policy",
+                    "embedding_input_kind",
                 ):
                     await self.client.create_payload_index(
                         collection_name=self.collection_name,
@@ -177,6 +184,8 @@ class QdrantVectorStore:
                     "visit_id",
                     "meeting_id",
                     "content_hash",
+                    "embedding_prefix_policy",
+                    "embedding_input_kind",
                 ):
                     await self.client.create_payload_index(
                         collection_name=self.collection_name,
@@ -374,6 +383,9 @@ class QdrantVectorStore:
             or hashlib.sha256(content.encode("utf-8")).hexdigest()
         ).strip()
         details["content_hash"] = resolved_content_hash
+        details.setdefault("embedding_prefix_policy", EMBEDDING_PREFIX_POLICY_VERSION)
+        details.setdefault("embedding_input_kind", EMBEDDING_DOCUMENT_INPUT_KIND)
+        details.setdefault("embedding_prefix", EMBEDDING_DOCUMENT_PREFIX)
         resolved_expiration = self._expiration_time(
             now=now,
             expires_at=expires_at or details.get("expires_at"),
@@ -385,6 +397,9 @@ class QdrantVectorStore:
         provenance = details.get("provenance")
         if not isinstance(provenance, dict):
             provenance = {}
+        provenance.setdefault("embedding_prefix_policy", EMBEDDING_PREFIX_POLICY_VERSION)
+        provenance.setdefault("embedding_input_kind", EMBEDDING_DOCUMENT_INPUT_KIND)
+        provenance.setdefault("embedding_prefix", EMBEDDING_DOCUMENT_PREFIX)
         payload: dict[str, Any] = {
             "source": source[:80],
             "source_id": source_id[:200],
@@ -396,6 +411,9 @@ class QdrantVectorStore:
             "provenance": provenance,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
+            "embedding_prefix_policy": str(details["embedding_prefix_policy"])[:80],
+            "embedding_input_kind": str(details["embedding_input_kind"])[:40],
+            "embedding_prefix": str(details["embedding_prefix"])[:80],
         }
         if resolved_expiration is not None:
             payload["expires_at"] = resolved_expiration.isoformat()
