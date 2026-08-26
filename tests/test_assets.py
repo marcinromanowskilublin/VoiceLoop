@@ -1,7 +1,7 @@
 import json
 import re
 import xml.etree.ElementTree as ET
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from voiceloop.models import CommandRequest, CommandSource
 from voiceloop.router import deterministic_plan
@@ -25,6 +25,14 @@ def test_panel_does_not_embed_deepgram_key() -> None:
 
     assert "DEFAULT_KEY" not in "\n".join(panels)
     assert "DEEPGRAM_API_KEY=" not in "\n".join(panels)
+
+
+def test_panel_authenticates_private_event_stream() -> None:
+    panel = (ROOT / "panel" / "index.html").read_text(encoding="utf-8")
+
+    assert "new EventSource" not in panel
+    assert 'fetch("/api/v1/events"' in panel
+    assert '"X-VoiceLoop-Token": state.token' in panel
 
 
 def test_legacy_deepgram_entrypoints_are_retired() -> None:
@@ -70,7 +78,11 @@ def test_voiceattack_profile_points_to_existing_vbs_files() -> None:
         for action in profile.findall(".//CommandAction")
     )
     assert all(path and path.lower().endswith(".vbs") for path in paths)
-    assert all(Path(path).exists() for path in paths if path)
+    assert all(
+        (ROOT / "scripts" / "va" / PureWindowsPath(path).name).is_file()
+        for path in paths
+        if path
+    )
 
 
 def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
@@ -86,7 +98,7 @@ def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
         if phrase.strip()
     ]
     paths = [
-        Path(path)
+        PureWindowsPath(path)
         for action in profile.findall(".//CommandAction")
         if action.findtext("ActionType") == "Launch"
         if (path := action.findtext("Context"))
@@ -115,8 +127,11 @@ def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
         action.findtext("ActionType") == "Launch"
         for action in profile.findall(".//CommandAction")
     )
-    assert all(path.parent == ROOT / "scripts" / "va" for path in paths)
-    assert all(path.is_file() and path.suffix == ".vbs" for path in paths)
+    assert all(path.parent.name.casefold() == "va" for path in paths)
+    assert all(
+        (ROOT / "scripts" / "va" / path.name).is_file() and path.suffix == ".vbs"
+        for path in paths
+    )
 
 
 def test_voiceattack_dispatcher_preserves_fixed_command_ids() -> None:

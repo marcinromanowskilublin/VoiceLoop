@@ -4,6 +4,28 @@ from voiceloop.hume_emotion import HumeEmotionClient
 from voiceloop.settings import Settings
 
 
+def test_hume_auth_is_sent_in_header_not_uri(tmp_path) -> None:
+    client = HumeEmotionClient(
+        Settings(
+            voiceloop_data_dir=str(tmp_path),
+            hume_emotion_analysis_enabled=True,
+            hume_api_key="test-key",
+            hume_emotion_endpoint=(
+                "wss://api.hume.ai/v0/evi/chat"
+                "?api_key=legacy&access_token=legacy-token&custom=value"
+            ),
+        )
+    )
+
+    uri = client._endpoint_uri()
+
+    assert "api_key=" not in uri
+    assert "access_token=" not in uri
+    assert "custom=value" in uri
+    assert "verbose_transcription=true" in uri
+    assert client._connection_headers() == {"X-Hume-Api-Key": "test-key"}
+
+
 def test_hume_emotion_parser_extracts_top_prosody_windows(tmp_path) -> None:
     client = HumeEmotionClient(
         Settings(

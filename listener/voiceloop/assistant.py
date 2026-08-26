@@ -618,7 +618,8 @@ class AssistantService:
             )
             memories.append(
                 "Aktualne wyszukiwanie nie powiodło się: "
-                f"{knowledge_lookup.error[:500]}. Nie przedstawiaj świeżych danych jako sprawdzonych."
+                f"{knowledge_lookup.error[:500]}. "
+                "Nie przedstawiaj świeżych danych jako sprawdzonych."
             )
         self._latest_tool_observations = [
             observation.model_dump(mode="json") for observation in tool_observations

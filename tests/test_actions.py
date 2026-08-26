@@ -302,7 +302,12 @@ async def test_open_folder_allows_only_this_pc(tmp_path, monkeypatch) -> None:
     import os
 
     launched: list[str] = []
-    monkeypatch.setattr(os, "startfile", lambda target: launched.append(target))
+    monkeypatch.setattr(
+        os,
+        "startfile",
+        lambda target: launched.append(target),
+        raising=False,
+    )
     registry = ActionRegistry(
         Settings(voiceloop_data_dir=str(tmp_path)),
         MemoryStore(tmp_path / "voice.db"),
@@ -323,7 +328,12 @@ async def test_open_app_allows_only_whatsapp(tmp_path, monkeypatch) -> None:
     import os
 
     launched: list[str] = []
-    monkeypatch.setattr(os, "startfile", lambda target: launched.append(target))
+    monkeypatch.setattr(
+        os,
+        "startfile",
+        lambda target: launched.append(target),
+        raising=False,
+    )
     registry = ActionRegistry(
         Settings(voiceloop_data_dir=str(tmp_path)),
         MemoryStore(tmp_path / "voice.db"),

@@ -4,7 +4,9 @@ import argparse
 import asyncio
 import json
 import re
+import shutil
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -92,8 +94,11 @@ from .storage import (
 )
 from .voice_eval import (
     VoiceEvalError,
+    backup_voice_eval_artifacts,
     build_voice_candidates,
+    inventory_meeting_audio,
     inventory_screenpipe_audio,
+    merge_voice_candidates,
     refill_voice_development_samples,
     select_voice_eval_samples,
     tag_voice_candidate_quality,
@@ -315,6 +320,19 @@ def build_parser() -> argparse.ArgumentParser:
     voice_refill.add_argument("--development-count", type=int, default=30)
     voice_refill.add_argument("--data-root", type=Path)
 
+    voice_prepare_meetings = subparsers.add_parser(
+        "prepare-meeting-voice",
+        help="Dodaj własne nagrania mikrofonowe ze spotkań do development eval.",
+    )
+    voice_prepare_meetings.add_argument("--meetings-root", type=Path)
+    voice_prepare_meetings.add_argument("--per-session-limit", type=int, default=80)
+    voice_prepare_meetings.add_argument("--max-candidates", type=int, default=120)
+    voice_prepare_meetings.add_argument("--development-count", type=int, default=30)
+    voice_prepare_meetings.add_argument("--ffmpeg", default="ffmpeg")
+    voice_prepare_meetings.add_argument("--confirm", required=True)
+    voice_prepare_meetings.add_argument("--skip-refill", action="store_true")
+    voice_prepare_meetings.add_argument("--data-root", type=Path)
+
     voice_validate = subparsers.add_parser(
         "validate-voice-eval",
         help="Sprawdź kompletność audio, splitów, adnotacji i pokrycia tagów.",
@@ -517,51 +535,17 @@ async def _run_async(args: argparse.Namespace) -> int:
         )
         return 0
     if args.command == "refill-voice-development":
-        report_path = paths.voice_root / "transcription-report-development-v1.json"
-        if not report_path.is_file():
-            raise VoiceEvalError(
-                "Brak raportu development; uruchom najpierw transcribe-voice-eval."
-            )
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-        rejected_ids = {
-            str(sample_id) for sample_id in report.get("no_speech_sample_ids", ())
-        }
-        if not rejected_ids:
-            raise VoiceEvalError("Raport nie zawiera klipów development bez mowy.")
         candidates = read_jsonl(paths.voice_candidates, VoiceEvalSampleV1)
-        current_samples = read_jsonl(paths.voice_samples, VoiceEvalSampleV1)
-        previous_holdout_ids = {
-            sample.sample_id
-            for sample in current_samples
-            if sample.split is not None and sample.split.value == "holdout"
-        }
-        samples = refill_voice_development_samples(
+        samples, envelopes, replacement_ids = _prepare_voice_development_refill(
+            paths,
             candidates,
-            current_samples,
-            rejected_sample_ids=rejected_ids,
             development_count=args.development_count,
         )
-        envelopes = _load_voice_envelopes(paths.voice_transcripts, required=False)
         _write_voice_selection_artifacts(
             paths,
             samples,
             prefill_envelopes=envelopes,
         )
-        current_ids = {sample.sample_id for sample in current_samples}
-        replacement_ids = [
-            sample.sample_id
-            for sample in samples
-            if sample.split is not None
-            and sample.split.value == "development"
-            and sample.sample_id not in current_ids
-        ]
-        holdout_ids = {
-            sample.sample_id
-            for sample in samples
-            if sample.split is not None and sample.split.value == "holdout"
-        }
-        if holdout_ids != previous_holdout_ids:
-            raise VoiceEvalError("Refill naruszył zamrożony holdout.")
         print(
             json.dumps(
                 {
@@ -575,6 +559,85 @@ async def _run_async(args: argparse.Namespace) -> int:
                     "development_review": str(
                         paths.voice_annotation_review_development
                     ),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    if args.command == "prepare-meeting-voice":
+        if args.confirm != "SELF_AUDIO_ONLY":
+            raise VoiceEvalError(
+                "--confirm musi mieć wartość SELF_AUDIO_ONLY po sprawdzeniu kanału."
+            )
+        meetings_root = (
+            args.meetings_root or settings.data_dir / "meetings"
+        ).resolve()
+        manifest = inventory_meeting_audio(
+            meetings_root,
+            per_session_limit=args.per_session_limit,
+        )
+        existing_candidates = read_jsonl(
+            paths.voice_candidates,
+            VoiceEvalSampleV1,
+        )
+        with tempfile.TemporaryDirectory(prefix="voiceloop-meeting-voice-") as temp_dir:
+            staging_root = Path(temp_dir)
+            new_candidates = await asyncio.to_thread(
+                build_voice_candidates,
+                manifest,
+                eval_root=staging_root,
+                screenpipe_root=meetings_root,
+                speaker_role=SpeakerRole.SELF,
+                max_candidates=args.max_candidates,
+                ffmpeg_executable=args.ffmpeg,
+                source_system="meeting_recorder",
+            )
+            candidates = merge_voice_candidates(existing_candidates, new_candidates)
+            samples: list[VoiceEvalSampleV1] | None = None
+            envelopes: dict[str, TranscriptEnvelopeV1] = {}
+            replacement_ids: list[str] = []
+            if not args.skip_refill:
+                samples, envelopes, replacement_ids = (
+                    _prepare_voice_development_refill(
+                        paths,
+                        candidates,
+                        development_count=args.development_count,
+                    )
+                )
+
+            backup_root = backup_voice_eval_artifacts(paths.voice_root)
+            _publish_voice_candidate_audio(
+                new_candidates,
+                source_root=staging_root,
+                destination_root=paths.voice_root,
+            )
+            write_json(paths.voice_meeting_manifest, manifest)
+            write_jsonl(paths.voice_candidates, candidates)
+            if samples is not None:
+                _write_voice_selection_artifacts(
+                    paths,
+                    samples,
+                    prefill_envelopes=envelopes,
+                )
+
+        print(
+            json.dumps(
+                {
+                    "backup_root": str(backup_root) if backup_root else None,
+                    "included_sources": manifest.included_source_count,
+                    "excluded_sources": manifest.excluded_source_count,
+                    "new_candidate_count": len(new_candidates),
+                    "candidate_count": len(candidates),
+                    "replacement_count": len(replacement_ids),
+                    "replacement_sample_ids": replacement_ids,
+                    "holdout_checked": not args.skip_refill,
+                    "holdout_unchanged": True if not args.skip_refill else None,
+                    "development_review": (
+                        str(paths.voice_annotation_review_development)
+                        if samples is not None
+                        else None
+                    ),
+                    "meeting_manifest": str(paths.voice_meeting_manifest),
                 },
                 ensure_ascii=False,
             )
@@ -1699,6 +1762,100 @@ def _voice_annotation_template(
         }
         for sample in samples
     ]
+
+
+def _prepare_voice_development_refill(
+    paths: CorpusPaths,
+    candidates: list[VoiceEvalSampleV1],
+    *,
+    development_count: int,
+) -> tuple[
+    list[VoiceEvalSampleV1],
+    dict[str, TranscriptEnvelopeV1],
+    list[str],
+]:
+    if development_count < 1:
+        raise VoiceEvalError("Liczba próbek development musi być dodatnia.")
+    report_path = paths.voice_root / "transcription-report-development-v1.json"
+    if not report_path.is_file():
+        raise VoiceEvalError(
+            "Brak raportu development; uruchom najpierw transcribe-voice-eval."
+        )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    rejected_ids = {
+        str(sample_id) for sample_id in report.get("no_speech_sample_ids", ())
+    }
+    if not rejected_ids:
+        raise VoiceEvalError("Raport nie zawiera klipów development bez mowy.")
+    current_samples = read_jsonl(paths.voice_samples, VoiceEvalSampleV1)
+    if not current_samples:
+        raise VoiceEvalError("Brak zamrożonego zestawu voice eval do uzupełnienia.")
+    previous_holdout_ids = {
+        sample.sample_id
+        for sample in current_samples
+        if sample.split is not None and sample.split.value == "holdout"
+    }
+    if not previous_holdout_ids:
+        raise VoiceEvalError("Zamrożony zestaw nie zawiera holdoutu.")
+    samples = refill_voice_development_samples(
+        candidates,
+        current_samples,
+        rejected_sample_ids=rejected_ids,
+        development_count=development_count,
+    )
+    holdout_ids = {
+        sample.sample_id
+        for sample in samples
+        if sample.split is not None and sample.split.value == "holdout"
+    }
+    if holdout_ids != previous_holdout_ids:
+        raise VoiceEvalError("Refill naruszył zamrożony holdout.")
+    current_ids = {sample.sample_id for sample in current_samples}
+    replacement_ids = [
+        sample.sample_id
+        for sample in samples
+        if sample.split is not None
+        and sample.split.value == "development"
+        and sample.sample_id not in current_ids
+    ]
+    envelopes = _load_voice_envelopes(paths.voice_transcripts, required=False)
+    return samples, envelopes, replacement_ids
+
+
+def _publish_voice_candidate_audio(
+    candidates: list[VoiceEvalSampleV1],
+    *,
+    source_root: Path,
+    destination_root: Path,
+) -> None:
+    pending: list[tuple[Path, Path, str]] = []
+    for candidate in candidates:
+        if candidate.audio is None:
+            continue
+        relative_path = Path(candidate.audio.relative_path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise VoiceEvalError("Kandydat audio ma niebezpieczną ścieżkę względną.")
+        source = source_root / relative_path
+        destination = destination_root / relative_path
+        expected_hash = candidate.audio.clip_sha256
+        if not source.is_file() or sha256_file(source) != expected_hash:
+            raise VoiceEvalError(
+                f"Nie udało się zweryfikować przygotowanego audio: {candidate.sample_id}."
+            )
+        if destination.is_file():
+            if sha256_file(destination) != expected_hash:
+                raise VoiceEvalError(
+                    f"Docelowy plik audio ma inny hash: {candidate.sample_id}."
+                )
+            continue
+        pending.append((source, destination, expected_hash))
+
+    for source, destination, expected_hash in pending:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        if sha256_file(destination) != expected_hash:
+            destination.unlink(missing_ok=True)
+            raise VoiceEvalError(f"Nie udało się opublikować audio: {destination.name}.")
 
 
 def _write_voice_selection_artifacts(

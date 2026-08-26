@@ -135,6 +135,10 @@ class CorpusPaths:
         return self.root / "manifests" / "voice-sources-v1.json"
 
     @property
+    def voice_meeting_manifest(self) -> Path:
+        return self.root / "manifests" / "voice-meeting-sources-v1.json"
+
+    @property
     def voice_candidates(self) -> Path:
         return self.voice_root / "candidates-v1.jsonl"
 

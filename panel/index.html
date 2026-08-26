@@ -775,55 +775,94 @@
       await loadTasks();
     }
 
-    function connectEvents() {
-      const stream = new EventSource("/api/v1/events");
-      stream.onmessage = event => {
-        const data = JSON.parse(event.data);
-        const type = data.type;
-        const payload = data.payload || {};
-        if (type === "transcript.interim") {
-          $("interim").textContent = state.meetingActive && payload.text
-            ? "Ty (na żywo): " + payload.text
-            : payload.text || "";
+    function handleEventData(data) {
+      const type = data.type;
+      const payload = data.payload || {};
+      if (type === "transcript.interim") {
+        $("interim").textContent = state.meetingActive && payload.text
+          ? "Ty (na żywo): " + payload.text
+          : payload.text || "";
+      }
+      if (type === "transcript.final") {
+        $("interim").textContent = "";
+        if (!state.meetingActive) addMessage("user", payload.text || "");
+      }
+      if (type === "meeting.transcript.final") {
+        $("interim").textContent = "";
+        addTranscriptSegment(payload);
+      }
+      if (type === "meeting.segment.emotions") {
+        updateTranscriptEmotions(payload);
+      }
+      if (type === "meeting.started" || type === "meeting.stopped" || type === "meeting.completed") {
+        updateMeetingUi(payload);
+      }
+      if (type === "conversation.transcribe_only" && payload.enabled) {
+        if (!state.meetingActive) {
+          addMessage("system", "Asystent milczy. Transkrypcja na żywo i nagrywanie działają.");
         }
-        if (type === "transcript.final") {
-          $("interim").textContent = "";
-          if (!state.meetingActive) addMessage("user", payload.text || "");
-        }
-        if (type === "meeting.transcript.final") {
-          $("interim").textContent = "";
-          addTranscriptSegment(payload);
-        }
-        if (type === "meeting.segment.emotions") {
-          updateTranscriptEmotions(payload);
-        }
-        if (type === "meeting.started" || type === "meeting.stopped" || type === "meeting.completed") {
-          updateMeetingUi(payload);
-        }
-        if (type === "conversation.transcribe_only" && payload.enabled) {
-          if (!state.meetingActive) {
-            addMessage("system", "Asystent milczy. Transkrypcja na żywo i nagrywanie działają.");
+      }
+      if (type === "listening.connected") {
+        state.listening = true;
+        $("listen").textContent = "Wyłącz Deepgram";
+      }
+      if (type === "listening.stopped") {
+        state.listening = false;
+        $("listen").textContent = "Włącz Deepgram";
+      }
+      if (type === "conversation.trace") {
+        renderTrace(payload);
+      }
+      if (type === "knowledge.search.completed") {
+        renderSources(payload.sources || []);
+      }
+      if (type === "knowledge.search.failed") {
+        renderSourceError(payload.error);
+      }
+      if (type.startsWith("command.") || type === "action.completed") loadTasks();
+    }
+
+    async function connectEvents() {
+      while (true) {
+        try {
+          const response = await fetch("/api/v1/events", {
+            cache: "no-store",
+            headers: { "X-VoiceLoop-Token": state.token }
+          });
+          if (!response.ok || !response.body) {
+            throw new Error("HTTP " + response.status);
           }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary >= 0) {
+              const packet = buffer.slice(0, boundary).replace(/\r/g, "");
+              buffer = buffer.slice(boundary + 2);
+              const payload = packet
+                .split("\n")
+                .filter(line => line.startsWith("data:"))
+                .map(line => line.slice(5).trimStart())
+                .join("\n");
+              if (payload) {
+                try {
+                  handleEventData(JSON.parse(payload));
+                } catch (error) {
+                  console.warn("Pominięto niepoprawne zdarzenie SSE:", error);
+                }
+              }
+              boundary = buffer.indexOf("\n\n");
+            }
+          }
+        } catch (error) {
+          console.warn("Ponawiam chroniony strumień zdarzeń:", error);
         }
-        if (type === "listening.connected") {
-          state.listening = true;
-          $("listen").textContent = "Wyłącz Deepgram";
-        }
-        if (type === "listening.stopped") {
-          state.listening = false;
-          $("listen").textContent = "Włącz Deepgram";
-        }
-        if (type === "conversation.trace") {
-          renderTrace(payload);
-        }
-        if (type === "knowledge.search.completed") {
-          renderSources(payload.sources || []);
-        }
-        if (type === "knowledge.search.failed") {
-          renderSourceError(payload.error);
-        }
-        if (type.startsWith("command.") || type === "action.completed") loadTasks();
-      };
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
     }
 
     async function init() {
@@ -874,7 +913,7 @@
         $("memoryText").value = "";
         await loadMemories();
       };
-      connectEvents();
+      void connectEvents();
       await Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities()]);
       setInterval(loadHealth, 8000);
       addMessage(

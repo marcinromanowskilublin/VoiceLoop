@@ -10,7 +10,7 @@ if (-not (Test-Path $tokenPath -PathType Leaf)) {
 $headers = @{ 'X-VoiceLoop-Token' = (Get-Content -Raw -Encoding UTF8 $tokenPath).Trim() }
 
 Write-Host '[1/3] health...'
-$health = Invoke-RestMethod "$base/health"
+$health = Invoke-RestMethod "$base/health" -Headers $headers
 Write-Host "   core=$($health.components.core.status), lm=$($health.components.lm_studio.status), n8n=$($health.components.n8n.status)"
 
 Write-Host '[2/3] polecenie voice_test...'
