@@ -1,4 +1,5 @@
 import pytest
+
 from voiceloop.embeddings import (
     EMBEDDING_DOCUMENT_PREFIX,
     EMBEDDING_PREFIX_POLICY_VERSION,

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
+
 from voiceloop.actions import ActionRegistry
 from voiceloop.behavior_digest import DigestedMemory
 from voiceloop.memory import MemoryStore

@@ -3,6 +3,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
+
 from voiceloop.model_router import (
     ModelRouter,
     ModelUnavailableError,

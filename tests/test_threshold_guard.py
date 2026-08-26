@@ -10,6 +10,7 @@ import asyncio
 import re
 
 import pytest
+
 from voiceloop.settings import Settings
 from voiceloop.threshold_guard import ThresholdGuard
 from voiceloop.threshold_measure import (

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from voiceloop.qdrant_memory import (
     VECTOR_NAMES,
     WEIGHTED_RRF_VERSION,
