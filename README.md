@@ -1,7 +1,8 @@
 # VoiceLoop
 
-**VoiceLoop is a local-first assistant for Windows automation, Polish-language
-voice interaction, private context memory, and measurable voice-agent quality.**
+**VoiceLoop is a local-first context assistant for Windows workflows: it builds
+private working memory, understands Polish-language input, and turns selected
+intent into safe, validated actions.**
 
 It is not a generic "LLM with tools" demo. The project is built around a stricter
 idea: a language model may interpret intent, but it must not become a shell, a
@@ -14,14 +15,18 @@ sequential executor.
 ## What The Program Is
 
 VoiceLoop is a Python 3.11 application designed for local Windows workflows. It
-combines a FastAPI control core, a local browser panel, speech-to-text
-integration, local and cloud-compatible LLM planners, optional Qdrant vector
-memory, Screenpipe context ingestion, VoiceAttack command support, and a
-testable evaluation pipeline.
+combines a FastAPI control core, a private context layer, optional Screenpipe and
+Qdrant memory, Polish speech input, local and cloud-compatible LLM planners,
+VoiceAttack command support, and a testable evaluation pipeline.
+
+Voice is one interface. The larger idea is context: the system should help the
+user preserve, inspect, retrieve, and act on local working context without
+turning private activity into an uncontrolled cloud transcript.
 
 In practice, it lets the user:
 
-- speak commands and questions naturally in Polish;
+- capture and retrieve useful local working context;
+- ask questions or give commands naturally in Polish;
 - hold a short voice conversation with interruption and STOP control;
 - execute only known, allowlisted Windows actions;
 - inspect health, routing, memory, and component readiness from a local panel;
@@ -31,21 +36,22 @@ In practice, it lets the user:
 
 ## Why It Exists
 
-Most assistant prototypes optimize for a fluent demo. VoiceLoop focuses on the
-harder engineering questions:
+Most AI assistant prototypes optimize for a fluent demo. VoiceLoop focuses on
+the harder engineering questions:
 
 - How do you let an LLM help with desktop actions without giving it arbitrary
   control of the computer?
 - How do you keep Polish-language voice interaction usable when speech
   recognition is imperfect?
 - How do you stop the system immediately when the user interrupts?
-- How do you preserve privacy while still building useful context memory?
+- How do you preserve privacy while still building useful local context memory?
 - How do you measure whether vector thresholds, deduplication, routing, and
   voice evaluation are behaving honestly?
 
-The result is a research-oriented but runnable local assistant. It is useful as a
-portfolio project because it shows architecture, safety boundaries, local AI
-integration, evaluation discipline, and Windows automation in one system.
+The result is a research-oriented but runnable local context system. It is useful
+as a portfolio project because it shows architecture, safety boundaries, local AI
+integration, evaluation discipline, memory diagnostics, and Windows automation in
+one system.
 
 ## Current Portfolio Status
 
@@ -78,7 +84,7 @@ but should not be presented as required production features.
 At a high level:
 
 ```text
-voice / panel / VoiceAttack
+local context / voice / panel / VoiceAttack
     -> FastAPI core
     -> deterministic command or model planner
     -> validated CommandPlan
@@ -227,6 +233,8 @@ Diagnostics are a first-class part of the system:
 Examples of supported or designed capabilities:
 
 - start, pause, resume, and stop voice listening;
+- maintain a private local context layer;
+- retrieve relevant memories instead of sending the whole history to a model;
 - hold a short conversation in Polish;
 - open selected local apps and URLs;
 - describe the active window;
