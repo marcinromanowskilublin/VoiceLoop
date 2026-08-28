@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     meeting_recording_archive_audio: bool = True
     meeting_recording_audio_chunk_seconds: int = 15
     meeting_recording_output_sample_rate: int = 48000
-    screenpipe_vector_memory_enabled: bool = True
+    screenpipe_vector_memory_enabled: bool = False
     screenpipe_vector_poll_seconds: int = 300
     screenpipe_vector_recent_minutes: int = 10
 

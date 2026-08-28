@@ -41,6 +41,8 @@ def test_env_example_matches_stabilization_defaults(tmp_path) -> None:
         values["STT_MIN_ACTION_CONFIDENCE"]
         == f"{settings.stt_min_action_confidence:.2f}"
     )
+    assert values["SCREENPIPE_VECTOR_MEMORY_ENABLED"] == "false"
+    assert settings.screenpipe_vector_memory_enabled is False
     assert hasattr(settings, "voiceattack_registration_key")
 
 
