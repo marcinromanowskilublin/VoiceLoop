@@ -287,7 +287,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
 The launcher coordinates:
 
 - LM Studio readiness;
-- Qdrant on `127.0.0.1:6333`;
+- Qdrant 1.19.0 on `127.0.0.1:6333`, with a persistent volume,
+  `unless-stopped` restart policy, container healthcheck and log rotation;
 - Screenpipe in safe context-only mode by default;
 - the VoiceLoop FastAPI listener;
 - VoiceAttack when available;
@@ -400,10 +401,19 @@ http://127.0.0.1:8765/api/docs
 
 ## Testing
 
-From the repository root:
+Canonical Windows path, matching CI, from `listener/`:
 
 ```powershell
-.\listener\.venv\Scripts\python.exe -m pytest -q
+cd C:\Users\marci\VoiceLoop\listener
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m ruff check `
+  voiceloop `
+  ..\tests `
+  ..\scripts\voice_capture_server.py `
+  ..\scripts\holding-commands\server.py `
+  ..\scripts\calibration-phrases\server.py
+.\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q
+.\.venv\Scripts\python.exe -m compileall voiceloop -q
 ```
 
 Targeted safety and memory regression tests used during the latest portfolio
@@ -411,28 +421,23 @@ commit:
 
 ```powershell
 .\listener\.venv\Scripts\python.exe -m pytest `
-  tests/test_threshold_guard.py `
-  tests/test_qdrant_memory.py `
-  tests/test_screenpipe.py `
-  tests/test_assets.py `
-  tests/test_model_router.py `
+  tests\test_threshold_guard.py `
+  tests\test_qdrant_memory.py `
+  tests\test_screenpipe.py `
+  tests\test_assets.py `
+  tests\test_model_router.py `
   -q
 ```
 
-Lint selected staged areas:
+Alternative root pytest invocation uses `pytest.ini`:
 
 ```powershell
-.\listener\.venv\Scripts\python.exe -m ruff check `
-  listener/voiceloop `
-  tests `
-  scripts/check_voiceattack_actions.py `
-  scripts/dedupe-collection.py `
-  scripts/reembed-memory-schema-c2.py `
-  vectorscope
+cd C:\Users\marci\VoiceLoop
+.\listener\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Note: local `.env` values can affect provider-specific tests. CI should run with
-clean test configuration and without private runtime secrets.
+Pytest isolates `Settings` from `listener/.env`, so local provider keys and
+runtime overrides should not change unit-test behavior.
 
 ## Privacy Boundaries
 

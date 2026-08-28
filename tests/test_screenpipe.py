@@ -119,6 +119,20 @@ async def test_duplicate_check_does_not_pretend_absence_when_qdrant_is_down(
 
 
 @pytest.mark.asyncio
+async def test_duplicate_check_fails_closed_without_content_hash_support(tmp_path) -> None:
+    qdrant = type("LegacyQdrant", (), {"enabled": True, "search": AsyncMock(return_value=[])})()
+    worker = _dedup_worker(
+        tmp_path,
+        qdrant=qdrant,
+        embeddings=type("E", (), {"enabled": True})(),
+    )
+
+    with pytest.raises(QdrantUnavailableError, match="content-hash"):
+        await worker._looks_like_duplicate("Treść, której nie można bezpiecznie sprawdzić.")
+    qdrant.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_semantic_duplicate_propagates_unavailable_instead_of_writing(
     tmp_path,
 ) -> None:
@@ -206,9 +220,11 @@ async def test_related_history_reports_cosine_not_rank_artifact(tmp_path) -> Non
 
     class FakeEmbeddings:
         enabled = True
+        queries: list[str] = []
 
-        async def embed_query(self, text):
-            return [1.0, 0.0, 0.0]
+        async def embed_queries(self, texts):
+            self.queries = list(texts)
+            return [[1.0, 0.0, 0.0]]
 
     hit = type(
         "Hit",
@@ -230,6 +246,55 @@ async def test_related_history_reports_cosine_not_rank_artifact(tmp_path) -> Non
     history = await worker._related_history("Praca nad pamięcią.")
 
     assert history == ["Wcześniejsza aktywność: Praca nad pamięcią. (cosinus=0.610)"]
+    assert worker.embeddings.queries[0].startswith(
+        "Wyszukaj zdarzenie lub informację odpowiadającą ogólnemu znaczeniu pytania:"
+    )
+    assert qdrant.search.await_args.kwargs["min_score"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_vector_worker_skips_empty_or_noise_only_activity(tmp_path) -> None:
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        behavior_digest_recent_minutes=10,
+    )
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    screenpipe = ScreenpipeClient(settings)
+    screenpipe.recent_text_activity = AsyncMock(
+        return_value=[
+            ScreenpipeTextItem(
+                app_name="Chrome.exe",
+                window_name="VoiceLoop - Cursor",
+                timestamp="2026-08-10T00:00:00Z",
+                browser_url="",
+                text="Minimize\nMaximize\nClose\nFile\nEdit\n",
+                content_type="OCR",
+            )
+        ]
+    )
+    qdrant = type(
+        "FakeQdrant",
+        (),
+        {
+            "enabled": True,
+            "upsert_memory": AsyncMock(),
+            "has_memory": AsyncMock(return_value=False),
+        },
+    )()
+    digester = type("FakeDigester", (), {"digest": AsyncMock()})()
+    worker = ScreenpipeVectorMemoryWorker(
+        settings=settings,
+        screenpipe=screenpipe,
+        memory=memory,
+        embeddings=type("FakeEmbeddings", (), {"enabled": True})(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        digester=digester,  # type: ignore[arg-type]
+    )
+
+    assert await worker.index_recent_activity() == 0
+    digester.digest.assert_not_awaited()
+    qdrant.upsert_memory.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -419,6 +484,7 @@ async def test_vector_worker_writes_any_nonempty_vector_subset_for_activity(tmp_
         {
             "enabled": True,
             "search": AsyncMock(return_value=[]),
+            "has_content_hash": AsyncMock(return_value=False),
             "upsert_memory": AsyncMock(),
             "has_memory": AsyncMock(return_value=False),
         },
@@ -497,6 +563,7 @@ async def test_vector_worker_skips_low_confidence_activity_digest(tmp_path) -> N
         {
             "enabled": True,
             "search": AsyncMock(return_value=[]),
+            "has_content_hash": AsyncMock(return_value=False),
             "upsert_memory": AsyncMock(),
             "has_memory": AsyncMock(return_value=False),
         },
@@ -660,6 +727,7 @@ async def test_vector_worker_redacts_before_digest_and_embedding(tmp_path) -> No
         {
             "enabled": True,
             "search": AsyncMock(return_value=[]),
+            "has_content_hash": AsyncMock(return_value=False),
             "upsert_memory": AsyncMock(),
             "has_memory": AsyncMock(return_value=False),
         },

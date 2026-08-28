@@ -18,7 +18,7 @@ rozmowy głosowej, telemetrii i warstwy wiedzy.
 
 ## 2) Stan spójności na moment przekazania
 
-- Historyczny wynik przy tym handoffie: `530 passed`; aktualny wynik pokazuje CI.
+- Historyczny wynik przy tym handoffie był lokalny; aktualny wynik pokazuje CI.
 - `compileall` dla `listener/voiceloop` bez błędów.
 - `git diff --check` bez błędów whitespace.
 
@@ -53,8 +53,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/v1/health" `
 5. Uruchom pełne testy:
 
 ```powershell
-$env:PYTHONPATH='listener'
-listener/.venv/Scripts/python.exe -m pytest -q
+cd listener
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q
 ```
 
 ## 5) Pliki, które Mikołaj powinien przeczytać najpierw

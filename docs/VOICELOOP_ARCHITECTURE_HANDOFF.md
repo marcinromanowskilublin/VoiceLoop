@@ -118,8 +118,8 @@ Aktualne modele:
 - lokalny fallback: `qwen2.5-14b-instruct-1m-abliterated`,
 - embeddingi: `text-embedding-nomic-embed-text-v2-moe`.
 
-Aktualny przebieg to `541 passed, 1 skipped`; pomijany jest prywatny replay bez
-lokalnych transkryptów. Wynik pytest i Ruff publikuje również workflow CI.
+Aktualny wynik testów pokazuje workflow CI. Nie utrzymujemy tu ręcznie liczby
+`pytest`, bo zmienia się przy każdej stabilizacji suite.
 
 ---
 
@@ -1074,8 +1074,10 @@ Smoke test nie używa mikrofonu i nie wykonuje akcji ekranowych.
 
 ```powershell
 cd listener
-.\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests
-.\.venv\Scripts\python.exe -m pytest -c pyproject.toml ..\tests
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests ..\scripts\voice_capture_server.py ..\scripts\holding-commands\server.py ..\scripts\calibration-phrases\server.py
+.\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q
+.\.venv\Scripts\python.exe -m compileall voiceloop -q
 ```
 
 Konfigurację pytest należy jawnie wskazać przez `-c pyproject.toml`, ponieważ

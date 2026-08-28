@@ -13,6 +13,7 @@ from voiceloop.models import (
     PlanStep,
     TranscriptEnvelopeV1,
 )
+from voiceloop.qdrant_memory import QdrantUnavailableError
 from voiceloop.routing.assembler import AssemblyResult, clarification_plan
 from voiceloop.routing.segmenter import segment_command
 from voiceloop.routing.service import RoutingV2Outcome
@@ -211,6 +212,60 @@ def test_vector_memory_query_uses_five_distinct_spaces(tmp_path) -> None:
         assert shadow_event["payload"]["active_source_ids"] == ["meeting:7"]
         assert shadow_event["payload"]["shadow_source_ids"] == ["meeting:8"]
         assert shadow_event["payload"]["top1_match"] is False
+        await assistant.close()
+
+    asyncio.run(scenario())
+
+
+def test_vector_memory_falls_back_to_sqlite_when_qdrant_is_unavailable(tmp_path) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_queries(self, documents):
+            return [
+                [1.0, 0.0, 0.0] if index == 0 else [0.0, float(index), 0.0]
+                for index, _document in enumerate(documents)
+            ]
+
+    class QdrantStub:
+        enabled = True
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def search(self, **_kwargs):
+            raise QdrantUnavailableError("down")
+
+    async def scenario() -> None:
+        memory = MemoryStore(tmp_path / "voice.db")
+        await memory.initialize()
+        await memory.upsert_vector_memory(
+            source="manual_memory",
+            source_id="fallback-1",
+            title="Fallback SQLite",
+            content="Lokalny wpis dostępny bez Qdranta.",
+            embedding=[1.0, 0.0, 0.0],
+            metadata={"origin": "sqlite"},
+        )
+        assistant = _assistant(
+            memory,
+            router=RouterStub(),
+            n8n=N8nStub(),
+            executor=ExecutorStub(memory),
+            tts=TTSStub(),
+            embeddings=EmbeddingsStub(),
+            qdrant=QdrantStub(),
+            vector_context_limit=5,
+        )
+
+        contexts = await assistant._vector_memories_for_request(CommandRequest(text="fallback"))
+
+        assert len(contexts) == 1
+        assert "source_id=fallback-1" in contexts[0]
+        assert "title=Fallback SQLite" in contexts[0]
         await assistant.close()
 
     asyncio.run(scenario())

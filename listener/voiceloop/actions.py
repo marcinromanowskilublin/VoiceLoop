@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -35,6 +36,7 @@ from .web_search import WebSearchClient, WebSearchError
 
 ActionHandler = Callable[[dict[str, Any]], Awaitable[tuple[str, dict[str, Any]]]]
 RISK_ORDER = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}
+LOGGER = logging.getLogger(__name__)
 NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\+?\d[\d\s().-]{4,}\d|\d+(?:[.,]\d+)?)(?!\w)")
 EMAIL_PATTERN = re.compile(
     r"(?<![A-Za-z0-9._%+-])"
@@ -2262,17 +2264,20 @@ class ActionRegistry:
                     and self.qdrant.enabled
                     and self.qdrant.accepts_private_data()
                 ):
-                    hits = await self.qdrant.search(
-                        query_vectors=query_vectors,
-                        query_weights=memory_query_weights(
-                            query,
-                            adaptive=self.settings.vector_memory_adaptive_query_weights,
-                            base_weights=self.settings.vector_memory_weights,
-                        ),
-                        limit=10,
-                        min_score=self.settings.vector_memory_min_score,
-                        rrf_k=self.settings.vector_memory_rrf_k,
-                    )
+                    try:
+                        hits = await self.qdrant.search(
+                            query_vectors=query_vectors,
+                            query_weights=memory_query_weights(
+                                query,
+                                adaptive=self.settings.vector_memory_adaptive_query_weights,
+                                base_weights=self.settings.vector_memory_weights,
+                            ),
+                            limit=10,
+                            min_score=self.settings.vector_memory_min_score,
+                            rrf_k=self.settings.vector_memory_rrf_k,
+                        )
+                    except QdrantMemoryError as exc:
+                        LOGGER.warning("Qdrant recall unavailable; using SQLite fallback: %s", exc)
                 if not hits and query_vectors.get("semantic"):
                     hits = await self.memory.search_vector_memories(
                         query_vectors["semantic"],
@@ -2291,7 +2296,7 @@ class ActionRegistry:
                     }
                     for hit in hits
                 ]
-            except (EmbeddingUnavailableError, QdrantMemoryError):
+            except EmbeddingUnavailableError:
                 vector_items = []
         if vector_items:
             return (

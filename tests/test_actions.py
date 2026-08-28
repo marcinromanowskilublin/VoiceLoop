@@ -7,6 +7,7 @@ import pytest
 from voiceloop.actions import ActionRegistry
 from voiceloop.memory import MemoryStore
 from voiceloop.models import CommandPlan, PlanStep, RiskLevel
+from voiceloop.qdrant_memory import QdrantUnavailableError
 from voiceloop.screenpipe import ScreenpipeContext
 from voiceloop.settings import Settings
 from voiceloop.tts import WindowsTTS
@@ -100,6 +101,54 @@ async def test_recall_prefers_five_space_vector_memory(tmp_path) -> None:
     assert payload["retrieval"] == "vector_v2"
     assert payload["items"][0]["source_id"] == "meeting:2"
     assert len(qdrant.kwargs["query_vectors"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_recall_falls_back_to_sqlite_when_qdrant_is_unavailable(tmp_path) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_queries(self, documents):
+            return [
+                [1.0, 0.0, 0.0] if index == 0 else [0.0, float(index), 0.0]
+                for index, _document in enumerate(documents)
+            ]
+
+    class QdrantStub:
+        enabled = True
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def search(self, **_kwargs):
+            raise QdrantUnavailableError("down")
+
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    await memory.upsert_vector_memory(
+        source="manual_memory",
+        source_id="fallback-1",
+        title="Fallback SQLite",
+        content="Lokalny wpis dostępny bez Qdranta.",
+        embedding=[1.0, 0.0, 0.0],
+        metadata={"origin": "sqlite"},
+    )
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        memory,
+        WindowsTTS(),
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=QdrantStub(),  # type: ignore[arg-type]
+    )
+
+    message, payload = await registry._recall({"query": "fallback"})
+
+    assert "pamięci semantycznej" in message
+    assert payload["retrieval"] == "vector_v2"
+    assert payload["items"][0]["source_id"] == "fallback-1"
 
 
 def test_policy_rejects_missing_required_action_argument(tmp_path) -> None:

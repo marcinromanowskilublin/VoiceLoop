@@ -17,7 +17,7 @@ from .embeddings import (
     embedding_prefix_metadata,
 )
 from .memory import MemoryStore
-from .memory_vectorization import MEMORY_DOCUMENT_SCHEMA_VERSION
+from .memory_vectorization import MEMORY_DOCUMENT_SCHEMA_VERSION, memory_query_documents
 from .qdrant_memory import QdrantMemoryError, QdrantUnavailableError, QdrantVectorStore
 from .screenpipe import ScreenpipeClient, ScreenpipeContext, ScreenpipeError
 from .settings import Settings
@@ -324,11 +324,17 @@ class ScreenpipeVectorMemoryWorker:
             return []
         try:
             safe_content = redact_text(content)[0]
-            query = await self.embeddings.embed_query(safe_content[:2000])
+            query_documents = memory_query_documents(safe_content[:2000])
+            semantic_query = query_documents.get("semantic")
+            if not semantic_query:
+                return []
+            query_vectors = await self.embeddings.embed_queries([semantic_query])
+            if len(query_vectors) != 1:
+                return []
             hits = await self.qdrant.search(
-                query,
+                query_vectors[0],
                 limit=6,
-                min_score=0.30,
+                min_score=0.0,
                 vector_names=("semantic",),
             )
         except (EmbeddingUnavailableError, QdrantMemoryError, AttributeError):
@@ -693,8 +699,10 @@ class ScreenpipeVectorMemoryWorker:
                 content_hash=content_hash,
                 source="screenpipe_behavior",
             )
-        except AttributeError:
-            return False
+        except AttributeError as exc:
+            raise QdrantUnavailableError(
+                "Qdrant store does not support content-hash duplicate checks."
+            ) from exc
 
     async def _semantic_duplicate_exists(
         self,

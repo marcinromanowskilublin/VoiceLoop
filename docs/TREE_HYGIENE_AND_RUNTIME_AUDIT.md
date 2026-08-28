@@ -23,14 +23,14 @@ Utrzymać bezpieczny, przewidywalny stan roboczy bez utraty lokalnych zmian:
    - wynik: `staged=0` (brak plików gotowych do przypadkowego commita).
 4. Audyt działania aplikacji:
    - lint:
-     - `listener\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests`
+     - `listener\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests ..\scripts\voice_capture_server.py ..\scripts\holding-commands\server.py ..\scripts\calibration-phrases\server.py`
    - testy:
-     - `listener\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q ..\tests`
+     - `listener\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q`
 
 ## Wyniki audytu
 
 - Ruff: **PASS**
-- Pytest: **PASS** (`480 passed`)
+- Pytest: **PASS** według aktualnego przebiegu CI/lokalnego `pytest`
 - Health API: **PASS** (`GET /api/v1/health`, HTTP 200)
 
 Stan drzewa po audycie:

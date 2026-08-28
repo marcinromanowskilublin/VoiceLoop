@@ -153,15 +153,22 @@ def test_voiceattack_action_audit_validates_profile_without_execution() -> None:
 def test_one_click_launcher_starts_safe_complete_stack() -> None:
     launcher = (ROOT / "Start-VoiceLoop.bat").read_text(encoding="utf-8")
     start_all = (ROOT / "scripts" / "start-all.ps1").read_text(encoding="utf-8")
+    qdrant = (ROOT / "scripts" / "start-qdrant.ps1").read_text(encoding="utf-8")
     screenpipe = (ROOT / "scripts" / "start-screenpipe.ps1").read_text(
         encoding="utf-8"
     )
 
     assert "scripts\\start-all.ps1" in launcher
+    assert "& $startQdrant" in start_all
     assert "check_voiceattack_actions.py" in start_all
     assert "VoiceAttack" in start_all
     assert "-ContextOnly" in start_all
     assert "FullScreenpipeCapture" in start_all
+    assert "qdrant/qdrant:v1.19.0" in qdrant
+    assert "docker update --restart $restartPolicy" in qdrant
+    assert "--restart $restartPolicy" in qdrant
+    assert "--health-cmd" in qdrant
+    assert "--log-opt 'max-size=10m'" in qdrant
     assert "--disable-audio" in screenpipe
     assert "--disable-keyboard-capture" in screenpipe
     assert "--disable-clipboard-capture" in screenpipe

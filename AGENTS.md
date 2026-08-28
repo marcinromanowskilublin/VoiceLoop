@@ -42,8 +42,8 @@ export XDG_RUNTIME_DIR=/run/user/$(id -u)
   ../scripts/calibration-phrases/server.py
 ./.venv/bin/python -m pytest -c pyproject.toml -q
 ```
-Baseline: **541 passed, 1 skipped** (the skipped test is the intentional
-private-data replay).
+Use the latest local/CI run as the baseline. The intentional private-data replay
+remains skipped when local transcripts are absent.
 
 ### Run the core app
 ```bash

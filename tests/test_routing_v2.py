@@ -546,6 +546,38 @@ def test_resolver_uses_top2_margin_instead_of_guessing() -> None:
     assert decision.reason == "low_top2_margin"
 
 
+def test_resolver_applies_min_score_before_accepting_margin() -> None:
+    subtask = segment_command("otwórz Chrome").subtasks[0]
+    decision = resolve_subtasks(
+        (
+            search_for(
+                subtask,
+                [
+                    (
+                        "open_browser",
+                        0.80,
+                        {"semantic": 0.80, "intent": 0.80, "target_context": 0.80},
+                    ),
+                    (
+                        "open_url",
+                        0.10,
+                        {"semantic": 0.10, "intent": 0.10, "target_context": 0.10},
+                    ),
+                ],
+            ),
+        ),
+        definitions=[definition("open_browser"), definition("open_url")],
+        transcript_confidence=0.95,
+        min_score=0.95,
+        min_margin=0.10,
+        stt_threshold=0.75,
+    )[0]
+
+    assert decision.decision is ResolutionStatusV1.CLARIFY
+    assert decision.reason == "low_combined_score"
+    assert decision.margin_top2 is not None and decision.margin_top2 >= 0.10
+
+
 def test_resolver_rejects_copy_without_an_explicit_target() -> None:
     subtask = segment_command("kopiuj").subtasks[0]
     decision = resolve_subtasks(

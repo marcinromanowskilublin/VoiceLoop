@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.6-flash"
     gemini_timeout_seconds: float = 90.0
 
     web_search_enabled: bool = True
@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     screenpipe_vector_recent_minutes: int = 10
 
     voiceattack_exe: str | None = None
+    voiceattack_registration_key: SecretStr | None = None
     hume_api_key: SecretStr | None = None
     hume_emotion_analysis_enabled: bool = False
     hume_emotion_endpoint: str = "wss://api.hume.ai/v0/evi/chat"

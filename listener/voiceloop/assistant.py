@@ -954,13 +954,16 @@ class AssistantService:
                 and self.qdrant.enabled
                 and self.qdrant.accepts_private_data()
             ):
-                hits = await self.qdrant.search(
-                    query_vectors=query_vectors,
-                    limit=self.vector_context_limit,
-                    min_score=self.vector_memory_min_score,
-                    query_weights=query_weights,
-                    rrf_k=self.vector_memory_rrf_k,
-                )
+                try:
+                    hits = await self.qdrant.search(
+                        query_vectors=query_vectors,
+                        limit=self.vector_context_limit,
+                        min_score=self.vector_memory_min_score,
+                        query_weights=query_weights,
+                        rrf_k=self.vector_memory_rrf_k,
+                    )
+                except QdrantMemoryError as exc:
+                    LOGGER.warning("Qdrant memory unavailable; using SQLite fallback: %s", exc)
             active_qdrant_hits = list(hits)
             if (
                 self.qdrant_shadow is not None
@@ -1012,9 +1015,6 @@ class AssistantService:
                 )
         except EmbeddingUnavailableError as exc:
             LOGGER.warning("Vector memory unavailable: %s", exc)
-            return []
-        except QdrantMemoryError as exc:
-            LOGGER.warning("Qdrant memory unavailable: %s", exc)
             return []
         except Exception:
             LOGGER.exception("Vector memory retrieval failed")

@@ -66,13 +66,8 @@ if (Test-Path $syncUiVision -PathType Leaf) {
     }
 }
 
-if (-not (Test-Port 6333)) {
-    Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', "`"$PSScriptRoot\start-qdrant.ps1`""
-    ) -WindowStyle Hidden
-}
+$startQdrant = Join-Path $PSScriptRoot 'start-qdrant.ps1'
+& $startQdrant | Write-Output
 
 if (-not (Test-Port 3030)) {
     $screenpipeArguments = @(
