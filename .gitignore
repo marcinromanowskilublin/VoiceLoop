@@ -19,6 +19,14 @@ scripts/staging-voice-eval/
 *.bak
 *.tmp
 
+# Local agent/runtime scratch data. These can contain huge models, virtualenvs,
+# transcripts, screenshots, and private local artifacts.
+.codex_tmp/
+
+# Local Cursor hook experiments; not part of the shared VoiceLoop runtime.
+.cursor/hooks.json
+.cursor/hooks/
+
 # Kopie awaryjne vectorscope z kolizji dwóch równoległych sesji (2026-08-24).
 # Trzymane lokalnie do porównania, nie należą do historii projektu.
 .vectorscope-backup-*/
