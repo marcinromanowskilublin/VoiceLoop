@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -127,12 +127,12 @@
 <body>
   <div class="layout">
     <header>
-      <h1>VoiceLoop <span id="model-badge">lokalny panel</span></h1>
+      <h1>VoiceLoop <span id="model-badge">local panel</span></h1>
       <div class="actions">
-        <button id="conversation">Rozpocznij rozmowę</button>
-        <button id="meeting" class="primary">Rozpocznij nagranie</button>
-        <button id="listen">Włącz Deepgram</button>
-        <button id="refresh">Odśwież</button>
+        <button id="conversation">Start conversation</button>
+        <button id="meeting" class="primary">Start recording</button>
+        <button id="listen">Enable Deepgram</button>
+        <button id="refresh">Refresh</button>
         <button id="stop" class="danger">STOP</button>
       </div>
     </header>
@@ -142,50 +142,50 @@
     <main>
       <section class="card conversation">
         <div id="meeting-bar" class="meeting-bar">
-          <span><span class="recording-dot">●</span> <b id="meeting-status">Brak aktywnego nagrania</b></span>
-          <span id="meeting-detail">Asystent dostępny</span>
+          <span><span class="recording-dot">●</span> <b id="meeting-status">No active recording</b></span>
+          <span id="meeting-detail">Assistant available</span>
         </div>
         <div id="messages"></div>
         <div id="interim"></div>
         <div class="composer">
-          <textarea id="prompt" placeholder="Napisz lub powiedz, co mam zrobić…"></textarea>
+          <textarea id="prompt" placeholder="Type or say what I should do…"></textarea>
           <div class="composer-row">
             <div class="toggles">
-              <label><input id="screen" type="checkbox"> dołącz aktywne okno</label>
+              <label><input id="screen" type="checkbox"> include active window</label>
               <label>
                 <input id="cloud" type="checkbox">
-                <span id="cloud-label">zezwól na chmurowy fallback</span>
+                <span id="cloud-label">allow cloud fallback</span>
               </label>
             </div>
-            <button id="send" class="primary">Wyślij</button>
+            <button id="send" class="primary">Send</button>
           </div>
         </div>
       </section>
 
       <aside class="side">
         <section class="card">
-          <h2>Ostatnia tura</h2>
-          <div id="turn-trace"><span class="empty">Brak pomiaru.</span></div>
+          <h2>Capabilities</h2>
+          <div id="capabilities"><span class="empty">Loading catalog…</span></div>
         </section>
         <section class="card">
-          <h2>Źródła odpowiedzi</h2>
-          <div id="answer-sources"><span class="empty">Brak źródeł.</span></div>
+          <h2>Recent tasks</h2>
+          <div id="tasks"><span class="empty">No tasks yet.</span></div>
         </section>
         <section class="card">
-          <h2>Możliwości</h2>
-          <div id="capabilities"><span class="empty">Ładowanie katalogu…</span></div>
+          <h2>Answer sources</h2>
+          <div id="answer-sources"><span class="empty">No sources.</span></div>
         </section>
         <section class="card">
-          <h2>Ostatnie zadania</h2>
-          <div id="tasks"><span class="empty">Brak zadań.</span></div>
-        </section>
-        <section class="card">
-          <h2>Pamięć lokalna</h2>
+          <h2>Local memory</h2>
           <div class="memory-form">
-            <input id="memoryText" placeholder="Fakt lub preferencja">
-            <button id="remember">Zapamiętaj</button>
+            <input id="memoryText" placeholder="A fact or preference">
+            <button id="remember">Remember</button>
           </div>
           <div id="memories"></div>
+        </section>
+        <section class="card">
+          <h2>Last turn</h2>
+          <div id="turn-trace"><span class="empty">No measurements yet.</span></div>
         </section>
       </aside>
     </main>
@@ -205,56 +205,6 @@
       commandIds: new Set()
     };
     const $ = id => document.getElementById(id);
-    const emotionLabels = {
-      Admiration: "podziw",
-      Adoration: "uwielbienie",
-      "Aesthetic Appreciation": "zachwyt",
-      Amusement: "rozbawienie",
-      Anger: "złość",
-      Anxiety: "niepokój",
-      Awe: "zdumienie",
-      Awkwardness: "niezręczność",
-      Boredom: "znudzenie",
-      Calmness: "spokój",
-      Concentration: "koncentracja",
-      Confusion: "dezorientacja",
-      Contemplation: "zamyślenie",
-      Contempt: "pogarda",
-      Contentment: "zadowolenie",
-      Craving: "pragnienie",
-      Desire: "chęć",
-      Determination: "determinacja",
-      Disappointment: "rozczarowanie",
-      Disgust: "wstręt",
-      Distress: "napięcie",
-      Doubt: "wątpliwość",
-      Ecstasy: "euforia",
-      Embarrassment: "zakłopotanie",
-      "Empathic Pain": "współodczuwanie bólu",
-      Entrancement: "zafascynowanie",
-      Envy: "zazdrość",
-      Excitement: "pobudzenie",
-      Fear: "strach",
-      Guilt: "poczucie winy",
-      Horror: "przerażenie",
-      Interest: "zainteresowanie",
-      Joy: "radość",
-      Love: "miłość",
-      Nostalgia: "nostalgia",
-      Pain: "ból",
-      Pride: "duma",
-      Realization: "olśnienie",
-      Relief: "ulga",
-      Romance: "romantyczność",
-      Sadness: "smutek",
-      Satisfaction: "satysfakcja",
-      Shame: "wstyd",
-      "Surprise (negative)": "negatywne zaskoczenie",
-      "Surprise (positive)": "pozytywne zaskoczenie",
-      Sympathy: "sympatia",
-      Tiredness: "zmęczenie",
-      Triumph: "triumf"
-    };
 
     async function api(path, options = {}) {
       const headers = Object.assign({}, options.headers || {});
@@ -300,6 +250,7 @@
       return /[.!?…]["')\]]?\s*$/.test((text || "").trim());
     }
 
+    // Continuation heuristics stay Polish: the transcripts themselves are Polish speech.
     function beginsAsContinuation(text) {
       const cleaned = (text || "").trim();
       if (!cleaned) return false;
@@ -310,7 +261,7 @@
     function shouldMergeTranscriptSegment(group, item) {
       if (!group || !item) return false;
       const channel = ["input", "output"].includes(item.channel) ? item.channel : "unknown";
-      const speakerLabel = item.speaker_label || (channel === "input" ? "Ty" : "Rozmówca");
+      const speakerLabel = item.speaker_label || (channel === "input" ? "You" : "Speaker");
       if (group.channel !== channel || group.speakerLabel !== speakerLabel) return false;
       const previousText = group.text || "";
       const nextText = item.text || "";
@@ -332,7 +283,7 @@
     function updateTranscriptGroupNode(group) {
       group.textNode.textContent = group.text;
       group.node.dataset.segmentKeys = group.keys.join(",");
-      group.node.title = `Scalone z ${group.keys.length} fragmentów źródłowych`;
+      group.node.title = `Merged from ${group.keys.length} source segments`;
       renderGroupEmotions(group);
     }
 
@@ -348,8 +299,8 @@
         .slice(0, 3);
     }
 
-    function polishEmotionName(name) {
-      return emotionLabels[name] || name.toLowerCase();
+    function emotionName(name) {
+      return name.toLowerCase();
     }
 
     function mergeGroupEmotions(group) {
@@ -370,8 +321,8 @@
     function emotionText(emotions) {
       const safe = normalizeEmotions(emotions);
       if (!safe.length) return "";
-      return "emocje: " + safe
-        .map(item => `${polishEmotionName(item.name)} ${Math.round(item.score * 100)}%`)
+      return "emotions: " + safe
+        .map(item => `${emotionName(item.name)} ${Math.round(item.score * 100)}%`)
         .join(", ");
     }
 
@@ -404,7 +355,7 @@
       if (state.transcriptKeys.has(key)) return;
       state.transcriptKeys.add(key);
       const channel = ["input", "output"].includes(item.channel) ? item.channel : "unknown";
-      const speakerLabel = item.speaker_label || (channel === "input" ? "Ty" : "Rozmówca");
+      const speakerLabel = item.speaker_label || (channel === "input" ? "You" : "Speaker");
       const lastGroup = state.transcriptGroups[state.transcriptGroups.length - 1];
       if (shouldMergeTranscriptSegment(lastGroup, item)) {
         lastGroup.text = joinTranscriptText(lastGroup.text, item.text);
@@ -423,7 +374,7 @@
       let time = "";
       const date = parseTranscriptTime(item);
       if (date) {
-        time = " · " + date.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        time = " · " + date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       }
       speaker.textContent = speakerLabel + time;
       const text = document.createElement("span");
@@ -459,18 +410,18 @@
       const bar = $("meeting-bar");
       bar.classList.toggle("active", active);
       $("meeting-status").textContent = active
-        ? "Nagrywanie trwa"
+        ? "Recording in progress"
         : status === "finalizing"
-        ? "Finalizowanie transkryptu"
+        ? "Finalizing transcript"
         : status === "completed"
-        ? "Nagranie zakończone"
-        : "Brak aktywnego nagrania";
+        ? "Recording finished"
+        : "No active recording";
       $("meeting-detail").textContent = active
-        ? "Asystent wyłączony · input/output zapisywane osobno"
+        ? "Assistant muted · input/output recorded separately"
         : status === "finalizing"
-        ? "Deepgram kończy kanały wyjściowe"
-        : "Asystent dostępny";
-      $("meeting").textContent = active ? "Zakończ nagranie" : "Rozpocznij nagranie";
+        ? "Deepgram is finalizing output channels"
+        : "Assistant available";
+      $("meeting").textContent = active ? "Stop recording" : "Start recording";
       $("meeting").classList.toggle("danger", active);
       $("meeting").classList.toggle("primary", !active);
       $("conversation").disabled = active;
@@ -482,7 +433,7 @@
         const data = await api("/api/v1/health");
         const deepgram = data.components.deepgram || {};
         state.listening = deepgram.status === "ok";
-        $("listen").textContent = state.listening ? "Wyłącz Deepgram" : "Włącz Deepgram";
+        $("listen").textContent = state.listening ? "Disable Deepgram" : "Enable Deepgram";
         $("health").replaceChildren(...Object.entries(data.components).map(([name, item]) => {
           const card = document.createElement("div");
           card.className = "health-card";
@@ -496,7 +447,7 @@
           return card;
         }));
       } catch (error) {
-        $("health").textContent = "Rdzeń VoiceLoop nie odpowiada: " + error.message;
+        $("health").textContent = "VoiceLoop core is not responding: " + error.message;
       }
     }
 
@@ -506,7 +457,7 @@
       if (!tasks.length) {
         const empty = document.createElement("span");
         empty.className = "empty";
-        empty.textContent = "Brak zadań.";
+        empty.textContent = "No tasks yet.";
         root.appendChild(empty);
         return;
       }
@@ -528,10 +479,10 @@
           const actions = document.createElement("div");
           actions.className = "task-actions";
           const confirm = document.createElement("button");
-          confirm.textContent = "Potwierdź";
+          confirm.textContent = "Confirm";
           confirm.onclick = () => actOnTask(task.request_id, "confirm");
           const cancel = document.createElement("button");
-          cancel.textContent = "Anuluj";
+          cancel.textContent = "Cancel";
           cancel.onclick = () => actOnTask(task.request_id, "cancel");
           actions.append(confirm, cancel);
           node.appendChild(actions);
@@ -547,17 +498,17 @@
     function renderTrace(trace, aggregates = {}) {
       const root = $("turn-trace");
       if (!trace) {
-        root.innerHTML = '<span class="empty">Brak pomiaru.</span>';
+        root.innerHTML = '<span class="empty">No measurements yet.</span>';
         return;
       }
       const labels = {
         stt_ms: "STT",
-        context_ms: "Kontekst",
+        context_ms: "Context",
         model_ms: "Model",
-        tool_ms: "Narzędzie",
-        speech_to_first_audio_ms: "Do pierwszego audio",
-        listening_resume_ms: "Powrót nasłuchu",
-        barge_stop_ms: "Przerwanie TTS"
+        tool_ms: "Tool",
+        speech_to_first_audio_ms: "To first audio",
+        listening_resume_ms: "Listening resume",
+        barge_stop_ms: "TTS barge-in"
       };
       const summary = document.createElement("div");
       summary.className = "trace-summary";
@@ -577,7 +528,7 @@
       });
       const meta = document.createElement("p");
       meta.className = "trace-meta";
-      meta.textContent = `sesja ${trace.session_id} · tura ${trace.turn_id} · ${trace.status}`;
+      meta.textContent = `session ${trace.session_id} · turn ${trace.turn_id} · ${trace.status}`;
       root.replaceChildren(summary, meta);
       if (trace.metadata && Array.isArray(trace.metadata.sources)) {
         renderSources(trace.metadata.sources);
@@ -588,7 +539,7 @@
       const root = $("answer-sources");
       const safeSources = (sources || []).filter(item => item && item.url).slice(0, 3);
       if (!safeSources.length) {
-        root.innerHTML = '<span class="empty">Brak źródeł.</span>';
+        root.innerHTML = '<span class="empty">No sources.</span>';
         return;
       }
       root.replaceChildren(...safeSources.map(item => {
@@ -607,7 +558,7 @@
       const root = $("answer-sources");
       const item = document.createElement("span");
       item.className = "empty";
-      item.textContent = message || "Nie udało się pobrać aktualnych źródeł.";
+      item.textContent = message || "Could not fetch live sources.";
       root.replaceChildren(item);
     }
 
@@ -617,7 +568,7 @@
         const catalog = await api("/api/v1/capabilities");
         const grouped = new Map();
         for (const action of catalog.voiceloop_actions || []) {
-          const category = action.category || "inne";
+          const category = action.category || "other";
           if (!grouped.has(category)) grouped.set(category, []);
           grouped.get(category).push(action);
         }
@@ -638,7 +589,7 @@
         });
         root.replaceChildren(...groups);
       } catch (error) {
-        root.innerHTML = '<span class="empty">Katalog chwilowo niedostępny.</span>';
+        root.innerHTML = '<span class="empty">Catalog temporarily unavailable.</span>';
       }
     }
 
@@ -665,7 +616,7 @@
           text.textContent = item.content;
           const remove = document.createElement("button");
           remove.textContent = "×";
-          remove.title = "Zapomnij";
+          remove.title = "Forget";
           remove.onclick = async () => {
             await api(`/api/v1/memories/${item.id}`, { method: "DELETE" });
             await loadMemories();
@@ -700,7 +651,7 @@
         }
         await loadTasks();
       } catch (error) {
-        addMessage("system", "Błąd: " + error.message);
+        addMessage("system", "Error: " + error.message);
       } finally {
         $("send").disabled = false;
         $("prompt").focus();
@@ -710,9 +661,9 @@
     async function startConversation() {
       try {
         await api("/api/v1/conversation/start", { method: "POST" });
-        addMessage("system", "Rozpoczynam rozmowę: jedno powitanie, potem Deepgram one-shot.");
+        addMessage("system", "Starting conversation: one greeting, then Deepgram one-shot.");
       } catch (error) {
-        addMessage("system", "Rozmowa: " + error.message);
+        addMessage("system", "Conversation: " + error.message);
       }
     }
 
@@ -723,7 +674,7 @@
         (meeting.segments || []).forEach(addTranscriptSegment);
         return meeting;
       } catch (error) {
-        addMessage("system", "Nagranie: " + error.message);
+        addMessage("system", "Recording: " + error.message);
         return null;
       }
     }
@@ -734,9 +685,9 @@
         if (state.meetingActive) {
           const meeting = await api("/api/v1/meetings/stop", { method: "POST" });
           state.listening = false;
-          $("listen").textContent = "Włącz Deepgram";
+          $("listen").textContent = "Enable Deepgram";
           updateMeetingUi(meeting);
-          addMessage("system", "Nagrywanie zakończone. Kanały output są finalizowane i zapisane lokalnie.");
+          addMessage("system", "Recording finished. Output channels are being finalized and stored locally.");
         } else {
           state.transcriptKeys.clear();
           state.transcriptGroups = [];
@@ -745,11 +696,11 @@
           const meeting = await api("/api/v1/meetings/start", { method: "POST" });
           updateMeetingUi(meeting);
           state.listening = true;
-          $("listen").textContent = "Wyłącz Deepgram";
-          addMessage("system", "Asystent wyłączony. Deepgram działa, a input/output są nagrywane osobno.");
+          $("listen").textContent = "Disable Deepgram";
+          addMessage("system", "Assistant muted. Deepgram is running; input/output are recorded separately.");
         }
       } catch (error) {
-        addMessage("system", "Nagranie: " + error.message);
+        addMessage("system", "Recording: " + error.message);
       } finally {
         $("meeting").disabled = false;
       }
@@ -760,7 +711,7 @@
       try {
         await api(`/api/v1/listening/${endpoint}`, { method: "POST" });
         state.listening = !state.listening;
-        $("listen").textContent = state.listening ? "Wyłącz Deepgram" : "Włącz Deepgram";
+        $("listen").textContent = state.listening ? "Disable Deepgram" : "Enable Deepgram";
       } catch (error) {
         addMessage("system", "Deepgram: " + error.message);
       }
@@ -769,8 +720,8 @@
     async function stopAll() {
       await api("/api/v1/stop", { method: "POST" });
       state.listening = false;
-      $("listen").textContent = "Włącz Deepgram";
-      addMessage("system", "Nasłuch został zatrzymany.");
+      $("listen").textContent = "Enable Deepgram";
+      addMessage("system", "Listening stopped.");
       await loadMeeting();
       await loadTasks();
     }
@@ -780,7 +731,7 @@
       const payload = data.payload || {};
       if (type === "transcript.interim") {
         $("interim").textContent = state.meetingActive && payload.text
-          ? "Ty (na żywo): " + payload.text
+          ? "You (live): " + payload.text
           : payload.text || "";
       }
       if (type === "transcript.final") {
@@ -799,16 +750,16 @@
       }
       if (type === "conversation.transcribe_only" && payload.enabled) {
         if (!state.meetingActive) {
-          addMessage("system", "Asystent milczy. Transkrypcja na żywo i nagrywanie działają.");
+          addMessage("system", "Assistant is silent. Live transcription and recording remain active.");
         }
       }
       if (type === "listening.connected") {
         state.listening = true;
-        $("listen").textContent = "Wyłącz Deepgram";
+        $("listen").textContent = "Disable Deepgram";
       }
       if (type === "listening.stopped") {
         state.listening = false;
-        $("listen").textContent = "Włącz Deepgram";
+        $("listen").textContent = "Enable Deepgram";
       }
       if (type === "conversation.trace") {
         renderTrace(payload);
@@ -852,14 +803,14 @@
                 try {
                   handleEventData(JSON.parse(payload));
                 } catch (error) {
-                  console.warn("Pominięto niepoprawne zdarzenie SSE:", error);
+                  console.warn("Skipped malformed SSE event:", error);
                 }
               }
               boundary = buffer.indexOf("\n\n");
             }
           }
         } catch (error) {
-          console.warn("Ponawiam chroniony strumień zdarzeń:", error);
+          console.warn("Retrying protected event stream:", error);
         }
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
@@ -871,7 +822,7 @@
         state.token = session.token;
         state.llmPrimary = session.llm_primary || "local";
       } catch (error) {
-        addMessage("system", "Nie udało się rozpocząć lokalnej sesji: " + error.message);
+        addMessage("system", "Could not start a local session: " + error.message);
         return;
       }
       const cloudPrimary = ["cloud", "venice"].includes(state.llmPrimary);
@@ -879,10 +830,10 @@
       $("cloud").disabled = cloudPrimary || geminiPrimary;
       $("cloud").checked = false;
       $("cloud-label").textContent = geminiPrimary
-        ? "Gemini jest modelem głównym (ustawienie serwera)"
+        ? "Gemini is the primary model (server setting)"
         : cloudPrimary
-        ? "Venice jest modelem głównym (ustawienie serwera)"
-        : "zezwól na chmurowy fallback";
+        ? "Venice is the primary model (server setting)"
+        : "allow cloud fallback";
       const badge = $("model-badge");
       if (badge) {
         badge.textContent = geminiPrimary
@@ -919,12 +870,12 @@
       addMessage(
         "system",
         state.meetingActive
-          ? "Nagrywanie trwa. Asystent jest wyłączony; Deepgram zapisuje transkrypt."
+          ? "Recording in progress. Assistant is muted; Deepgram is saving the transcript."
           : geminiPrimary
-          ? "VoiceLoop gotowy. Gemini prowadzi rozmowę, Qwen jest fallbackiem; zadania idą Deepgram → VA/akcje."
+          ? "VoiceLoop ready. Gemini handles conversation with Qwen as fallback; tasks flow Deepgram → VA/actions."
           : cloudPrimary
-          ? "VoiceLoop gotowy. Venice jest głównym modelem, Qwen lokalnym fallbackiem."
-          : "VoiceLoop gotowy. Qwen jest głównym modelem lokalnym."
+          ? "VoiceLoop ready. Venice is the primary model, Qwen is the local fallback."
+          : "VoiceLoop ready. Qwen is the primary local model."
       );
     }
 

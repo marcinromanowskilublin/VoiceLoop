@@ -12,10 +12,12 @@ dependency graph — and rejects the **whole plan** if a single step fails.
 
 ![VoiceLoop local panel](docs/img/voiceloop-panel.png)
 
-*The actual local panel, captured with only the FastAPI core running and the
-optional providers (LM Studio, Qdrant, Screenpipe) offline. Per-component state
-is reported, not hidden — that is deliberate. The latency percentiles come from
-real local voice turns.*
+*The built-in diagnostics panel, captured live — a deliberately plain
+development UI (the final interface will take a different form). Optional
+providers were offline at capture time: per-component state is reported, not
+hidden. The Polish entries are real data from a Polish-first assistant — the
+voice-command catalog, task history, and a dictated test utterance with live
+emotion analysis.*
 
 ## The Core Rule
 
