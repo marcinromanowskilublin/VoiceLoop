@@ -1,302 +1,179 @@
 # VoiceLoop
 
-**A local-first, Polish-language voice and context assistant for Windows, built
-around one strict rule: the language model proposes, local code decides.**
-
-[![VoiceLoop CI](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml)
-
-VoiceLoop is not another "LLM with tools" demo. The model never gets a shell,
-never invents a tool, and never executes anything on its own. It returns a typed
-plan; local code validates every step against an allowlist, a risk policy, and a
-dependency graph — and rejects the **whole plan** if a single step fails.
-
-![VoiceLoop local panel](docs/img/voiceloop-panel.png)
-
-*The built-in diagnostics panel, captured live — a deliberately plain
-development UI (the final interface will take a different form). Optional
-providers were offline at capture time: per-component state is reported, not
-hidden. The Polish entries are real data from a Polish-first assistant — the
-voice-command catalog, task history, and a dictated test utterance with live
-emotion analysis.*
-
-## The Core Rule
+Local-first voice and context assistant for Windows, built around Polish
+speech. The language model may propose a plan. Local code decides whether
+anything runs.
 
 ```text
 LLM output is a proposal, not authority.
 Local code decides what can run.
 ```
 
-Every executable step passes through typed local contracts, an action allowlist,
-a risk-and-confirmation policy, and a sequential executor. The model can plan;
-it cannot lower risk, skip confirmation, claim success it did not have, or run
-anything the local registry does not define.
+[![VoiceLoop CI](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml)
 
-## Numbers You Can Check By Cloning
+This repository is the running system: typed contracts, an action allowlist,
+a sequential executor, local memory, and a voice loop that can be stopped.
+It is not a product pitch and not a general desktop agent. If you want to
+understand it, look at the blocks below — each one is a real module with
+tests.
 
-- **~30 allowlisted Windows actions** — every executable capability is a local
-  `ActionSpec` in `listener/voiceloop/actions.py` with its own argument schema,
-  risk level, and confirmation flag. Nothing else can run.
-- **5 named vector spaces** per memory entry in Qdrant: `semantic`, `topic`,
-  `intent`, `decision`, `person_context` — instead of one embedding pretending
-  to capture everything.
-- **680+ unit and regression tests** collected by pytest, run in CI on
-  `windows-latest`.
-- **1 global STOP** that cancels queued work, the active action, in-flight model
-  calls, and TTS at once.
-- **0 shell access** for the model. There is no "run command" tool to abuse.
+![VoiceLoop local panel](docs/img/voiceloop-panel.png)
 
-## Why It Exists
+*The local diagnostics panel. It is a development UI, not the final
+interface. Optional providers are shown as they are, including when they
+are offline.*
 
-Most AI assistant prototypes optimize for a fluent demo. VoiceLoop works on the
-harder engineering questions:
+## How the blocks fit
 
-- How do you let an LLM help with desktop actions without giving it arbitrary
-  control of the computer?
-- How do you keep Polish-language voice interaction usable when speech
-  recognition is imperfect?
-- How do you stop the system *immediately* when the user interrupts?
-- How do you build useful local context memory without turning private activity
-  into an uncontrolled cloud transcript?
-- How do you *measure* whether vector thresholds, deduplication, routing, and
-  voice evaluation actually behave — instead of assuming they do?
-
-The result is a research-oriented but runnable local system: architecture,
-safety boundaries, local AI integration, evaluation discipline, and Windows
-automation in one codebase.
-
-## How A Command Travels
+A command is just a `CommandRequest` until local code accepts a
+`CommandPlan`. Memory, screen text, and web results are context. They
+cannot invent a new action.
 
 ```text
-local context / voice / panel / VoiceAttack
+panel / Deepgram / VoiceAttack / API
     -> FastAPI core
-    -> deterministic command or model planner
-    -> validated CommandPlan
-    -> local action allowlist
-    -> risk and confirmation policy
-    -> sequential executor
-    -> spoken or panel-visible result
+    -> Router V1  (Routing V2 only in shadow)
+    -> ProposedPlan from the model, or a deterministic plan
+    -> CommandPlan after local binding
+    -> allowlist + risk policy + confirmation
+    -> one executor queue
+    -> ActionResult, then speech or the panel
 ```
 
 ```mermaid
 flowchart LR
-    Voice["Polish-language input"] --> STT["Deepgram STT"]
-    Panel["Local browser panel"] --> Core["FastAPI core"]
+    Voice["Polish input"] --> STT["Deepgram STT"]
+    Panel["Local panel"] --> Core["FastAPI core"]
     VA["VoiceAttack"] --> Core
     STT --> Core
 
-    Core --> Router["Conversation / task router"]
+    Core --> Router["Router V1"]
     Router -->|"conversation"| LLM["Gemini / Venice / LM Studio"]
-    Router -->|"task"| Planner["Structured planner"]
-    Planner --> Schema["JSON schema validation"]
-    Schema --> Policy["Allowlist + risk policy"]
+    Router -->|"task"| Planner["Typed planner"]
+    Planner --> Schema["JSON Schema"]
+    Schema --> Policy["Allowlist + risk"]
     Policy --> Executor["Sequential executor"]
-    Executor --> Windows["Windows actions / UI Automation / UI.Vision"]
+    Executor --> Windows["UIA / UI.Vision / local actions"]
 
     Core --> TTS["Azure or Windows TTS"]
-    Executor --> TTS
     Stop["Global STOP"] --> Core
 
-    Core <--> SQLite["SQLite state"]
-    Core <--> Qdrant["Qdrant vector memory"]
-    Screenpipe["Screenpipe local context"] --> Digest["Behavior digest"]
-    Digest --> Qdrant
-    Qdrant --> Guard["Threshold Guard"]
-    Qdrant --> Vectorscope["Vectorscope diagnostics"]
+    Core <--> SQL["SQLite"]
+    Core <--> Qdrant["Qdrant"]
+    Screenpipe["Screenpipe digest"] --> Qdrant
 ```
 
-## Six Parts Worth Reading
+The same path always applies: one unknown `action_id` rejects the whole
+plan. Model-declared risk cannot lower the risk on the local spec.
+`response_text` must not claim that an action already succeeded. External
+tool output is not fed back as executable intent.
 
-### 1. Fail-closed task planning
+## The blocks
 
-The task planner returns a typed structure:
+These are the pieces worth opening. Older write-ups in `docs/` yield to
+the code and to [`docs/ARCHITECTURE_CURRENT.md`](docs/ARCHITECTURE_CURRENT.md).
 
-```text
-intent
-response_text
-requires_clarification
-clarification_question
-steps[action_id, args, depends_on, risk, confirmation_required]
-```
+| Block | Where to look | What it actually does |
+| --- | --- | --- |
+| HTTP core | `listener/voiceloop/app.py` | Wires services, session token, SSE, listen-once modes. |
+| Contracts | `listener/voiceloop/models.py` | `CommandRequest`, `CommandPlan`, `TranscriptEnvelopeV1`. |
+| Router V1 | `listener/voiceloop/router.py` | Cheap deterministic plans and STT gates. No shell. |
+| Router V2 | `listener/voiceloop/routing/` | Segment → capability match → assemble. Shadow only. |
+| Planner | `listener/voiceloop/model_router.py` | `ProposedPlan` in, bound `CommandPlan` out. |
+| Allowlist | `listener/voiceloop/actions.py` | 42 `ActionSpec` entries. Schema, risk, confirmation, handler. |
+| Desktop UIA | `listener/voiceloop/windows_shell.py` | Visible desktop and Explorer items. Not `cmd`. |
+| Path journal | `listener/voiceloop/windows_context.py` | Local folder/file history with explicit roots. |
+| Executor | `listener/voiceloop/executor.py` | One plan at a time. Queue limit, confirmation TTL, STOP. |
+| Voice loop | `listener/voiceloop/voice_conversation.py` | Half-duplex, barge-in, pause, speaker gate. Polish stays Polish. |
+| Memory | `listener/voiceloop/memory.py` | SQLite operational state and explicit notes. |
+| Vectors | `listener/voiceloop/qdrant_memory.py` | Five named spaces, separate capabilities collection. |
+| Thresholds | `listener/voiceloop/threshold_guard.py` | Measures retrieval thresholds. Does not write vectors. |
+| Situation | `listener/voiceloop/situation/` | Read-only ledger. `GET /api/v1/situation`. Not a source of actions. |
+| Commitments | `listener/voiceloop/commitments/` | Text analysis only. Not wired into routing. |
+| Eval | `listener/voiceloop/corpus/` | Voice and routing evaluation. Private audio stays local. |
+| Panel | `panel/` | Local browser UI. |
+| Vectorscope | `vectorscope/` | Embedding geometry, read-only against Qdrant. |
+| VoiceAttack | `voiceattack/`, `scripts/va/` | Constrained wake phrases into the same API. |
+| Tests | `tests/` | Unit and regression suite. CI on `windows-latest`. |
 
-And the validation is deliberately unforgiving:
+Memory is a hybrid, not a single search trick:
 
-- one unknown `action_id` rejects the **entire** plan, not just the step;
-- `depends_on` may reference only earlier step indexes — self-dependencies,
-  forward references, and duplicate dependencies are rejected before execution;
-- external tool output (OCR, web text, memory content) is never fed back to the
-  planner as executable intent;
-- `response_text` must not claim an action already succeeded.
+- **A** — Qdrant hits concatenated with SQL memories into the planner context.
+- **B** — SQLite cosine fallback on the `semantic` axis when Qdrant is empty or down.
+- **C** — `remember` / `recall` write SQL first; Qdrant is an index; last resort is a substring.
 
-### 2. An executor that stays deterministic
+Capabilities live in `voiceloop_capabilities_v1`. They are not merged into
+`voiceloop_memory`. Embeddings are local Nomic 768d through LM Studio when
+that path is enabled.
 
-The executor runs only local `ActionSpec` definitions: identifier, argument
-schema, risk level, confirmation requirement, and a handler implemented in local
-code. Planning may be probabilistic; execution is not. One execution path is
-active at a time, and STOP cuts everything.
+## Three shelves
 
-### 3. Memory with named vectors — and a guard that distrusts it
+Keep these separate. Mixing them is how the system becomes unclear.
 
-- SQLite holds operational state, explicit memories, commands, and traces.
-- Qdrant holds optional vector memory with the five named spaces above.
-- Screenpipe activity is compressed into local behavior digests before ingestion.
-- Content-hash plus semantic deduplication keeps the store clean.
-- **Threshold Guard** continuously checks whether similarity thresholds are
-  dead, unreachable, over-broad, or drifting — because a threshold that silently
-  stopped matching is worse than no threshold.
+**Runs today.** Input → V1 router → optional model plan → policy →
+executor. Windows actions, STOP, SQLite, optional Qdrant and Screenpipe,
+VoiceAttack, Azure or Windows TTS.
 
-### 4. Vectorscope: look at your embeddings before trusting them
+**Present, not in charge.** Routing V2 (shadow), commitment detector,
+`SituationStateV1`, `StateProposal`, Hume, n8n. Code and tests exist.
+They do not steer the planner or the executor.
 
-A separate diagnostics package visualizes embedding geometry, prefix effects,
-projection behavior, and live Qdrant retrieval distributions. It exists because
-"the vector search works" is a claim that should be *measured*, not felt.
+**Not next.** Live V2 only after a quality gate with numbers. Situation
+state must not become a source of `action_id`. The model must not write
+situation facts. There is no shell tool for the LLM.
 
-### 5. A voice loop that can be interrupted
+## Safety, in practice
 
-Polish-first dictation and command phrasing (Deepgram STT), short conversations
-with interruption support, and a global STOP endpoint that cancels queued work,
-the active action, model calls, and TTS. Dictated Polish stays Polish — it is
-not silently translated into English commands.
+- loopback-first services; private routes need `X-VoiceLoop-Token`;
+- secrets stay in `listener/.env`, which is not in Git;
+- 0 high-risk actions on the allowlist; several medium actions need
+  confirmation;
+- one execution path; STOP cancels the queue, the current action, the
+  model call, and TTS;
+- Screenpipe defaults to a reduced capture mode.
 
-### 6. Measurable voice evaluation
+VoiceLoop is controlled local assistance. It is not a sandbox-escape
+framework.
 
-A private evaluation pipeline with source and speaker gates, hashing and
-deduplication, a frozen development/holdout split, manual annotation, and STT,
-routing, and prosody metrics. The repository contains the pipeline and its
-invariants; the private dataset stays local.
+## Quick start
 
-## Experimental: The Commitment Layer
-
-The newest module treats conversation as a stream of *commitments* rather than
-just text. It classifies Polish utterances into requests, promises, commands,
-refusals, and cheap signals — and applies a strict rule borrowed from real life:
-
-```text
-request_received != commitment_accepted
-```
-
-```text
-"Postaram się to ogarnąć w piątek."
--> cheap_signal, needs_clarification: deadline known, action missing
-
-"Wyślę ci dokumenty do piątku."
--> promise, captured, user_to_other
-
-"Musisz mi to wysłać dzisiaj."
--> command, needs_user_review, elevated pressure
-```
-
-Current state, honestly: the rule-based detector, scoring, and typed schema are
-implemented and tested (`listener/voiceloop/commitments/`,
-`tests/test_commitment_analysis.py`). The vector and temporal evidence stages
-are a documented direction, not shipped code. The layer analyzes text only — it
-is not wired into routing or execution. Design notes:
-[`docs/COMMITMENT_LAYER.md`](docs/COMMITMENT_LAYER.md).
-
-## Safety Model
-
-Defense in depth, not a single gate:
-
-- loopback-first services; token-protected private endpoints;
-- `.env` secrets excluded from Git;
-- LLM output parsed through strict schemas; unknown actions rejected;
-- invalid multi-step plans rejected as a whole;
-- arguments validated against local schemas;
-- model-declared risk cannot reduce locally defined action risk;
-- high-risk actions require confirmation;
-- one active execution path at a time; STOP cancels everything;
-- external OCR, memory, and web text are treated as untrusted data.
-
-VoiceLoop is not a sandbox-escape framework and not a general autonomous desktop
-agent. Its purpose is controlled local assistance.
-
-## Quick Start
-
-### Requirements
-
-VoiceLoop targets Windows.
-
-Minimum:
-
-- Python 3.11;
-- a local `listener/.env` copied from `listener/.env.example`;
-- the provider keys or local models you explicitly enable.
-
-Optional full stack: LM Studio, Docker Desktop (for Qdrant), Screenpipe,
-VoiceAttack, UI.Vision, Azure Speech, Deepgram, Gemini or another
-OpenAI-compatible planner.
-
-### Configure
+Windows, Python 3.11. Copy `listener/.env.example` to `listener/.env`
+and enable only the providers you want.
 
 ```powershell
 copy .\listener\.env.example .\listener\.env
-```
-
-Keep all secrets in `listener/.env`. Never commit or display that file.
-
-### Run the core only
-
-```powershell
 .\scripts\start-core.bat
 ```
 
-Then open `http://127.0.0.1:8765`.
+Panel: `http://127.0.0.1:8765`.
 
-### Run the full local stack
-
-```powershell
-Start-VoiceLoop.bat
-```
-
-or:
+Full local stack (LM Studio, Qdrant 1.19, Screenpipe, listener,
+VoiceAttack when installed):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start-all.ps1
 ```
 
-The launcher coordinates LM Studio readiness, Qdrant 1.19.0 on
-`127.0.0.1:6333` (persistent volume, `unless-stopped` restart policy,
-healthcheck, log rotation), Screenpipe, the FastAPI listener, VoiceAttack when
-available, a static audit of VoiceAttack actions, and optional smoke testing.
+Full Screenpipe capture is opt-in: `.\scripts\start-all.ps1 -FullScreenpipeCapture`.
 
-By default Screenpipe starts in a reduced privacy mode: OCR/accessibility
-context enabled; audio, keyboard, clipboard, and click capture disabled;
-telemetry disabled; PII removal enabled. Full capture requires an explicit flag:
-
-```powershell
-.\scripts\start-all.ps1 -FullScreenpipeCapture
-```
-
-## API
-
-Important local endpoints:
+Private endpoints need `X-VoiceLoop-Token`. The panel reads it from the
+loopback `GET /api/v1/session`. OpenAPI: `http://127.0.0.1:8765/api/docs`.
 
 ```text
-GET  /api/v1/session
 GET  /api/v1/health
-GET  /api/v1/events
 GET  /api/v1/capabilities
+GET  /api/v1/situation
 POST /api/v1/commands
-GET  /api/v1/commands
 POST /api/v1/commands/{id}/confirm
-POST /api/v1/commands/{id}/cancel
 POST /api/v1/stop
 POST /api/v1/conversation/start
-POST /api/v1/conversation/interrupt
-POST /api/v1/conversation/resume
-POST /api/v1/conversation/stop
 POST /api/v1/listening/start
-POST /api/v1/listening/stop
 GET  /api/v1/memories
-POST /api/v1/memories
 ```
 
-Private endpoints require `X-VoiceLoop-Token`. The panel obtains the token from
-the loopback-only session endpoint. OpenAPI is available locally at
-`http://127.0.0.1:8765/api/docs`.
+## Tests
 
-## Testing
-
-Canonical Windows path, matching CI, from `listener/`:
+From `listener/`, same path as CI:
 
 ```powershell
 cd listener
@@ -308,80 +185,38 @@ cd listener
   ..\scripts\holding-commands\server.py `
   ..\scripts\calibration-phrases\server.py
 .\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q
-.\.venv\Scripts\python.exe -m compileall voiceloop -q
 ```
 
-Pytest isolates `Settings` from `listener/.env`, so local provider keys and
-runtime overrides do not change unit-test behavior.
+Pytest isolates `Settings` from `listener/.env`.
 
-## Privacy Boundaries
+## What is not in Git
 
-Never commit:
-
-- `listener/.env`;
-- `data/`, Qdrant storage, runtime logs, local tokens;
+- `listener/.env`, tokens, SQLite, Qdrant volumes, logs;
 - meeting recordings, transcripts, private voice samples;
-- private runtime screenshots or captured activity;
-- medical or patient data.
+- Screenpipe captures and local screenshots;
+- medical or patient data;
+- private notes under `sources/` (local drop folder only).
 
-This repository contains implementation code, tests, schemas, and
-documentation. It does not contain the private memory or the private evaluation
-corpus.
+## Limits
 
-## Repository Map
-
-```text
-VoiceLoop/
-├── listener/voiceloop/       FastAPI core, routing, memory, voice loop
-│   └── commitments/          experimental commitment analysis (text-only)
-├── panel/                    local browser interface
-├── vectorscope/              embedding and Qdrant diagnostics
-├── tests/                    unit and regression tests
-├── docs/                     architecture, handoff, and planning docs
-├── scripts/                  startup, migration, audit, and capture tools
-├── voiceattack/              constrained voice-command profile docs
-├── uivision/macros/          approved UI automation macros
-├── n8n/                      optional deterministic workflow
-├── data/                     local runtime data, ignored
-└── logs/                     local runtime logs, ignored
-```
-
-## Key Files
-
-- `listener/voiceloop/app.py` — FastAPI application and service wiring.
-- `listener/voiceloop/model_router.py` — conversation/task planner contracts.
-- `listener/voiceloop/actions.py` — local action registry and policy.
-- `listener/voiceloop/qdrant_memory.py` — vector memory backend.
-- `listener/voiceloop/screenpipe_memory.py` — Screenpipe digest-to-memory worker.
-- `listener/voiceloop/threshold_guard.py` — live threshold diagnostics.
-- `listener/voiceloop/commitments/` — experimental commitment analysis.
-- `vectorscope/live.py` — read-only live Qdrant measurement.
-- `scripts/start-all.ps1` — full local stack launcher.
-- `scripts/check_voiceattack_actions.py` — non-executing VoiceAttack audit.
-
-## Known Limitations
-
-- Full reproduction is Windows-specific.
-- Optional providers require credentials and may incur cost.
+- Full stack is Windows-specific.
+- Optional providers need keys and may cost money.
 - Deepgram diarization is not voice biometrics.
-- Screenpipe must be configured carefully because it can observe broad local
-  activity.
-- Hume and n8n are optional and experimental — present in the codebase, but not
-  required and not production features.
-- The commitment layer is an early, text-only experiment.
-- The repository is published without a public open-source license.
+- Screenpipe can see a lot of local activity if you turn capture up.
+- Hume, n8n, commitments, and situation state are not production
+  features.
+- No public open-source license.
 
-## Documentation
+## Docs
 
-- [`docs/PORTFOLIO_PL.md`](docs/PORTFOLIO_PL.md) — portfolio scope in Polish.
-- [`docs/VOICELOOP_ARCHITECTURE_HANDOFF.md`](docs/VOICELOOP_ARCHITECTURE_HANDOFF.md) — detailed Polish architecture handoff.
-- [`docs/COMMITMENT_LAYER.md`](docs/COMMITMENT_LAYER.md) — commitment layer design and non-goals.
-- [`docs/PLAN_2026-08-26.md`](docs/PLAN_2026-08-26.md) — implementation plan and operational notes.
+- [`docs/ARCHITECTURE_CURRENT.md`](docs/ARCHITECTURE_CURRENT.md) — current baseline.
+- [`docs/ARCHITECTURE_INVARIANTS.md`](docs/ARCHITECTURE_INVARIANTS.md) — frozen rules.
+- [`docs/COMMITMENT_LAYER.md`](docs/COMMITMENT_LAYER.md) — commitment analysis.
+- [`docs/PORTFOLIO_PL.md`](docs/PORTFOLIO_PL.md) — Polish portfolio notes.
 - [`vectorscope/README.md`](vectorscope/README.md) — embedding diagnostics.
-- [`voiceattack/INSTRUKCJA.md`](voiceattack/INSTRUKCJA.md) — VoiceAttack setup and command inventory.
+- [`voiceattack/INSTRUKCJA.md`](voiceattack/INSTRUKCJA.md) — VoiceAttack profile.
 
-## License And Portfolio Use
+## License
 
-VoiceLoop is published as a portfolio repository without an open-source license.
-The code and documentation are available for review, but no permission to copy,
-modify, or redistribute them is granted. Local data is not included.
+Published for review as a portfolio repository. No permission is granted
+to copy, modify, or redistribute the code. Local data is not included.

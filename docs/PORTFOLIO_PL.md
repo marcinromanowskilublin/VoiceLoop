@@ -14,8 +14,9 @@ połączeniu trzech tematów:
 2. obsługi rozmowy głosowej z barge-in i polskim STT;
 3. mierzalnej jakości przez lokalny korpus, zamrożony holdout i testy regresji.
 
-Repozytorium pozostaje prywatne. Ten dokument opisuje wyłącznie funkcje możliwe
-do obrony kodem, testami lub kontrolowanym demo.
+Repozytorium jest publiczne jako portfolio do przeglądu, bez licencji OSS.
+Ten dokument opisuje wyłącznie funkcje możliwe do obrony kodem, testami
+lub kontrolowanym demo.
 
 ## Architektura
 

@@ -25,6 +25,14 @@ scripts/staging-voice-eval/
 .codex-tmp/
 artifacts/
 
+# Local reading notes. Keep the empty drop folders; do not publish contents.
+sources/articles/**
+!sources/articles/.gitkeep
+sources/notes/**
+!sources/notes/.gitkeep
+sources/books/**
+!sources/books/.gitkeep
+
 # Local Cursor hook experiments; not part of the shared VoiceLoop runtime.
 .cursor/hooks.json
 .cursor/hooks/
