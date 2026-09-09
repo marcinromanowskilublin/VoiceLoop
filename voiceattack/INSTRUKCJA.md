@@ -1,7 +1,7 @@
 # VoiceAttack Profile v2 PRO
 
 VoiceAttack pełni rolę niezawodnego przycisku głosowego i warstwy awaryjnej.
-Profil ma 670 jawnych polskich wariantów fraz: formy naturalne, krótkie skróty,
+Profil ma 655 jawnych polskich wariantów fraz: formy naturalne, krótkie skróty,
 odmiany i typowe warianty bez polskich znaków. Swobodną wypowiedź po komendzie
 **„Asystent”** albo **„Kursor”** nadal rozpoznaje Deepgram, nie wildcard VoiceAttack.
 
@@ -10,7 +10,7 @@ Routing komend jest automatyczny:
 - przy wyłączonym Deepgramie znane komendy lecą bezpośrednio przez `CommandId`,
 - przy aktywnym Deepgramie znane komendy VoiceAttack są mapowane na naturalny
   tekst i idą ścieżką tekstową, więc nie rozrywają sesji Venice,
-- wypowiedzi spoza 656 wariantów obsługuje `Asystent` albo ciągły nasłuch.
+- wypowiedzi spoza 655 wariantów obsługuje `Asystent` albo ciągły nasłuch.
 
 Gotowy profil:
 
@@ -21,7 +21,7 @@ lokalnego API VoiceLoop na `127.0.0.1:8765`.
 
 Generator odrzuca zduplikowane frazy pomiędzy komendami i komendę bez
 istniejącego skryptu `.vbs`. Dzięki temu rozbudowanie słownika nie tworzy
-niejednoznacznego routingu. Pełne 670 wariantów jest w
+niejednoznacznego routingu. Pełne 655 wariantów jest w
 `scripts\build-voiceattack-profile.py`; niżej są najważniejsze przykłady.
 
 Profil ustawia dla komend VoiceLoop próg rozpoznania `65`. Jeśli w logu
@@ -153,7 +153,7 @@ okna** i nic nie otwiera ani nie zaznacza automatycznie — powiedz „Pierwszy�
 | `Zminimalizuj okno` | `Schowaj okno`, `Ukryj okno`, `Zwiń aktywne okno`, skrót: `Zwiń` | Minimalizuje aktualnie aktywne okno. |
 | `Zminimalizuj okno pod kursorem` | `Schowaj okno pod kursorem`, `Zwiń okno pod myszką` | Minimalizuje okno wskazywane kursorem. |
 | `Zminimalizuj wszystkie` | `Pokaż pulpit`, `Minimalizuj wszystko`, `Zwiń wszystkie okna`, skrót: `Pulpit` | Minimalizuje wszystkie okna i pokazuje pulpit. |
-| `Wyłącz aplikację pod kursorem` | `Zamknij wskazane okno`, `Zamknij program który wskazuję`, `Zamknij to okno` | Po potwierdzeniu wysyła `WM_CLOSE`; nie zabija procesu i pozostawia pytanie o zapis. |
+| `Wyłącz aplikację pod kursorem` | `Zamknij okno pod kursorem`, `Zamknij okno pod myszką` | Tylko przy jawnym „pod kursorem/myszką”. „Zamknij to okno” już tego nie odpala. Po potwierdzeniu `WM_CLOSE`. |
 | `Kopiuj zaznaczony tekst` | `Skopiuj zaznaczony tekst`, `Kopiuj zaznaczony fragment`, skrót: `Kopiuj zaznaczenie` | Kopiuje aktualnie zaznaczony tekst do schowka. |
 | `Kopiuj tekst pod kursorem` | `Kopiuj spod kursora`, `Skopiuj wskazany tekst`, `Wskazany tekst do schowka` | Kopiuje najbliższy tekst udostępniony przez UI Automation. |
 | `Kopiuj email pod kursorem` | `Skopiuj mail pod myszką`, `Adres e-mail do schowka`, `Skopiuj mail który wskazuję` | Kopiuje jeden jednoznaczny adres e-mail z elementu pod kursorem. |

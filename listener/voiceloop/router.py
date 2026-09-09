@@ -1079,7 +1079,7 @@ def _is_minimize_window_under_cursor_command(text: str) -> bool:
     return (
         _contains_any(text, ("minimalizuj", "zminimalizuj", "schowaj", "ukryj", "zwin"))
         and _contains_any(text, ("okno", "aplikacj", "program"))
-        and _contains_any(text, ("kursor", "myszk", "wskaz", "pod mysz", "to okno"))
+        and _contains_any(text, ("kursor", "myszk", "pod mysz"))
     )
 
 
@@ -1122,15 +1122,13 @@ def _is_close_window_under_cursor_command(text: str) -> bool:
             "wylacz aplikacje pod kursorem",
             "zamknij program pod kursorem",
             "wylacz program pod kursorem",
-            "zamknij wskazane okno",
-            "wylacz wskazana aplikacje",
         ),
     ):
         return True
     return (
         _contains_any(text, ("zamknij", "wylacz", "zakoncz"))
         and _contains_any(text, ("okno", "aplikacj", "program"))
-        and _contains_any(text, ("kursor", "myszk", "wskaz", "pod mysz", "to okno"))
+        and _contains_any(text, ("kursor", "myszk", "pod mysz"))
     )
 
 
@@ -1454,7 +1452,10 @@ def _single_step(
     args: dict[str, object] | None = None,
     risk: RiskLevel = RiskLevel.LOW,
 ) -> CommandPlan:
-    confirmation_required = action_id == "open_shell_item"
+    confirmation_required = action_id in {
+        "open_shell_item",
+        "close_window_under_cursor",
+    }
     return CommandPlan(
         request_id=request.request_id,
         intent=intent,

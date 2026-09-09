@@ -146,7 +146,7 @@ def test_voiceattack_action_audit_validates_profile_without_execution() -> None:
     assert report["errors"] == []
     assert report["profile"]["name"] == "VoiceLoop v2 PRO"
     assert report["profile"]["command_count"] == 34
-    assert report["profile"]["phrase_count"] == 670
+    assert report["profile"]["phrase_count"] == 655
     assert report["profile"]["missing_scripts"] == 0
     assert len(report["inventory"]) == 34
 

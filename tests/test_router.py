@@ -252,6 +252,37 @@ def test_close_window_under_cursor_is_medium_risk() -> None:
     assert plan.intent == "close_window_under_cursor"
     assert [step.action_id for step in plan.steps] == ["close_window_under_cursor"]
     assert plan.steps[0].risk is RiskLevel.MEDIUM
+    assert plan.steps[0].confirmation_required is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Zamknij to okno",
+        "Zamknij tę aplikację",
+        "Wyłącz tę aplikację",
+        "Zamknij wskazane okno",
+        "Zamknij program który wskazuję",
+    ],
+)
+def test_generic_close_is_not_window_under_cursor(text: str) -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text=text)
+    )
+
+    assert plan is None or not plan.steps or plan.steps[0].action_id != (
+        "close_window_under_cursor"
+    )
+
+
+def test_generic_minimize_is_not_window_under_cursor() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Schowaj to okno")
+    )
+
+    assert plan is None or not plan.steps or plan.steps[0].action_id != (
+        "minimize_window_under_cursor"
+    )
 
 
 def test_web_search_command_is_deterministic() -> None:

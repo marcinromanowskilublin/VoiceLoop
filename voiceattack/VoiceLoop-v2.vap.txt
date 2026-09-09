@@ -887,7 +887,7 @@
     </Command>
     <Command>
       <Id>d2a03387-5267-5943-8e4b-19458a3cf979</Id>
-      <CommandString>zamknij okno pod kursorem;zamknij wskazane okno;zamknij okno które wskazuję;zamknij okno ktore wskazuje;zamknij okno pod myszką;zamknij okno pod myszka;zamknij aplikację pod kursorem;zamknij aplikacje pod kursorem;wyłącz aplikację pod kursorem;wylacz aplikacje pod kursorem;zamknij aplikację pod myszką;zamknij aplikacje pod myszka;wyłącz aplikację pod myszką;wylacz aplikacje pod myszka;zamknij wskazaną aplikację;zamknij wskazana aplikacje;wyłącz wskazaną aplikację;wylacz wskazana aplikacje;zamknij program pod kursorem;wyłącz program pod kursorem;wylacz program pod kursorem;zamknij wskazany program;zamknij program który wskazuję;zamknij program ktory wskazuje;zamknij to okno;wyłącz tę aplikację;wylacz te aplikacje;zamknij tę aplikację;zamknij te aplikacje</CommandString>
+      <CommandString>zamknij okno pod kursorem;zamknij okno pod myszką;zamknij okno pod myszka;zamknij aplikację pod kursorem;zamknij aplikacje pod kursorem;wyłącz aplikację pod kursorem;wylacz aplikacje pod kursorem;zamknij aplikację pod myszką;zamknij aplikacje pod myszka;wyłącz aplikację pod myszką;wylacz aplikacje pod myszka;zamknij program pod kursorem;wyłącz program pod kursorem;wylacz program pod kursorem</CommandString>
       <ActionSequence>
         <CommandAction>
           <PairingSet>false</PairingSet>
