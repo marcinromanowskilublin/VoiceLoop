@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     routing_v2_execute_min_margin: float = 0.10
     routing_v2_max_subtasks: int = 12
     routing_v2_shadow_timeout_seconds: float = 5.0
+    commitment_shadow_enabled: bool = True
     routing_v2_quality_gate_file: str = "corpus/eval/routing-v2-metrics.json"
     routing_v2_calibration_mode: str = "off"
     routing_v2_calibration_artifact_file: str = (

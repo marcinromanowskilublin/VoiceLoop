@@ -315,6 +315,7 @@ def build_services(settings: Settings) -> Services:
         private_style_instruction=private_style_instruction,
         telemetry=telemetry,
         knowledge_tools=knowledge_tools,
+        commitment_shadow_enabled=settings.commitment_shadow_enabled,
     )
     assistant.configure_stt_threshold(settings.stt_min_action_confidence)
     assistant.configure_speaker_gate(

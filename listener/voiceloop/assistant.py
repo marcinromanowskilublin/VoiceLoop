@@ -122,6 +122,7 @@ class AssistantService:
         private_style_instruction: str | None = None,
         telemetry: ConversationTelemetry | None = None,
         knowledge_tools: KnowledgeToolOrchestrator | None = None,
+        commitment_shadow_enabled: bool = True,
     ) -> None:
         self.memory = memory
         self.events = events
@@ -138,6 +139,7 @@ class AssistantService:
         self.private_style_instruction = private_style_instruction
         self.telemetry = telemetry
         self.knowledge_tools = knowledge_tools
+        self.commitment_shadow_enabled = commitment_shadow_enabled
         self._latest_tool_observations: list[dict[str, object]] = []
         self.action_definitions = action_definitions
         self.dedupe_seconds = dedupe_seconds
@@ -211,6 +213,46 @@ class AssistantService:
         if assistant_text.strip():
             await self.memory.add_message("assistant", assistant_text.strip(), request_id)
 
+    async def _emit_commitment_shadow(self, request: CommandRequest) -> None:
+        if not self.commitment_shadow_enabled:
+            return
+        text = (request.text or "").strip()
+        if not text:
+            return
+        try:
+            from .commitments import TranscriptChunk, analyze_commitments
+
+            speaker = "user"
+            if request.transcript is not None and request.transcript.speaker_ids:
+                speaker = f"speaker_{request.transcript.speaker_ids[0]}"
+            result = analyze_commitments(
+                [
+                    TranscriptChunk(
+                        chunk_id=request.request_id,
+                        speaker=speaker,
+                        text=text,
+                    )
+                ],
+                user_speakers={"user"},
+            )
+            await self.events.publish(
+                "commitment.shadow",
+                {
+                    "request_id": request.request_id,
+                    "item_count": len(result.items),
+                    "items": [
+                        {
+                            "type": item.type.value,
+                            "status": item.status.value,
+                            "direction": item.direction.value,
+                        }
+                        for item in result.items
+                    ],
+                },
+            )
+        except Exception:
+            LOGGER.exception("Commitment shadow failed")
+
     async def handle(self, request: CommandRequest) -> CommandAccepted:
         safety_plan = deterministic_plan(request)
         if safety_plan and safety_plan.intent == "stop":
@@ -271,6 +313,7 @@ class AssistantService:
                 "text": input_text,
             },
         )
+        await self._emit_commitment_shadow(request)
         if self.telemetry is not None:
             await self.telemetry.mark_request(request.request_id, "request_received")
 
