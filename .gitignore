@@ -22,6 +22,8 @@ scripts/staging-voice-eval/
 # Local agent/runtime scratch data. These can contain huge models, virtualenvs,
 # transcripts, screenshots, and private local artifacts.
 .codex_tmp/
+.codex-tmp/
+artifacts/
 
 # Local Cursor hook experiments; not part of the shared VoiceLoop runtime.
 .cursor/hooks.json
