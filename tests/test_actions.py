@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -329,6 +329,437 @@ def test_close_window_under_cursor_requires_confirmation(tmp_path) -> None:
 
     assert step.risk is RiskLevel.MEDIUM
     assert step.confirmation_required is True
+
+
+def test_shell_actions_have_required_policy(tmp_path) -> None:
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    hover = registry.enforce_policy(
+        PlanStep(action_id="hover_shell_item", args={"query": "A Way Out"})
+    )
+    opened = registry.enforce_policy(
+        PlanStep(action_id="open_shell_item", args={"query": "Mortal Shell"})
+    )
+    assert hover.risk is RiskLevel.LOW
+    assert hover.confirmation_required is False
+    assert opened.risk is RiskLevel.MEDIUM
+    assert opened.confirmation_required is True
+    definitions = {item["id"]: item for item in registry.definitions()}
+    assert definitions["hover_shell_item"]["execution_layer"] == 2
+    assert definitions["open_shell_item"]["execution_layer"] == 2
+
+
+@pytest.mark.asyncio
+async def test_open_shell_target_is_bound_before_confirmation(tmp_path, monkeypatch) -> None:
+    from voiceloop.windows_shell import ShellItem, WindowsShellLocator
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    target = ShellItem(
+        "Mortal Shell", (1, 2, 30, 40), "ListItem", "Progman", 12, (4, 5)
+    )
+    monkeypatch.setattr(WindowsShellLocator, "resolve", lambda self, query: target)
+    plan = CommandPlan(
+        request_id="request",
+        intent="open_shell_item",
+        steps=[
+            PlanStep(
+                action_id="open_shell_item",
+                args={"query": "Mortal Shell"},
+                risk=RiskLevel.MEDIUM,
+            )
+        ],
+    )
+
+    await registry.bind_execution_targets(plan)
+
+    assert plan.steps[0].args["expected_name"] == "Mortal Shell"
+    assert plan.steps[0].args["expected_runtime_id"] == [4, 5]
+
+
+def _folder_item(name: str, runtime: int, *, is_folder: bool | None, extension: str = ""):
+    from voiceloop.windows_shell import ShellItem
+
+    return ShellItem(
+        name,
+        (0, 0, 10, 10),
+        "ListItem",
+        "CabinetWClass",
+        99,
+        (runtime,),
+        is_folder=is_folder,
+        extension=extension,
+    )
+
+
+def test_cursor_and_active_folder_actions_are_low_risk_without_confirmation(tmp_path) -> None:
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+
+    for action_id, args in (
+        ("select_shell_folder", {"query": "Projekty"}),
+        ("select_shell_file", {"query": "Raport"}),
+        ("select_shell_items_by_extension", {"extension": "pdf"}),
+        ("select_shell_items_by_letter", {"letter": "a"}),
+        ("select_listed_candidate", {"index": 1}),
+        ("cursor_center", {}),
+        ("cursor_return", {}),
+        ("snap_window_layout", {"layout": "left_half"}),
+    ):
+        step = registry.enforce_policy(PlanStep(action_id=action_id, args=args))
+        assert step.risk is RiskLevel.LOW, action_id
+        assert step.confirmation_required is False, action_id
+
+
+@pytest.mark.asyncio
+async def test_select_shell_folder_confident_match_selects_via_uia(tmp_path, monkeypatch) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    target = _folder_item("Projekty", 1, is_folder=True)
+    monkeypatch.setattr(ws, "locate_active_folder_handle", lambda: 555)
+    monkeypatch.setattr(
+        ws.WindowsShellLocator,
+        "enumerate_active_folder_items",
+        lambda self, handle: [target],
+    )
+    selected: list = []
+    monkeypatch.setattr(
+        ws,
+        "select_shell_items",
+        lambda handle, targets: selected.append((handle, targets)) or targets,
+    )
+
+    message, data = await registry._select_shell_folder({"query": "Projekty"})
+
+    assert "Projekty" in message
+    assert selected == [(555, [target])]
+    assert data["name"] == "Projekty"
+    assert registry._last_shell_candidates is None
+
+
+@pytest.mark.asyncio
+async def test_select_shell_file_ambiguous_returns_candidates_without_selecting(
+    tmp_path, monkeypatch
+) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    candidates = [
+        _folder_item("Raport styczen", 1, is_folder=False),
+        _folder_item("Raport luty", 2, is_folder=False),
+    ]
+    monkeypatch.setattr(ws, "locate_active_folder_handle", lambda: 555)
+    monkeypatch.setattr(
+        ws.WindowsShellLocator,
+        "enumerate_active_folder_items",
+        lambda self, handle: candidates,
+    )
+    monkeypatch.setattr(ws, "match_active_folder_item", lambda *a, **k: (None, candidates))
+    select_calls: list = []
+    monkeypatch.setattr(
+        ws, "select_shell_items", lambda handle, targets: select_calls.append(targets)
+    )
+
+    message, data = await registry._select_shell_file({"query": "Raport"})
+
+    assert "pierwszy" in message
+    assert select_calls == []
+    assert len(data["candidates"]) == 2
+    assert registry._last_shell_candidates == (555, candidates)
+
+
+@pytest.mark.asyncio
+async def test_select_shell_by_extension_selects_all_pdfs(tmp_path, monkeypatch) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    pdf_a = _folder_item("Faktura.pdf", 1, is_folder=False, extension="pdf")
+    pdf_b = _folder_item("Umowa.pdf", 2, is_folder=False, extension="pdf")
+    jpg = _folder_item("Zdjecie.jpg", 3, is_folder=False, extension="jpg")
+    monkeypatch.setattr(ws, "locate_active_folder_handle", lambda: 777)
+    monkeypatch.setattr(
+        ws.WindowsShellLocator,
+        "enumerate_active_folder_items",
+        lambda self, handle: [pdf_a, pdf_b, jpg],
+    )
+    selected: list = []
+    monkeypatch.setattr(
+        ws,
+        "select_shell_items",
+        lambda handle, targets: selected.append((handle, targets)) or targets,
+    )
+
+    message, data = await registry._select_shell_by_extension({"extension": "PDF"})
+
+    assert data["count"] == 2
+    assert selected == [(777, [pdf_a, pdf_b])]
+    assert "pdf" in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_select_shell_by_letter_selects_matching_items(tmp_path, monkeypatch) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    atak = _folder_item("Atak.pdf", 1, is_folder=False, extension="pdf")
+    budzet = _folder_item("Budzet.xlsx", 2, is_folder=False, extension="xlsx")
+    monkeypatch.setattr(ws, "locate_active_folder_handle", lambda: 777)
+    monkeypatch.setattr(
+        ws.WindowsShellLocator,
+        "enumerate_active_folder_items",
+        lambda self, handle: [atak, budzet],
+    )
+    selected: list = []
+    monkeypatch.setattr(
+        ws,
+        "select_shell_items",
+        lambda handle, targets: selected.append(targets) or targets,
+    )
+
+    message, data = await registry._select_shell_by_letter({"letter": "a"})
+
+    assert data["count"] == 1
+    assert selected == [[atak]]
+    assert "Atak.pdf" in message
+
+
+@pytest.mark.asyncio
+async def test_select_listed_candidate_revalidates_before_selecting(
+    tmp_path, monkeypatch
+) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    first_candidate = _folder_item("Raport styczen", 1, is_folder=False)
+    second_candidate = _folder_item("Raport luty", 2, is_folder=False)
+    registry._remember_shell_candidates(555, [first_candidate, second_candidate])
+
+    fresh = _folder_item("Raport luty", 2, is_folder=False)
+    monkeypatch.setattr(ws, "locate_active_folder_handle", lambda: 555)
+    monkeypatch.setattr(ws, "revalidate_active_folder_item", lambda handle, target: fresh)
+    selected: list = []
+    monkeypatch.setattr(
+        ws, "select_shell_items", lambda handle, targets: selected.append(targets) or targets
+    )
+
+    message, data = await registry._select_listed_candidate({"index": 2})
+
+    assert "Raport luty" in message
+    assert selected == [[fresh]]
+    assert registry._last_shell_candidates is None
+
+
+@pytest.mark.asyncio
+async def test_select_listed_candidate_rejects_out_of_range_index(tmp_path) -> None:
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    registry._remember_shell_candidates(555, [_folder_item("Raport", 1, is_folder=False)])
+
+    with pytest.raises(RuntimeError, match="Nie ma kandydata"):
+        await registry._select_listed_candidate({"index": 3})
+
+
+@pytest.mark.asyncio
+async def test_select_listed_candidate_requires_same_active_folder(tmp_path, monkeypatch) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    registry._remember_shell_candidates(555, [_folder_item("Raport", 1, is_folder=False)])
+    monkeypatch.setattr(ws, "locate_active_folder_handle", lambda: 999)
+
+    with pytest.raises(RuntimeError, match="zmienił się"):
+        await registry._select_listed_candidate({"index": 1})
+
+
+@pytest.mark.asyncio
+async def test_select_listed_candidate_without_stored_candidates_fails(tmp_path) -> None:
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+
+    with pytest.raises(RuntimeError, match="Nie ma zapamiętanych kandydatów"):
+        await registry._select_listed_candidate({"index": 1})
+
+
+@pytest.mark.asyncio
+async def test_cursor_center_then_return_restores_previous_position(
+    tmp_path, monkeypatch
+) -> None:
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    monkeypatch.setattr(ws, "get_cursor_position", lambda: (11, 22))
+    monkeypatch.setattr(ws, "center_cursor", lambda: (960, 540))
+
+    message, data = await registry._cursor_center({})
+
+    assert data == {"x": 960, "y": 540}
+    assert registry._last_cursor_position == (11, 22)
+    assert "środek" in message
+
+    restored: list = []
+    monkeypatch.setattr(
+        ws, "set_cursor_position", lambda position: restored.append(position)
+    )
+
+    message2, data2 = await registry._cursor_return({})
+
+    assert restored == [(11, 22)]
+    assert data2 == {"x": 11, "y": 22}
+    assert registry._last_cursor_position is None
+
+
+@pytest.mark.asyncio
+async def test_cursor_return_without_previous_position_fails(tmp_path) -> None:
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+
+    with pytest.raises(RuntimeError, match="Nie mam zapamiętanej"):
+        await registry._cursor_return({})
+
+
+@pytest.mark.asyncio
+async def test_snap_window_layout_computes_rect_from_monitor_work_area(
+    tmp_path, monkeypatch
+) -> None:
+    import sys
+
+    import voiceloop.windows_shell as ws
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    set_window_pos = Mock()
+    win32con = SimpleNamespace(
+        SW_RESTORE=9,
+        SWP_NOZORDER=0x0004,
+        SWP_NOACTIVATE=0x0010,
+    )
+    win32gui = SimpleNamespace(
+        GetForegroundWindow=lambda: 4242,
+        IsWindow=lambda hwnd: True,
+        IsWindowVisible=lambda hwnd: True,
+        GetClassName=lambda hwnd: "Chrome_WidgetWin_1",
+        GetWindowText=lambda hwnd: "Mortal Shell",
+        IsIconic=lambda hwnd: False,
+        IsZoomed=lambda hwnd: False,
+        ShowWindow=lambda hwnd, cmd: None,
+        SetWindowPos=set_window_pos,
+    )
+    monkeypatch.setitem(sys.modules, "win32con", win32con)
+    monkeypatch.setitem(sys.modules, "win32gui", win32gui)
+    monkeypatch.setattr(ws, "monitor_work_area_for_window", lambda hwnd: (0, 0, 1920, 1080))
+
+    message, data = await registry._snap_window_layout({"layout": "right_third"})
+
+    assert data["rect"] == [1280, 0, 1920, 1080]
+    assert data["layout"] == "right_third"
+    assert "Mortal Shell" in message
+    set_window_pos.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_snap_window_layout_blocks_protected_system_windows(
+    tmp_path, monkeypatch
+) -> None:
+    import sys
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    win32con = SimpleNamespace(SW_RESTORE=9, SWP_NOZORDER=0x0004, SWP_NOACTIVATE=0x0010)
+    win32gui = SimpleNamespace(
+        GetForegroundWindow=lambda: 1,
+        IsWindow=lambda hwnd: True,
+        IsWindowVisible=lambda hwnd: True,
+        GetClassName=lambda hwnd: "Shell_TrayWnd",
+    )
+    monkeypatch.setitem(sys.modules, "win32con", win32con)
+    monkeypatch.setitem(sys.modules, "win32gui", win32gui)
+
+    with pytest.raises(RuntimeError, match="pulpitu"):
+        await registry._snap_window_layout({"layout": "left_half"})
+
+
+@pytest.mark.asyncio
+async def test_snap_window_layout_rejects_invalid_window_handle(tmp_path, monkeypatch) -> None:
+    import sys
+
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+    win32con = SimpleNamespace(SW_RESTORE=9, SWP_NOZORDER=0x0004, SWP_NOACTIVATE=0x0010)
+    win32gui = SimpleNamespace(
+        GetForegroundWindow=lambda: 0,
+    )
+    monkeypatch.setitem(sys.modules, "win32con", win32con)
+    monkeypatch.setitem(sys.modules, "win32gui", win32gui)
+
+    with pytest.raises(RuntimeError, match="Nie mogę ustalić aktywnego okna"):
+        await registry._snap_window_layout({"layout": "left_half"})
+
+
+def test_snap_window_layout_rejects_unknown_layout_before_touching_windows(tmp_path) -> None:
+    registry = ActionRegistry(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        MemoryStore(tmp_path / "voice.db"),
+        WindowsTTS(),
+    )
+
+    with pytest.raises(ValueError, match="Nieznany układ okna"):
+        registry._snap_window_layout_sync({"layout": "diagonal"})
 
 
 def test_search_web_action_is_registered_as_low_risk(tmp_path) -> None:

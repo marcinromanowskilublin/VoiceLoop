@@ -1,9 +1,9 @@
 # VoiceAttack Profile v2 PRO
 
 VoiceAttack pełni rolę niezawodnego przycisku głosowego i warstwy awaryjnej.
-Profil ma 656 jawnych polskich wariantów fraz: formy naturalne, krótkie skróty,
+Profil ma 670 jawnych polskich wariantów fraz: formy naturalne, krótkie skróty,
 odmiany i typowe warianty bez polskich znaków. Swobodną wypowiedź po komendzie
-**„Asystent”** nadal rozpoznaje Deepgram, nie wildcard VoiceAttack.
+**„Asystent”** albo **„Kursor”** nadal rozpoznaje Deepgram, nie wildcard VoiceAttack.
 
 Routing komend jest automatyczny:
 
@@ -16,12 +16,12 @@ Gotowy profil:
 
 `C:\Users\marci\VoiceLoop\voiceattack\VoiceLoop-v2.vap`
 
-Profil nazywa się **VoiceLoop v2 PRO**, zawiera 33 komendy i korzysta wyłącznie z
+Profil nazywa się **VoiceLoop v2 PRO**, zawiera 34 komendy i korzysta wyłącznie z
 lokalnego API VoiceLoop na `127.0.0.1:8765`.
 
 Generator odrzuca zduplikowane frazy pomiędzy komendami i komendę bez
 istniejącego skryptu `.vbs`. Dzięki temu rozbudowanie słownika nie tworzy
-niejednoznacznego routingu. Pełne 656 wariantów jest w
+niejednoznacznego routingu. Pełne 670 wariantów jest w
 `scripts\build-voiceattack-profile.py`; niżej są najważniejsze przykłady.
 
 Profil ustawia dla komend VoiceLoop próg rozpoznania `65`. Jeśli w logu
@@ -67,11 +67,84 @@ Dwustopniowy tryb jest celowy. Polski Deepgram znacznie lepiej rozpoznaje dowoln
 zdania niż wildcard systemowego silnika VoiceAttack. Stałe polecenia, takie jak
 „otwórz kalendarz”, wypowiadaj bez poprzedzania ich słowem „Asystent”.
 
-## Pakiet komend (33) z parafrazami
+## Paleta sterowania kursorem i aktywnym folderem
+
+„Kursor” działa identycznie jak „Asystent”, ale z innym pytaniem i pod kątem
+bezpiecznego sterowania kursorem myszy oraz aktywnym folderem:
+
+1. Powiedz **„Kursor”** (albo parafrazę: „Sterowanie kursorem”, „Ruch kursora”,
+   „Mysz”, „Wskaźnik”).
+2. VoiceAttack uruchomi `scripts\va\cursor.vbs`, który wywoła
+   `POST /api/v1/listening/once?mode=cursor` — wyłącznie lokalne API VoiceLoop.
+3. VoiceLoop powie: **„Gdzie przesunąć kursor lub co zrobić w aktywnym folderze?”**
+4. Wypowiedz jedną z komend poniżej. Deepgram rozpozna ją i przekaże jako pełny
+   tekst do bezpiecznego routera deterministycznego VoiceLoop.
+
+**„Aktywny folder”** oznacza wyłącznie okno Eksploratora, które w danym momencie
+znajduje się *pod kursorem myszy* — nigdy pulpit i nigdy inne okno wybrane
+automatycznie. Jeśli pod kursorem nie ma okna Eksploratora, VoiceLoop odpowie
+błędem i nic nie zaznaczy.
+
+### Komendy palety
+
+| Wypowiedź | Akcja | Ryzyko / potwierdzenie |
+|---|---|---|
+| `Najedź na ATAK` | `hover_shell_item` — przesuwa kursor na widoczną ikonę/element; nie klika. | niskie |
+| `Przesuń kursor na Mortal Shell` | `hover_shell_item` | niskie |
+| `Wróć kursorem` | `cursor_return` — przywraca pozycję kursora sprzed ostatniego przesunięcia. | niskie |
+| `Kursor na środek` | `cursor_center` — przesuwa kursor na środek monitora, na którym aktualnie jest. | niskie |
+| `Zaznacz folder NAZWA` | `select_shell_folder` — zaznacza jednoznaczny folder w aktywnym folderze przez UIA `SelectionItem`. | niskie |
+| `Zaznacz plik NAZWA` | `select_shell_file` — jak wyżej, dla pliku. | niskie |
+| `Zaznacz wszystkie PDF` | `select_shell_items_by_extension` — zaznacza wszystkie pliki danego rozszerzenia (wielokrotny UIA `SelectionItem`, bez przeciągania). | niskie |
+| `Zaznacz wszystkie na literę A` | `select_shell_items_by_letter` | niskie |
+| `Pierwszy` / `Drugi` / `Trzeci` | `select_listed_candidate` — wybiera jednego z 2-3 kandydatów zwróconych, gdy nazwa była niejednoznaczna. | niskie |
+| `Otwórz Mortal Shell` / `Uruchom A Way Out` | `open_shell_item` — UIA Invoke albo Select+Enter, **zawsze wymaga potwierdzenia**. | **średnie, potwierdzenie** |
+| `Przesuń okno na lewą połowę` / `prawą połowę` / `lewą jedną trzecią` / `środkową jedną trzecią` / `prawą jedną trzecią` / `lewą górną ćwiartkę` / `lewą dolną ćwiartkę` / `prawą górną ćwiartkę` / `prawą dolną ćwiartkę` | `snap_window_layout` — liczy prostokąt względem obszaru roboczego monitora aktywnego okna; nie używa menu Snap Layout. | niskie |
+| `Stop` | zatrzymuje nasłuch, TTS i bieżącą akcję jak zawsze. | — |
+
+### Niejednoznaczne nazwy
+
+Router najpierw szuka dopasowania dokładnego (exact match). Gdy nie ma
+dokładnego trafienia, dopasowanie rozmyte wymaga wysokiego podobieństwa oraz
+wystarczającego marginesu nad drugim kandydatem, inaczej VoiceLoop nie wykonuje
+żadnego ruchu. Przy pewnym wyniku wybierany jest jeden cel. Przy niepewności
+VoiceLoop wymienia od 2 do 3 najlepszych kandydatów **z aktywnego, zweryfikowanego
+okna** i nic nie otwiera ani nie zaznacza automatycznie — powiedz „Pierwszy”,
+„Drugi” albo „Trzeci”, żeby wybrać.
+
+### Przykłady
+
+- **„Kursor”** → **„Najedź na ATAK”** — kursor przesuwa się na ikonę/element „ATAK”.
+- **„Kursor”** → **„Zaznacz wszystkie PDF”** — zaznacza wszystkie pliki PDF w
+  aktywnym folderze pod kursorem.
+- **„Kursor”** → **„Przesuń okno na prawą jedną trzecią”** — aktywne okno zajmuje
+  prawą jedną trzecią obszaru roboczego swojego monitora.
+- **„Kursor”** → **„Otwórz Mortal Shell”** → **„Potwierdź”** — cel jest wiązany od
+  razu, ale otwarcie następuje dopiero po ponownej walidacji UIA po słowie
+  „Potwierdź”.
+
+### Bezpieczeństwo palety
+
+- Zero AutoHotkey, zero współrzędnych podawanych przez model językowy i zero
+  ślepych kliknięć — kursor przesuwa wyłącznie zweryfikowany, jednoznaczny cel
+  UIA, a zaznaczanie odbywa się przez UIA `SelectionItem` (`Select` /
+  `AddToSelection`), nigdy przez przeciąganie.
+- „Aktywny folder” nigdy nie spada automatycznie na pulpit ani na inne okno —
+  gdy pod kursorem nie jest Eksplorator, akcja kończy się błędem po polsku.
+- „Otwórz”/„Uruchom” to ryzyko średnie i zawsze wymaga „Potwierdź”. Cel jest
+  wiązany od razu (przed potwierdzeniem), a po potwierdzeniu VoiceLoop
+  ponownie waliduje ten sam element przez UIA, zanim go otworzy (UIA Invoke
+  albo Select+Enter — nigdy podwójne kliknięcie).
+- Układy okien liczą się względem obszaru roboczego monitora aktywnego okna,
+  sprawdzają poprawność uchwytu okna i blokują pulpit, pasek zadań oraz inne
+  chronione klasy systemowe. Nie korzystają z menu Snap Layout systemu Windows.
+
+## Pakiet komend (34) z parafrazami
 
 | Komenda główna | Przykładowe parafrazy | Działanie |
 |---|---|---|
 | `Asystent` | `Hej asystent`, `Słuchaj asystencie`, `Mam polecenie`, skrót: `Asys` | Otwiera jednorazowy nasłuch dowolnego polecenia. |
+| `Kursor` | `Sterowanie kursorem`, `Ruch kursora`, `Mysz`, `Wskaźnik` | Otwiera jednorazowy nasłuch dla palety sterowania kursorem i aktywnym folderem. |
 | `Zapisz notatkę` | `Nowa notatka`, `Utwórz notatkę`, `Zanotuj to`, skrót: `Notka` | Pyta o treść i zapisuje ją kontrolowaną akcją UI.Vision. |
 | `Zapamiętaj` | `Zapamiętaj to`, `Pamiętaj to`, `Zapisz to w pamięci`, skrót: `Pamiętaj` | Pyta o fakt i przygotowuje lokalny zapis wymagający zgody. |
 | `Co robiłem ostatnio` | `Co się działo na ekranie`, `Pokaż historię ekranu`, `Podsumuj aktywność`, skrót: `Aktywność` | Czyta lokalne podsumowanie aktywności Screenpipe. |
@@ -167,6 +240,33 @@ Zgoda wygasa po 5 minutach. To zabezpiecza pamięć przed przypadkowym zapisem
 Stare profile `VoiceLoop` i `VoiceLoop v2` mogą pozostać jako archiwum, ale
 aktywny powinien być tylko `VoiceLoop v2 PRO`.
 
+### Częsty błąd: komendy „wsiąkają” w inny profil
+
+Objaw: „Kursor” bywa losowo rozpoznawany jako coś zupełnie innego, mimo
+niskiego szumu. W logu VoiceAttack widać na przemian odrzucenia z progiem
+`.../65` (to są komendy VoiceLoop — profil ustawia im próg 65) i z progiem
+`.../75` lub innym (to są **cudze, stare komendy** z tego samego profilu).
+Potwierdzony w nagraniu przypadek: stara komenda z frazą „otwórz cursor” (próg
+75) uruchamiająca edytor `Cursor.exe`, obok naszej komendy „kursor” (próg 65,
+`cursor.vbs`) — silnik czasem wybiera tę starą zamiast naszej.
+
+Przyczyna: w **More Actions** VoiceAttack ma dwie różne opcje — **Import
+Profile** (tworzy/nadpisuje osobny profil) i **Import Commands** (dogrywa
+komendy do profilu, który jest akurat aktywny). Użycie tej drugiej opcji, albo
+zgoda na „scalenie” zamiast „nadpisania” przy imporcie, miesza komendy
+VoiceLoop ze starymi, niepowiązanymi komendami w jednym profilu (np. w
+domyślnym `My Profile`).
+
+Naprawa:
+1. Sprawdź, który profil jest aktywny (dropdown `Profile` u góry okna VoiceAttack).
+2. Jeśli widzisz w nim komendy spoza kategorii „VoiceLoop v2 PRO” (np. „otwórz
+   cursor”, „hello”) — usuń ten profil całkowicie (**Delete Profile**), żeby
+   nie dało się go przypadkiem znowu aktywować.
+3. Zrób od nowa czysty **Import Profile** ze świeżo przebudowanego
+   `VoiceLoop-v2.vap` i przy imporcie wybierz nadpisanie, nie scalenie.
+4. Ustaw jako aktywny wyłącznie **VoiceLoop v2 PRO** i sprawdź w edytorze
+   komend, że kategoria ma dokładnie 34 pozycje (tyle generuje skrypt).
+
 ## Test przyjęcia
 
 1. **„Test pętli”** → „Pętla VoiceLoop działa”.
@@ -178,7 +278,11 @@ aktywny powinien być tylko `VoiceLoop v2 PRO`.
 7. Najedź na testowe okno → **„Wyłącz aplikację pod kursorem”** → dopiero
    **„Potwierdź”** wysyła zamknięcie.
 8. **„Zapamiętaj”** → podaj fakt → **„Potwierdź”** → „Zapamiętano”.
-9. **„Stop teraz”** → aktywne zadania i głos zostają przerwane.
+9. **„Kursor”** → **„Najedź na ATAK”** → kursor przesuwa się na wskazany element.
+10. Wskaż kursorem okno Eksploratora → **„Kursor”** → **„Zaznacz wszystkie PDF”**
+    → zaznaczają się wszystkie pliki PDF w tym oknie.
+11. **„Kursor”** → **„Otwórz Mortal Shell”** → dopiero **„Potwierdź”** otwiera element.
+12. **„Stop teraz”** → aktywne zadania i głos zostają przerwane.
 
 ## Bezpieczeństwo
 

@@ -62,6 +62,50 @@ def test_unknown_app_is_not_open_app() -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "action_id", "query"),
+    [
+        ("Najedź na A Way Out", "hover_shell_item", "A Way Out"),
+        ("Przesuń kursor na Mortal Shell", "hover_shell_item", "Mortal Shell"),
+        ("Otwórz Mortal Shell", "open_shell_item", "Mortal Shell"),
+    ],
+)
+def test_shell_item_commands_are_deterministic(text, action_id, query) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.steps[0].action_id == action_id
+    assert plan.steps[0].args == {"query": query}
+    assert plan.steps[0].confirmation_required is (action_id == "open_shell_item")
+
+
+def test_known_open_commands_keep_priority_over_shell_items() -> None:
+    for text, expected in (
+        ("Otwórz WhatsApp", "open_app"),
+        ("Otwórz kalendarz", "open_calendar"),
+        ("Otwórz Ten komputer", "open_folder"),
+        ("Otwórz Gemini", "open_gemini_chat"),
+    ):
+        plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+        assert plan is not None
+        assert plan.steps[0].action_id == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "Czy potrafisz otworzyć Mortal Shell?",
+        "Jak mam powiedzieć, żeby otworzyć A Way Out?",
+    ),
+)
+def test_shell_capability_questions_do_not_execute(text: str) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.intent == "list_capabilities"
+    assert [step.action_id for step in plan.steps] == ["list_capabilities"]
+
+
+@pytest.mark.parametrize(
     "text",
     (
         "Czy potrafisz otworzyć WhatsApp?",
@@ -431,6 +475,172 @@ def test_remember_extracts_content_and_requires_policy_confirmation() -> None:
         "kind": "fact",
     }
     assert "potwierdź" in plan.response_text
+
+
+# ---------------------------------------------------------------------------
+# Paleta sterowania kursorem i aktywnym folderem.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "Kursor na środek",
+        "Wyśrodkuj kursor",
+        "Przesuń kursor na środek ekranu",
+    ),
+)
+def test_cursor_center_commands_are_deterministic(text: str) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.intent == "cursor_center"
+    assert [step.action_id for step in plan.steps] == ["cursor_center"]
+    assert plan.steps[0].confirmation_required is False
+    assert plan.steps[0].risk is RiskLevel.LOW
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "Wróć kursorem",
+        "Przywróć kursor",
+        "Przywróć pozycję kursora",
+    ),
+)
+def test_cursor_return_commands_are_deterministic(text: str) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.intent == "cursor_return"
+    assert [step.action_id for step in plan.steps] == ["cursor_return"]
+    assert plan.steps[0].confirmation_required is False
+
+
+def test_stop_command_takes_priority_and_clears_steps() -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text="Stop"))
+
+    assert plan is not None
+    assert plan.intent == "stop"
+    assert plan.steps == []
+
+
+@pytest.mark.parametrize(
+    ("text", "layout"),
+    [
+        ("Przesuń okno na lewą połowę", "left_half"),
+        ("Przesuń okno na prawą połowę", "right_half"),
+        ("Przesuń okno na lewą jedną trzecią", "left_third"),
+        ("Przesuń okno na środkową jedną trzecią", "center_third"),
+        ("Przesuń okno na prawą jedną trzecią", "right_third"),
+        ("Przesuń okno na lewą górną ćwiartkę", "top_left_quarter"),
+        ("Przesuń okno na lewą dolną ćwiartkę", "bottom_left_quarter"),
+        ("Przesuń okno na prawą górną ćwiartkę", "top_right_quarter"),
+        ("Przesuń okno na prawą dolną ćwiartkę", "bottom_right_quarter"),
+    ],
+)
+def test_window_layout_commands_are_deterministic(text: str, layout: str) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.intent == "snap_window_layout"
+    assert plan.steps[0].action_id == "snap_window_layout"
+    assert plan.steps[0].args == {"layout": layout}
+    assert plan.steps[0].confirmation_required is False
+
+
+@pytest.mark.parametrize(
+    ("text", "action_id", "query"),
+    [
+        ("Zaznacz folder Projekty", "select_shell_folder", "Projekty"),
+        ("Zaznacz plik Raport Q2", "select_shell_file", "Raport Q2"),
+    ],
+)
+def test_select_shell_target_commands_are_deterministic(text, action_id, query) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.steps[0].action_id == action_id
+    assert plan.steps[0].args == {"query": query}
+    assert plan.steps[0].confirmation_required is False
+
+
+def test_select_by_extension_command_is_deterministic() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Zaznacz wszystkie PDF")
+    )
+
+    assert plan is not None
+    assert plan.steps[0].action_id == "select_shell_items_by_extension"
+    assert plan.steps[0].args == {"extension": "PDF"}
+
+
+def test_select_by_letter_command_is_deterministic() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Zaznacz wszystkie na literę A")
+    )
+
+    assert plan is not None
+    assert plan.steps[0].action_id == "select_shell_items_by_letter"
+    assert plan.steps[0].args == {"letter": "A"}
+
+
+@pytest.mark.parametrize(
+    ("text", "index"),
+    [
+        ("pierwszy", 1),
+        ("drugi", 2),
+        ("trzeci", 3),
+    ],
+)
+def test_candidate_ordinal_commands_are_deterministic(text: str, index: int) -> None:
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.steps[0].action_id == "select_listed_candidate"
+    assert plan.steps[0].args == {"index": index}
+    assert plan.steps[0].confirmation_required is False
+
+
+def test_open_shell_item_still_requires_confirmation_alongside_new_commands() -> None:
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Uruchom Mortal Shell")
+    )
+
+    assert plan is not None
+    assert plan.steps[0].action_id == "open_shell_item"
+    assert plan.steps[0].args == {"query": "Mortal Shell"}
+    assert plan.steps[0].confirmation_required is True
+    assert plan.steps[0].risk is RiskLevel.MEDIUM
+
+
+def test_cursor_commands_take_priority_over_generic_hover() -> None:
+    # "Kursor na środek" nie powinno zostać pomylone z "najedź na ..." itp.
+    plan = deterministic_plan(
+        CommandRequest(source=CommandSource.DEEPGRAM, text="Kursor na środek")
+    )
+
+    assert plan is not None
+    assert plan.steps[0].action_id == "cursor_center"
+
+
+@pytest.mark.parametrize(
+    ("text", "action_id", "query"),
+    [
+        ("Przesuń kursor na folder wizyta", "hover_shell_item", "wizyta"),
+        ("Najedź na plik Faktura", "hover_shell_item", "Faktura"),
+        ("Otwórz folder wizyta", "open_shell_item", "wizyta"),
+        ("Uruchom plik Raport Q2", "open_shell_item", "Raport Q2"),
+    ],
+)
+def test_hover_and_open_strip_folder_plik_qualifier(text, action_id, query) -> None:
+    # Naturalna fraza "na folder NAZWA"/"na plik NAZWA" musi trafić w samą nazwę,
+    # żeby dopasowanie rozmyte nie odpadło z powodu dodatkowego słowa.
+    plan = deterministic_plan(CommandRequest(source=CommandSource.DEEPGRAM, text=text))
+
+    assert plan is not None
+    assert plan.steps[0].action_id == action_id
+    assert plan.steps[0].args == {"query": query}
 
 
 def test_stop_has_no_executable_step() -> None:

@@ -12,7 +12,7 @@ param(
         'cancel-last'
     )]
     [string]$Operation = 'command',
-    [ValidateSet('assistant', 'note', 'remember')]
+    [ValidateSet('assistant', 'note', 'remember', 'cursor')]
     [string]$Mode = 'assistant'
 )
 

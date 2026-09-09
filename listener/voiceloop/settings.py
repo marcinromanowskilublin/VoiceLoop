@@ -168,6 +168,14 @@ class Settings(BaseSettings):
     screenpipe_vector_memory_enabled: bool = False
     screenpipe_vector_poll_seconds: int = 300
     screenpipe_vector_recent_minutes: int = 10
+    windows_context_enabled: bool = True
+    windows_context_roots: str = ""
+    windows_context_reconcile_seconds: int = 120
+    windows_context_ttl_seconds: int = 300
+    windows_context_retention_days: int = 90
+    windows_context_max_records: int = 10000
+    windows_context_journal_limit: int = 1000
+    windows_context_screenpipe_cache_limit: int = 500
 
     voiceattack_exe: str | None = None
     voiceattack_registration_key: SecretStr | None = None

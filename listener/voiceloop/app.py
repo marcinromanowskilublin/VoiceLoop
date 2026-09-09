@@ -60,10 +60,12 @@ from .screenpipe import ScreenpipeClient
 from .screenpipe_deepgram import ScreenpipeMeetingTranscriber
 from .screenpipe_memory import ScreenpipeVectorMemoryWorker
 from .settings import Settings, get_settings
+from .situation import SituationStateV1, SituationStore
 from .threshold_guard import ThresholdGuard
 from .tts import WindowsTTS
 from .voice_conversation import VoiceConversationCoordinator
 from .web_search import WebSearchClient
+from .windows_context import WindowsContextService
 
 LOGGER = logging.getLogger("voiceloop")
 
@@ -71,6 +73,7 @@ LISTEN_ONCE_MODES = {
     "assistant": ("Słucham.", ""),
     "note": ("Co zapisać w notatce?", "Zapisz notatkę"),
     "remember": ("Co mam zapamiętać?", "Zapamiętaj"),
+    "cursor": ("Gdzie przesunąć kursor lub co zrobić w aktywnym folderze?", ""),
 }
 
 
@@ -82,6 +85,7 @@ class Services:
     events: EventBus
     telemetry: ConversationTelemetry
     screenpipe: ScreenpipeClient
+    windows_context: WindowsContextService
     web_search: WebSearchClient
     knowledge_tools: KnowledgeToolOrchestrator
     screenpipe_transcriber: ScreenpipeMeetingTranscriber
@@ -106,6 +110,7 @@ class Services:
     cloud_planner: OpenAICompatiblePlanner | None
     gemini_planner: OpenAICompatiblePlanner | None
     n8n: N8nClient
+    situation: SituationStore
 
 
 def _build_gemini_planner(settings: Settings) -> OpenAICompatiblePlanner | None:
@@ -150,6 +155,7 @@ def build_services(settings: Settings) -> Services:
         speaking_pitch_percent=settings.tts_pitch_percent,
     )
     screenpipe = ScreenpipeClient(settings)
+    windows_context = WindowsContextService(settings, memory, screenpipe)
     web_search = WebSearchClient(settings)
     knowledge_tools = KnowledgeToolOrchestrator(
         settings=settings,
@@ -420,6 +426,7 @@ def build_services(settings: Settings) -> Services:
         events=events,
         telemetry=telemetry,
         screenpipe=screenpipe,
+        windows_context=windows_context,
         web_search=web_search,
         knowledge_tools=knowledge_tools,
         screenpipe_transcriber=screenpipe_transcriber,
@@ -444,6 +451,7 @@ def build_services(settings: Settings) -> Services:
         cloud_planner=cloud_planner,
         gemini_planner=gemini_planner,
         n8n=n8n,
+        situation=SituationStore(),
     )
 
 
@@ -478,6 +486,7 @@ async def lifespan(app: FastAPI):
     await services.executor.start()
     await services.screenpipe_transcriber.start()
     await services.screenpipe_vector_memory.start()
+    await services.windows_context.start()
     await services.threshold_guard.start()
     listen_watch_task: asyncio.Task[None] | None = None
     conversation_start_task: asyncio.Task[dict[str, str]] | None = None
@@ -533,6 +542,7 @@ async def lifespan(app: FastAPI):
         await services.meeting_recorder.close()
         await services.threshold_guard.stop()
         await services.screenpipe_vector_memory.stop()
+        await services.windows_context.stop()
         await services.screenpipe_transcriber.stop()
         await services.conversation.close()
         await services.deepgram.stop()
@@ -998,7 +1008,7 @@ async def start_listening(
 async def listen_once(
     services: Annotated[Services, Depends(require_token)],
     mode: Annotated[
-        Literal["assistant", "note", "remember"],
+        Literal["assistant", "note", "remember", "cursor"],
         Query(),
     ] = "assistant",
 ) -> dict[str, str]:
@@ -1018,6 +1028,15 @@ async def stop_listening(
 ) -> dict[str, str]:
     await services.deepgram.stop()
     return {"status": "stopped"}
+
+
+@app.get("/api/v1/situation", response_model=SituationStateV1)
+async def get_situation(
+    services: Annotated[Services, Depends(require_token)],
+) -> SituationStateV1:
+    """Read-only snapshot. Nie jest źródłem action_id dla planera."""
+
+    return services.situation.snapshot()
 
 
 @app.get("/api/v1/memories", response_model=list[MemoryItem])

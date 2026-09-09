@@ -480,6 +480,16 @@ COMMANDS = (
         "Zapisuje ostatnie źródło internetowe po potwierdzeniu.",
     ),
     VoiceCommand(
+        "cursor",
+        phrase_pack(
+            "kursor;sterowanie kursorem;ruch kursora;mysz;wskaźnik;wskaznik",
+            "steruj kursorem;steruj myszką;steruj myszka;paleta kursora",
+            "kontrola kursora;menu kursora;tryb kursora;kursor teraz",
+        ),
+        "cursor.vbs",
+        "Jednorazowy nasłuch Deepgram dla sterowania kursorem i aktywnym folderem.",
+    ),
+    VoiceCommand(
         "capabilities",
         phrase_pack(
             "co potrafisz;co umiesz;jakie masz komendy;jakie znasz komendy",

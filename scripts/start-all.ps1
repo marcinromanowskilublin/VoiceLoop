@@ -16,9 +16,14 @@ function Test-Port([int]$Port) {
     return [bool](Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
-function Test-Http([string]$Uri, [int]$Timeout = 3) {
+function Test-Http([string]$Uri, [int]$Timeout = 3, [hashtable]$Headers) {
     try {
-        Invoke-RestMethod -Uri $Uri -TimeoutSec $Timeout | Out-Null
+        if ($Headers) {
+            Invoke-RestMethod -Uri $Uri -TimeoutSec $Timeout -Headers $Headers | Out-Null
+        }
+        else {
+            Invoke-RestMethod -Uri $Uri -TimeoutSec $Timeout | Out-Null
+        }
         return $true
     }
     catch {
@@ -38,6 +43,22 @@ function Get-LocalEnvValue([string]$Name) {
         return $null
     }
     return ($match -split '=', 2)[1].Trim().Trim('"').Trim("'")
+}
+
+function Get-VoiceLoopTokenHeader {
+    # /api/v1/health jest schowany za require_token tak samo jak reszta
+    # prywatnych endpointow rdzenia, wiec health-check tez musi wyslac token
+    # zapisany przez rdzen w data\voiceloop.token. Brak pliku (rdzen jeszcze
+    # nie wystartowal) traktujemy jak "jeszcze nie gotowe", nie jak blad.
+    $tokenPath = Join-Path $projectRoot 'data\voiceloop.token'
+    if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
+        return $null
+    }
+    $token = (Get-Content -LiteralPath $tokenPath -Raw -Encoding UTF8).Trim()
+    if (-not $token) {
+        return $null
+    }
+    return @{ 'X-VoiceLoop-Token' = $token }
 }
 
 if (-not (Test-Port 1234)) {
@@ -78,9 +99,13 @@ if (-not (Test-Port 3030)) {
     if (-not $FullScreenpipeCapture) {
         $screenpipeArguments += '-ContextOnly'
     }
+    $logsDir = Join-Path $projectRoot 'logs'
+    New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
     Start-Process -FilePath 'powershell.exe' -ArgumentList @(
         $screenpipeArguments
-    ) -WindowStyle Hidden
+    ) -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $logsDir 'screenpipe-stdout.log') `
+        -RedirectStandardError (Join-Path $logsDir 'screenpipe-stderr.log')
 }
 
 # n8n jest wylaczone (N8N_ENABLED=false)
@@ -108,26 +133,29 @@ if (-not (Test-Port 8765)) {
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while ((Get-Date) -lt $deadline) {
+    $listenerHeaders = Get-VoiceLoopTokenHeader
     if (
         (Test-Http 'http://127.0.0.1:1234/v1/models') -and
         (Test-Http 'http://127.0.0.1:3030/health') -and
         (Test-Http 'http://127.0.0.1:6333/healthz') -and
-        (Test-Http 'http://127.0.0.1:8765/api/v1/health' 15)
+        (Test-Http 'http://127.0.0.1:8765/api/v1/health' 15 $listenerHeaders)
     ) {
         break
     }
     Start-Sleep -Milliseconds 500
 }
 
+$listenerHeaders = Get-VoiceLoopTokenHeader
 if (
     -not (Test-Http 'http://127.0.0.1:1234/v1/models') -or
     -not (Test-Http 'http://127.0.0.1:3030/health') -or
     -not (Test-Http 'http://127.0.0.1:6333/healthz') -or
-    -not (Test-Http 'http://127.0.0.1:8765/api/v1/health' 15)
+    -not (Test-Http 'http://127.0.0.1:8765/api/v1/health' 15 $listenerHeaders)
 ) {
     throw (
         "VoiceLoop nie uruchomil wszystkich uslug w $TimeoutSeconds sekund. " +
-        'Sprawdz LM Studio, Docker, Screenpipe i log listenera.'
+        'Sprawdz LM Studio, Docker, Screenpipe (logs\screenpipe-stderr.log), ' +
+        'token w data\voiceloop.token i log listenera.'
     )
 }
 

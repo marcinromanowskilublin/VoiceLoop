@@ -33,6 +33,7 @@ from .screenpipe import ScreenpipeClient, ScreenpipeError
 from .settings import Settings
 from .tts import WindowsTTS
 from .web_search import WebSearchClient, WebSearchError
+from .windows_shell import WINDOW_LAYOUTS, ShellItem
 
 ActionHandler = Callable[[dict[str, Any]], Awaitable[tuple[str, dict[str, Any]]]]
 RISK_ORDER = {RiskLevel.LOW: 0, RiskLevel.MEDIUM: 1, RiskLevel.HIGH: 2}
@@ -92,6 +93,8 @@ CAPABILITY_LABELS = {
     "copy_sentence_under_cursor": "kopiować zdanie pod kursorem",
     "copy_text_under_cursor": "kopiować tekst pod kursorem",
     "create_note": "tworzyć notatki",
+    "cursor_center": "przesuwać kursor na środek ekranu",
+    "cursor_return": "przywracać poprzednią pozycję kursora",
     "describe_active_window": "opisywać aktywne okno",
     "describe_recent_activity": "opisywać ostatnią aktywność",
     "describe_text_target": "sprawdzać cel wpisywania",
@@ -106,6 +109,8 @@ CAPABILITY_LABELS = {
     "open_folder": "otwierać Ten komputer",
     "open_gemini_chat": "otwierać Gemini",
     "open_gpt_chat": "otwierać ChatGPT",
+    "hover_shell_item": "najeżdżać na widoczny element pulpitu lub Eksploratora",
+    "open_shell_item": "otwierać widoczny element pulpitu lub Eksploratora",
     "open_url": "otwierać bezpieczny adres URL",
     "paste_text_safe": "bezpiecznie wklejać tekst",
     "recall": "przeszukiwać pamięć",
@@ -114,14 +119,22 @@ CAPABILITY_LABELS = {
     "rename_under_cursor": "zmieniać nazwę elementu pod kursorem",
     "run_uivision_macro": "uruchamiać dozwolone makra UI.Vision",
     "search_web": "wyszukiwać w internecie",
+    "select_listed_candidate": "wybierać kandydata z listy niejednoznacznych wyników",
     "select_paragraph_under_cursor": "zaznaczać akapit pod kursorem",
     "select_sentence_under_cursor": "zaznaczać zdanie pod kursorem",
+    "select_shell_file": "zaznaczać plik w aktywnym folderze",
+    "select_shell_folder": "zaznaczać folder w aktywnym folderze",
+    "select_shell_items_by_extension": "zaznaczać pliki danego rozszerzenia w aktywnym folderze",
+    "select_shell_items_by_letter": "zaznaczać elementy na daną literę w aktywnym folderze",
+    "snap_window_layout": "układać aktywne okno w siatce ekranu",
 }
 
 
 def _capability_category(action_id: str) -> str:
     if action_id.startswith(("open_", "run_")):
         return "aplikacje"
+    if action_id.startswith(("cursor_",)) or action_id == "snap_window_layout":
+        return "kursor i okna"
     if action_id.startswith(("copy_", "select_", "rename_", "minimize_", "close_")):
         return "okna i tekst"
     if action_id in {"describe_active_window", "describe_text_target"}:
@@ -197,6 +210,8 @@ class ActionRegistry:
         self.manual_memory = manual_memory
         self._last_web_sources: dict[str, Any] | None = None
         self._current_process: asyncio.subprocess.Process | None = None
+        self._last_cursor_position: tuple[int, int] | None = None
+        self._last_shell_candidates: tuple[int, list[ShellItem]] | None = None
         self._specs: dict[str, ActionSpec] = {}
         self._register_defaults()
 
@@ -294,6 +309,208 @@ class ActionRegistry:
                 routing_examples=(
                     "otwórz WhatsApp",
                     "uruchom WhatsApp",
+                ),
+            )
+        )
+        shell_properties = {
+            "query": {"type": "string", "minLength": 1, "maxLength": 260},
+            "expected_name": {"type": "string", "minLength": 1, "maxLength": 260},
+            "expected_control_type": {"type": "string", "minLength": 1, "maxLength": 80},
+            "expected_root_class": {"type": "string", "minLength": 1, "maxLength": 80},
+            "expected_root_handle": {"type": "integer", "minimum": 1},
+            "expected_runtime_id": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 1,
+            },
+            "expected_automation_id": {"type": "string", "maxLength": 260},
+        }
+        self._register(
+            ActionSpec(
+                id="hover_shell_item",
+                description=(
+                    "Przesuwa kursor na jednoznaczny widoczny element pulpitu "
+                    "lub aktywnego Eksploratora."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": shell_properties,
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._hover_shell_item,
+                execution_layer=2,
+                routing_examples=("najedź na A Way Out", "przesuń kursor na Mortal Shell"),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="open_shell_item",
+                description=(
+                    "Otwiera jednoznaczny widoczny element pulpitu lub aktywnego "
+                    "Eksploratora przez UIA."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": shell_properties,
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.MEDIUM,
+                confirmation_required=True,
+                handler=self._open_shell_item,
+                execution_layer=2,
+                routing_examples=("otwórz Mortal Shell", "uruchom A Way Out"),
+            )
+        )
+        active_folder_name_schema = {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 260},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        }
+        self._register(
+            ActionSpec(
+                id="select_shell_folder",
+                description=(
+                    "Zaznacza jednoznaczny folder o podanej nazwie w aktywnym folderze "
+                    "(oknie Eksploratora pod kursorem myszy)."
+                ),
+                args_schema=active_folder_name_schema,
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._select_shell_folder,
+                execution_layer=2,
+                routing_examples=("zaznacz folder Projekty", "zaznacz folder Archiwum"),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="select_shell_file",
+                description=(
+                    "Zaznacza jednoznaczny plik o podanej nazwie w aktywnym folderze "
+                    "(oknie Eksploratora pod kursorem myszy)."
+                ),
+                args_schema=active_folder_name_schema,
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._select_shell_file,
+                execution_layer=2,
+                routing_examples=("zaznacz plik Faktura", "zaznacz plik Raport Q2"),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="select_shell_items_by_extension",
+                description=(
+                    "Zaznacza wszystkie pliki danego rozszerzenia w aktywnym folderze "
+                    "przez wielokrotne UIA SelectionItem."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "extension": {"type": "string", "minLength": 1, "maxLength": 20}
+                    },
+                    "required": ["extension"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._select_shell_by_extension,
+                execution_layer=2,
+                routing_examples=("zaznacz wszystkie PDF", "zaznacz wszystkie pliki JPG"),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="select_shell_items_by_letter",
+                description=(
+                    "Zaznacza wszystkie elementy zaczynające się na daną literę w aktywnym "
+                    "folderze przez wielokrotne UIA SelectionItem."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {"letter": {"type": "string", "minLength": 1, "maxLength": 4}},
+                    "required": ["letter"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._select_shell_by_letter,
+                execution_layer=2,
+                routing_examples=("zaznacz wszystkie na literę A",),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="select_listed_candidate",
+                description=(
+                    "Wybiera i zaznacza jednego z 2-3 kandydatów zwróconych wcześniej przy "
+                    "niejednoznacznej nazwie w aktywnym folderze."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {"index": {"type": "integer", "minimum": 1, "maximum": 3}},
+                    "required": ["index"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._select_listed_candidate,
+                execution_layer=2,
+                routing_examples=("pierwszy", "drugi", "trzeci"),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="cursor_center",
+                description="Przesuwa kursor na środek monitora, na którym aktualnie jest.",
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._cursor_center,
+                routing_examples=("kursor na środek", "wyśrodkuj kursor"),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="cursor_return",
+                description=(
+                    "Przywraca pozycję kursora sprzed ostatniego przesunięcia wykonanego "
+                    "przez VoiceLoop."
+                ),
+                args_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._cursor_return,
+                routing_examples=("wróć kursorem",),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="snap_window_layout",
+                description=(
+                    "Układa aktywne okno w jednym z układów siatki, licząc względem obszaru "
+                    "roboczego monitora tego okna. Nie używa menu Snap Layout."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "layout": {"type": "string", "enum": list(WINDOW_LAYOUTS)},
+                    },
+                    "required": ["layout"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._snap_window_layout,
+                routing_examples=(
+                    "przesuń okno na prawą jedną trzecią",
+                    "przesuń okno na lewą górną ćwiartkę",
                 ),
             )
         )
@@ -895,6 +1112,25 @@ class ActionRegistry:
 
     async def bind_execution_targets(self, plan: CommandPlan) -> CommandPlan:
         for step in plan.steps:
+            if step.action_id in {"hover_shell_item", "open_shell_item"}:
+                from .windows_shell import WindowsShellLocator
+
+                target = await asyncio.to_thread(
+                    WindowsShellLocator().resolve,
+                    str(step.args.get("query") or ""),
+                )
+                identity = target.identity()
+                step.args.update(
+                    {
+                        "expected_name": identity["name"],
+                        "expected_control_type": identity["control_type"],
+                        "expected_root_class": identity["root_class"],
+                        "expected_root_handle": identity["root_handle"],
+                        "expected_runtime_id": identity["runtime_id"],
+                        "expected_automation_id": identity["automation_id"],
+                    }
+                )
+                continue
             if step.action_id != "close_window_under_cursor":
                 continue
             info = await asyncio.to_thread(self._window_under_cursor_info_sync)
@@ -2066,6 +2302,232 @@ class ActionRegistry:
             raise ValueError("Dozwolona jest wyłącznie aplikacja z allowlisty.")
         await asyncio.to_thread(os.startfile, target)
         return "Otwarto WhatsApp.", {"app_id": app_id}
+
+    @staticmethod
+    def _shell_expected(args: dict[str, Any]) -> dict[str, Any]:
+        required = (
+            "expected_name",
+            "expected_control_type",
+            "expected_root_class",
+            "expected_root_handle",
+            "expected_runtime_id",
+        )
+        if any(not args.get(key) for key in required):
+            raise RuntimeError("Brak związanej tożsamości elementu. Wydaj polecenie ponownie.")
+        return {
+            "name": args["expected_name"],
+            "control_type": args["expected_control_type"],
+            "root_class": args["expected_root_class"],
+            "root_handle": args["expected_root_handle"],
+            "runtime_id": args["expected_runtime_id"],
+            "automation_id": args.get("expected_automation_id", ""),
+        }
+
+    async def _hover_shell_item(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import get_cursor_position, hover_shell_item
+
+        previous = await asyncio.to_thread(get_cursor_position)
+        item = await asyncio.to_thread(hover_shell_item, self._shell_expected(args))
+        self._last_cursor_position = previous
+        return f"Najechałem na „{item.name}”.", item.to_dict()
+
+    async def _open_shell_item(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import open_shell_item
+
+        item = await asyncio.to_thread(open_shell_item, self._shell_expected(args))
+        return f"Otwarto „{item.name}”.", item.to_dict()
+
+    def _remember_shell_candidates(self, handle: int, candidates: list[ShellItem]) -> None:
+        self._last_shell_candidates = (handle, list(candidates))
+
+    def _forget_shell_candidates(self) -> None:
+        self._last_shell_candidates = None
+
+    async def _select_shell_folder(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._select_shell_named_sync, args, "folder")
+
+    async def _select_shell_file(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._select_shell_named_sync, args, "file")
+
+    def _select_shell_named_sync(
+        self,
+        args: dict[str, Any],
+        kind: str,
+    ) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import (
+            WindowsShellLocator,
+            locate_active_folder_handle,
+            match_active_folder_item,
+            select_shell_items,
+        )
+
+        query = str(args.get("query") or "").strip()
+        if not query:
+            raise ValueError("Podaj nazwę elementu do zaznaczenia.")
+        label = "folder" if kind == "folder" else "plik"
+        handle = locate_active_folder_handle()
+        items = WindowsShellLocator().enumerate_active_folder_items(handle)
+        match, candidates = match_active_folder_item(query, items, kind=kind)
+        if match is None:
+            self._remember_shell_candidates(handle, candidates)
+            names = "; ".join(
+                f"{index + 1}. {item.name}" for index, item in enumerate(candidates)
+            )
+            return (
+                f"Znalazłem kilka podobnych wyników na {label}: {names}. "
+                "Powiedz „pierwszy”, „drugi” albo „trzeci”.",
+                {"candidates": [item.to_dict() for item in candidates]},
+            )
+        select_shell_items(handle, [match])
+        self._forget_shell_candidates()
+        return (
+            f"{label.capitalize()} „{match.name}” został zaznaczony.",
+            match.to_dict(),
+        )
+
+    async def _select_shell_by_extension(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._select_shell_filtered_sync, args, "extension")
+
+    async def _select_shell_by_letter(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._select_shell_filtered_sync, args, "letter")
+
+    def _select_shell_filtered_sync(
+        self,
+        args: dict[str, Any],
+        mode: str,
+    ) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import (
+            WindowsShellLocator,
+            filter_by_extension,
+            filter_by_first_letter,
+            locate_active_folder_handle,
+            select_shell_items,
+        )
+
+        handle = locate_active_folder_handle()
+        items = WindowsShellLocator().enumerate_active_folder_items(handle)
+        if mode == "extension":
+            extension = str(args.get("extension") or "").strip().lstrip(".")
+            if not extension:
+                raise ValueError("Podaj rozszerzenie plików do zaznaczenia.")
+            matches = filter_by_extension(items, extension)
+            label = f"rozszerzeniem .{extension.lower()}"
+        else:
+            letter = str(args.get("letter") or "").strip()
+            if not letter:
+                raise ValueError("Podaj literę do zaznaczenia.")
+            matches = filter_by_first_letter(items, letter)
+            label = f"literą „{letter[:1].upper()}”"
+        if not matches:
+            raise RuntimeError(f"Nie znalazłem elementów z {label} w aktywnym folderze.")
+        select_shell_items(handle, matches)
+        self._forget_shell_candidates()
+        preview = ", ".join(item.name for item in matches[:10])
+        suffix = "" if len(matches) <= 10 else f" i {len(matches) - 10} więcej"
+        return (
+            f"Zaznaczyłem {len(matches)} elementów z {label}: {preview}{suffix}.",
+            {"count": len(matches), "items": [item.to_dict() for item in matches]},
+        )
+
+    async def _select_listed_candidate(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._select_listed_candidate_sync, args)
+
+    def _select_listed_candidate_sync(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import (
+            locate_active_folder_handle,
+            revalidate_active_folder_item,
+            select_shell_items,
+        )
+
+        try:
+            index = int(args.get("index") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Numer kandydata musi być liczbą 1, 2 albo 3.") from exc
+        if index < 1 or index > 3:
+            raise ValueError("Numer kandydata musi być 1, 2 albo 3.")
+
+        stored = self._last_shell_candidates
+        if not stored:
+            raise RuntimeError("Nie ma zapamiętanych kandydatów do wyboru.")
+        handle, candidates = stored
+        if index > len(candidates):
+            raise RuntimeError("Nie ma kandydata o tym numerze.")
+        target = candidates[index - 1]
+
+        current_handle = locate_active_folder_handle()
+        if current_handle != handle:
+            raise RuntimeError("Aktywny folder pod kursorem zmienił się. Powtórz polecenie.")
+        fresh_target = revalidate_active_folder_item(handle, target)
+        select_shell_items(handle, [fresh_target])
+        self._forget_shell_candidates()
+        return f"Zaznaczyłem „{fresh_target.name}”.", fresh_target.to_dict()
+
+    async def _cursor_center(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._cursor_center_sync)
+
+    def _cursor_center_sync(self) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import center_cursor, get_cursor_position
+
+        previous = get_cursor_position()
+        center = center_cursor()
+        self._last_cursor_position = previous
+        return "Przesunąłem kursor na środek ekranu.", {"x": center[0], "y": center[1]}
+
+    async def _cursor_return(self, _: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._cursor_return_sync)
+
+    def _cursor_return_sync(self) -> tuple[str, dict[str, Any]]:
+        from .windows_shell import set_cursor_position
+
+        previous = self._last_cursor_position
+        if previous is None:
+            raise RuntimeError("Nie mam zapamiętanej wcześniejszej pozycji kursora.")
+        set_cursor_position(previous)
+        self._last_cursor_position = None
+        return "Przywróciłem poprzednią pozycję kursora.", {"x": previous[0], "y": previous[1]}
+
+    async def _snap_window_layout(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._snap_window_layout_sync, args)
+
+    @staticmethod
+    def _snap_window_layout_sync(args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        layout = str(args.get("layout") or "").strip()
+        if layout not in WINDOW_LAYOUTS:
+            raise ValueError(f"Nieznany układ okna: {layout}")
+        try:
+            import win32con
+            import win32gui
+        except ImportError as exc:
+            raise RuntimeError(f"Brak zależności Windows do układania okien: {exc}") from exc
+        from .windows_shell import layout_rect, monitor_work_area_for_window
+
+        hwnd = int(win32gui.GetForegroundWindow() or 0)
+        if not hwnd or not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
+            raise RuntimeError("Nie mogę ustalić aktywnego okna do ułożenia.")
+        class_name = (win32gui.GetClassName(hwnd) or "").strip()
+        if class_name in PROTECTED_CURSOR_WINDOW_CLASSES:
+            raise RuntimeError("Nie układam pulpitu, paska zadań ani powłoki systemowej.")
+        title = (win32gui.GetWindowText(hwnd) or "").strip()
+
+        if win32gui.IsIconic(hwnd) or win32gui.IsZoomed(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+
+        work_area = monitor_work_area_for_window(hwnd)
+        x, y, width, height = layout_rect(work_area, layout)
+        win32gui.SetWindowPos(
+            hwnd,
+            0,
+            x,
+            y,
+            width,
+            height,
+            win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE,
+        )
+        label = title or class_name or "aktywne okno"
+        return (
+            f"Ułożyłem okno „{label}” w układzie: {layout}.",
+            {"hwnd": hwnd, "layout": layout, "rect": [x, y, x + width, y + height]},
+        )
 
     async def _create_note(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         text = str(args.get("text") or "").strip()

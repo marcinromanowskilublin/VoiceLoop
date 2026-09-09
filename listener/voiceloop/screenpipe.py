@@ -33,6 +33,17 @@ class ScreenpipeTextItem:
 
 
 @dataclass(frozen=True)
+class ScreenpipeElement:
+    frame_id: str
+    element_id: str
+    text: str
+    role: str
+    bounds: tuple[float, float, float, float] | None
+    timestamp: str
+    app_name: str = ""
+
+
+@dataclass(frozen=True)
 class ScreenpipeMeeting:
     id: int
     meeting_start: str
@@ -147,6 +158,55 @@ class ScreenpipeClient:
                 )
             )
         return contexts
+
+    async def recent_elements(
+        self,
+        *,
+        frame_id: str | int | None = None,
+        limit: int = 50,
+    ) -> list[ScreenpipeElement]:
+        """Read text metadata and bounds only; never request frame bytes."""
+        safe_limit = max(1, min(limit, 200))
+        candidate_ids = [str(frame_id)] if frame_id is not None else await self._recent_frame_ids()
+        for candidate in candidate_ids:
+            for suffix in ("context", "elements"):
+                try:
+                    payload = await self._get_json(f"/frames/{candidate}/{suffix}")
+                except (ScreenpipeError, httpx.HTTPError):
+                    continue
+                parsed = _parse_elements(payload, frame_id=candidate, limit=safe_limit)
+                if parsed:
+                    return parsed
+        return []
+
+    async def last_seen_elements(self, *, limit: int = 50) -> list[ScreenpipeElement]:
+        return await self.recent_elements(limit=limit)
+
+    async def _recent_frame_ids(self) -> list[str]:
+        now = datetime.now(UTC)
+        try:
+            items = await self._search(
+                content_type="accessibility",
+                start=now - timedelta(seconds=self.recent_window_seconds),
+                end=now,
+                limit=10,
+            )
+        except ScreenpipeError:
+            return []
+        ids: list[str] = []
+        for item in items:
+            content = item.get("content") if isinstance(item, dict) else None
+            values = (
+                item.get("frame_id"),
+                item.get("id"),
+                content.get("frame_id") if isinstance(content, dict) else None,
+                content.get("id") if isinstance(content, dict) else None,
+            )
+            for value in values:
+                if value is not None and str(value) not in ids:
+                    ids.append(str(value))
+                    break
+        return ids
 
     async def recent_text_activity(
         self,
@@ -428,3 +488,66 @@ def _audio_times(
     start_text = str(raw_start or timestamp or "").strip()
     end_text = str(raw_end or timestamp or "").strip()
     return start_text, end_text, start_offset, end_offset
+
+
+def _parse_elements(payload: Any, *, frame_id: str, limit: int) -> list[ScreenpipeElement]:
+    if isinstance(payload, list):
+        raw_items = payload
+    elif isinstance(payload, dict):
+        raw_items = next(
+            (
+                value
+                for key in ("elements", "data", "context", "items")
+                if isinstance((value := payload.get(key)), list)
+            ),
+            [],
+        )
+        if not raw_items and any(key in payload for key in ("text", "bounds", "role")):
+            raw_items = [payload]
+    else:
+        return []
+    results: list[ScreenpipeElement] = []
+    for index, raw in enumerate(raw_items[:limit]):
+        if not isinstance(raw, dict):
+            continue
+        item = raw.get("content") if isinstance(raw.get("content"), dict) else raw
+        bounds = _parse_bounds(item.get("bounds") or item.get("rect") or item.get("bbox"))
+        text = str(
+            item.get("text")
+            or item.get("label")
+            or item.get("name")
+            or item.get("accessibility_text")
+            or ""
+        ).strip()
+        if not text and bounds is None:
+            continue
+        results.append(
+            ScreenpipeElement(
+                frame_id=str(item.get("frame_id") or frame_id),
+                element_id=str(item.get("id") or item.get("element_id") or index),
+                text=text[:4000],
+                role=str(item.get("role") or item.get("type") or "").strip()[:200],
+                bounds=bounds,
+                timestamp=str(
+                    item.get("timestamp") or item.get("created_at") or ""
+                ).strip(),
+                app_name=str(item.get("app_name") or item.get("application") or "").strip(),
+            )
+        )
+    return results
+
+
+def _parse_bounds(value: Any) -> tuple[float, float, float, float] | None:
+    try:
+        if isinstance(value, dict):
+            if all(key in value for key in ("x", "y", "width", "height")):
+                x, y = float(value["x"]), float(value["y"])
+                return x, y, x + float(value["width"]), y + float(value["height"])
+            keys = ("left", "top", "right", "bottom")
+            if all(key in value for key in keys):
+                return tuple(float(value[key]) for key in keys)  # type: ignore[return-value]
+        if isinstance(value, (list, tuple)) and len(value) >= 4:
+            return tuple(float(item) for item in value[:4])  # type: ignore[return-value]
+    except (TypeError, ValueError):
+        return None
+    return None

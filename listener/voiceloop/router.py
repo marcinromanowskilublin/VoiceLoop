@@ -210,6 +210,99 @@ def deterministic_plan(request: CommandRequest) -> CommandPlan | None:
             action_id="open_chat",
         )
 
+    if _is_cursor_center_command(text):
+        return _single_step(
+            request,
+            intent="cursor_center",
+            response_text="Przesuwam kursor na środek ekranu.",
+            action_id="cursor_center",
+        )
+
+    if _is_cursor_return_command(text):
+        return _single_step(
+            request,
+            intent="cursor_return",
+            response_text="Wracam kursorem do poprzedniej pozycji.",
+            action_id="cursor_return",
+        )
+
+    window_layout = _extract_window_layout(text)
+    if window_layout:
+        return _single_step(
+            request,
+            intent="snap_window_layout",
+            response_text=f"Układam aktywne okno: {WINDOW_LAYOUT_LABELS[window_layout]}.",
+            action_id="snap_window_layout",
+            args={"layout": window_layout},
+        )
+
+    select_letter = _extract_select_by_letter(raw)
+    if select_letter:
+        return _single_step(
+            request,
+            intent="select_shell_items_by_letter",
+            response_text=f"Zaznaczam wszystkie elementy na literę „{select_letter.upper()}”.",
+            action_id="select_shell_items_by_letter",
+            args={"letter": select_letter},
+        )
+
+    select_extension = _extract_select_by_extension(raw)
+    if select_extension:
+        return _single_step(
+            request,
+            intent="select_shell_items_by_extension",
+            response_text=f"Zaznaczam wszystkie pliki z rozszerzeniem {select_extension}.",
+            action_id="select_shell_items_by_extension",
+            args={"extension": select_extension},
+        )
+
+    select_target = _extract_select_shell_target(raw)
+    if select_target:
+        kind, name = select_target
+        select_action_id = "select_shell_folder" if kind == "folder" else "select_shell_file"
+        select_label = "folder" if kind == "folder" else "plik"
+        return _single_step(
+            request,
+            intent=select_action_id,
+            response_text=f"Zaznaczam {select_label} „{name}” w aktywnym folderze.",
+            action_id=select_action_id,
+            args={"query": name},
+        )
+
+    candidate_ordinal = _extract_candidate_ordinal(text)
+    if candidate_ordinal is not None:
+        return _single_step(
+            request,
+            intent="select_listed_candidate",
+            response_text=f"Zaznaczam kandydata numer {candidate_ordinal}.",
+            action_id="select_listed_candidate",
+            args={"index": candidate_ordinal},
+        )
+
+    shell_hover_query = _extract_shell_hover_query(raw)
+    if shell_hover_query:
+        return _single_step(
+            request,
+            intent="hover_shell_item",
+            response_text=f"Przesuwam kursor na „{shell_hover_query}”.",
+            action_id="hover_shell_item",
+            args={"query": shell_hover_query},
+        )
+
+    shell_open_query = _extract_shell_open_query(raw)
+    if shell_open_query:
+        return _single_step(
+            request,
+            intent="open_shell_item",
+            response_text=(
+                f"Otworzyć widoczny element „{shell_open_query}”? "
+                "Powiedz potwierdź albo anuluj zadanie."
+            ),
+            action_id="open_shell_item",
+            args={"query": shell_open_query},
+            risk=RiskLevel.MEDIUM,
+        )
+
     if _is_describe_text_target_command(text):
         return _single_step(
             request,
@@ -743,6 +836,173 @@ def _is_describe_text_target_command(text: str) -> bool:
     )
 
 
+WINDOW_LAYOUT_LABELS: dict[str, str] = {
+    "left_half": "lewa połowa",
+    "right_half": "prawa połowa",
+    "left_third": "lewa jedna trzecia",
+    "center_third": "środkowa jedna trzecia",
+    "right_third": "prawa jedna trzecia",
+    "top_left_quarter": "lewa górna ćwiartka",
+    "bottom_left_quarter": "lewa dolna ćwiartka",
+    "top_right_quarter": "prawa górna ćwiartka",
+    "bottom_right_quarter": "prawa dolna ćwiartka",
+}
+_LAYOUT_MARKERS: dict[str, tuple[str, ...]] = {
+    "top_left_quarter": ("lewa gorna cwiartk", "gorna lewa cwiartk"),
+    "bottom_left_quarter": ("lewa dolna cwiartk", "dolna lewa cwiartk"),
+    "top_right_quarter": ("prawa gorna cwiartk", "gorna prawa cwiartk"),
+    "bottom_right_quarter": ("prawa dolna cwiartk", "dolna prawa cwiartk"),
+    "left_third": ("lewa jedna trzecia", "lewej jednej trzeciej", "lewa trzecia"),
+    "center_third": (
+        "srodkowa jedna trzecia",
+        "srodkowej jednej trzeciej",
+        "srodkowa trzecia",
+        "centralna jedna trzecia",
+    ),
+    "right_third": ("prawa jedna trzecia", "prawej jednej trzeciej", "prawa trzecia"),
+    "left_half": ("lewa polow", "lewej polow", "lewo polow"),
+    "right_half": ("prawa polow", "prawej polow"),
+}
+_WINDOW_LAYOUT_TRIGGERS = (
+    "przesun okno",
+    "przenies okno",
+    "uloz okno",
+    "ulozenie okna",
+    "podziel okno",
+    "przypnij okno",
+    "ustaw okno",
+    "okno na",
+)
+_ORDINAL_WORDS: dict[str, int] = {
+    "pierwszy": 1,
+    "pierwsza": 1,
+    "pierwsze": 1,
+    "pierwszego": 1,
+    "drugi": 2,
+    "druga": 2,
+    "drugie": 2,
+    "drugiego": 2,
+    "trzeci": 3,
+    "trzecia": 3,
+    "trzecie": 3,
+    "trzeciego": 3,
+}
+
+
+def _is_cursor_center_command(text: str) -> bool:
+    return _is_exact_alias(
+        text,
+        (
+            "cursor_center",
+            "kursor na srodek",
+            "przesun kursor na srodek",
+            "przesun kursor na srodek ekranu",
+            "wysrodkuj kursor",
+        ),
+    ) or _contains_any(
+        text,
+        ("kursor na srodek", "wysrodkuj kursor", "wycentruj kursor"),
+    )
+
+
+def _is_cursor_return_command(text: str) -> bool:
+    return _is_exact_alias(
+        text,
+        (
+            "cursor_return",
+            "wroc kursorem",
+            "wroc kursor",
+            "przywroc kursor",
+            "przywroc pozycje kursora",
+            "wroc z kursorem",
+        ),
+    ) or _contains_any(
+        text,
+        ("wroc kursorem", "wroc z kursorem", "przywroc kursor", "przywroc pozycje kursora"),
+    )
+
+
+def _extract_window_layout(text: str) -> str | None:
+    if not _contains_any(text, _WINDOW_LAYOUT_TRIGGERS):
+        return None
+    # Ćwiartki i "jedne trzecie" muszą wygrywać nad ogólną "połową", żeby np.
+    # "lewa gorna cwiartka" nie została błędnie rozpoznana jako "lewa polowa".
+    for layout in (
+        "top_left_quarter",
+        "bottom_left_quarter",
+        "top_right_quarter",
+        "bottom_right_quarter",
+        "left_third",
+        "center_third",
+        "right_third",
+        "left_half",
+        "right_half",
+    ):
+        if _contains_any(text, _LAYOUT_MARKERS[layout]):
+            return layout
+    return None
+
+
+def _extract_select_shell_target(raw: str) -> tuple[str, str] | None:
+    match = re.match(
+        r"^\s*zaznacz\s+(folder|plik)\s+(.+?)\s*[.!?]?\s*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    kind = "folder" if match.group(1).casefold() == "folder" else "file"
+    name = match.group(2).strip(" .\"'„”")
+    return (kind, name) if name else None
+
+
+def _extract_select_by_letter(raw: str) -> str | None:
+    match = re.match(
+        r"^\s*zaznacz\s+wszystkie\s+na\s+liter[eę]\s+(\S)\s*[.!?]?\s*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
+def _extract_select_by_extension(raw: str) -> str | None:
+    match = re.match(
+        r"^\s*zaznacz\s+wszystkie(?:\s+pliki)?"
+        r"(?:\s+typu|\s+z\s+rozszerzeniem)?\s+([A-Za-z0-9]{1,10})\s*[.!?]?\s*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    token = match.group(1).strip().lstrip(".")
+    if not token or token.casefold() in {"na", "litere", "literę"}:
+        return None
+    return token
+
+
+def _extract_candidate_ordinal(text: str) -> int | None:
+    return _ORDINAL_WORDS.get(text)
+
+
+def _extract_shell_hover_query(raw: str) -> str | None:
+    match = re.match(
+        r"^\s*(?:najedź|najedz|przesuń\s+kursor|przesun\s+kursor)\s+na\s+"
+        r"(?:(?:folder|plik)\s+)?(.+?)\s*[.!?]?\s*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip(" .\"'„”") if match else None
+
+
+def _extract_shell_open_query(raw: str) -> str | None:
+    match = re.match(
+        r"^\s*(?:otwórz|otworz|uruchom|odpal)\s+(?:(?:folder|plik)\s+)?(.+?)\s*[.!?]?\s*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip(" .\"'„”") if match else None
+
+
 def _is_active_window_command(text: str) -> bool:
     if _is_exact_alias(
         text,
@@ -1194,11 +1454,19 @@ def _single_step(
     args: dict[str, object] | None = None,
     risk: RiskLevel = RiskLevel.LOW,
 ) -> CommandPlan:
+    confirmation_required = action_id == "open_shell_item"
     return CommandPlan(
         request_id=request.request_id,
         intent=intent,
         response_text=response_text,
         confidence=1.0,
-        steps=[PlanStep(action_id=action_id, args=args or {}, risk=risk)],
+        steps=[
+            PlanStep(
+                action_id=action_id,
+                args=args or {},
+                risk=risk,
+                confirmation_required=confirmation_required,
+            )
+        ],
         provider="deterministic",
     )

@@ -46,6 +46,14 @@ _ROUTING_HOLDOUTS: dict[str, tuple[str, ...]] = {
         "wejdź do WhatsApp na tym komputerze",
         "włącz aplikację WhatsApp na pulpicie",
     ),
+    "hover_shell_item": (
+        "ustaw wskaźnik na ikonie A Way Out",
+        "przenieś mysz na widoczny folder Mortal Shell",
+    ),
+    "open_shell_item": (
+        "otwórz widoczną ikonę A Way Out",
+        "uruchom element Mortal Shell z pulpitu",
+    ),
     "open_chat": (
         "uruchom ogólną stronę czatu",
         "wejdź na dawny czat w przeglądarce",
@@ -145,6 +153,38 @@ _ROUTING_HOLDOUTS: dict[str, tuple[str, ...]] = {
     "recall": (
         "wyciągnij z pamięci informacje o gabinecie",
         "poszukaj w zapiskach hasła krótkie odpowiedzi",
+    ),
+    "select_shell_folder": (
+        "zaznacz w tym oknie katalog Projekty",
+        "wybierz na liście folder o nazwie Archiwum",
+    ),
+    "select_shell_file": (
+        "zaznacz na liście plik Faktura",
+        "wybierz w tym folderze dokument Raport Q2",
+    ),
+    "select_shell_items_by_extension": (
+        "zaznacz w folderze wszystkie dokumenty PDF",
+        "wybierz na liście każdy plik z rozszerzeniem JPG",
+    ),
+    "select_shell_items_by_letter": (
+        "zaznacz w tym oknie wszystko zaczynające się na literę B",
+        "wybierz każdy element którego nazwa zaczyna się na literę C",
+    ),
+    "select_listed_candidate": (
+        "wybieram tę drugą propozycję z podanej listy",
+        "chodzi mi o pierwszą z wymienionych opcji",
+    ),
+    "cursor_center": (
+        "przenieś wskaźnik na sam środek ekranu",
+        "wyśrodkuj mi teraz kursor myszy",
+    ),
+    "cursor_return": (
+        "wróć wskaźnikiem do miejsca sprzed chwili",
+        "przywróć poprzednie położenie kursora",
+    ),
+    "snap_window_layout": (
+        "przenieś to okno na prawą część ekranu",
+        "ułóż aktywne okno w lewej górnej części monitora",
     ),
 }
 _ROUTING_HOLDOUT_EXPECTED_ARGS: dict[tuple[str, int], dict] = {

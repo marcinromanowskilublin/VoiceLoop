@@ -48,6 +48,8 @@ VOICE_RESULT_ACTIONS = {
     "copy_sentence_under_cursor",
     "copy_text_under_cursor",
     "create_note",
+    "cursor_center",
+    "cursor_return",
     "describe_active_window",
     "describe_recent_activity",
     "describe_text_target",
@@ -58,8 +60,14 @@ VOICE_RESULT_ACTIONS = {
     "remember",
     "remember_last_source",
     "search_web",
+    "select_listed_candidate",
     "select_paragraph_under_cursor",
     "select_sentence_under_cursor",
+    "select_shell_file",
+    "select_shell_folder",
+    "select_shell_items_by_extension",
+    "select_shell_items_by_letter",
+    "snap_window_layout",
     "rename_under_cursor",
 }
 PROTECTED_DETERMINISTIC_INTENTS = {

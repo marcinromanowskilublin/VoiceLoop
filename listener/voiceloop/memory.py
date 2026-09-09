@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +102,21 @@ class MeetingAudioFile:
     source_path: str
     archived_path: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class PathHistoryItem:
+    normalized_path: str
+    display_name: str
+    root: str
+    is_dir: bool
+    first_seen: datetime
+    last_seen: datetime
+    last_event: str
+    exists: bool
+    deleted_at: datetime | None
+    is_project: bool
+    project_type: str
 
 
 class MemoryStore:
@@ -256,6 +272,20 @@ class MemoryStore:
                         UNIQUE(source, source_id)
                     );
 
+                    CREATE TABLE IF NOT EXISTS local_path_history (
+                        normalized_path TEXT PRIMARY KEY,
+                        display_name TEXT NOT NULL,
+                        root TEXT NOT NULL,
+                        is_dir INTEGER NOT NULL,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL,
+                        last_event TEXT NOT NULL,
+                        exists_flag INTEGER NOT NULL,
+                        deleted_at TEXT,
+                        is_project INTEGER NOT NULL DEFAULT 0,
+                        project_type TEXT NOT NULL DEFAULT ''
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_commands_created
                         ON commands(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_command_events_request
@@ -276,6 +306,12 @@ class MemoryStore:
                         ON meeting_audio_files(session_id, start_time ASC);
                     CREATE INDEX IF NOT EXISTS idx_vector_memories_source
                         ON vector_memories(source, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_local_path_history_seen
+                        ON local_path_history(last_seen DESC);
+                    CREATE INDEX IF NOT EXISTS idx_local_path_history_name
+                        ON local_path_history(display_name);
+                    CREATE INDEX IF NOT EXISTS idx_local_path_history_project
+                        ON local_path_history(is_project, last_seen DESC);
                     """
                 )
                 columns = {
@@ -291,6 +327,148 @@ class MemoryStore:
                     )
 
         await asyncio.to_thread(_initialize)
+
+    async def upsert_path_event(
+        self,
+        *,
+        path: Path,
+        display_name: str,
+        root: Path,
+        is_dir: bool,
+        event: str,
+        exists: bool,
+        is_project: bool = False,
+        project_type: str = "",
+        seen_at: datetime | None = None,
+    ) -> None:
+        now = seen_at or datetime.now(UTC)
+        normalized = os.path.normcase(os.path.abspath(path))
+        deleted_at = now.isoformat() if not exists else None
+
+        def _upsert() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO local_path_history(
+                        normalized_path, display_name, root, is_dir, first_seen,
+                        last_seen, last_event, exists_flag, deleted_at,
+                        is_project, project_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(normalized_path) DO UPDATE SET
+                        display_name = excluded.display_name,
+                        root = excluded.root,
+                        is_dir = excluded.is_dir,
+                        last_seen = excluded.last_seen,
+                        last_event = excluded.last_event,
+                        exists_flag = excluded.exists_flag,
+                        deleted_at = excluded.deleted_at,
+                        is_project = excluded.is_project,
+                        project_type = excluded.project_type
+                    """,
+                    (
+                        normalized,
+                        display_name[:500],
+                        str(root)[:4000],
+                        int(is_dir),
+                        now.isoformat(),
+                        now.isoformat(),
+                        event[:20],
+                        int(exists),
+                        deleted_at,
+                        int(is_project),
+                        project_type[:80],
+                    ),
+                )
+
+        await asyncio.to_thread(_upsert)
+
+    async def list_path_history(self, *, limit: int = 100) -> list[PathHistoryItem]:
+        safe_limit = max(1, min(limit, 1000))
+
+        def _list() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    "SELECT * FROM local_path_history ORDER BY last_seen DESC LIMIT ?",
+                    (safe_limit,),
+                ).fetchall()
+
+        return [self._path_history_from_row(row) for row in await asyncio.to_thread(_list)]
+
+    async def search_path_history(
+        self, query: str, *, limit: int = 20
+    ) -> list[PathHistoryItem]:
+        safe_query = query.strip()
+        if not safe_query:
+            return []
+        safe_limit = max(1, min(limit, 100))
+        escaped = safe_query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+        def _search() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM local_path_history
+                    WHERE display_name LIKE ? ESCAPE '\\'
+                       OR normalized_path LIKE ? ESCAPE '\\'
+                    ORDER BY is_project DESC, last_seen DESC
+                    LIMIT ?
+                    """,
+                    (f"%{escaped}%", f"%{escaped}%", safe_limit),
+                ).fetchall()
+
+        return [self._path_history_from_row(row) for row in await asyncio.to_thread(_search)]
+
+    async def prune_path_history(
+        self,
+        *,
+        retention_days: int,
+        max_records: int,
+        now: datetime | None = None,
+    ) -> int:
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=max(1, retention_days))
+        safe_max = max(10, max_records)
+
+        def _prune() -> int:
+            with self._connect() as connection:
+                old = connection.execute(
+                    """
+                    DELETE FROM local_path_history
+                    WHERE last_seen < ? AND exists_flag = 0
+                    """,
+                    (cutoff.isoformat(),),
+                ).rowcount
+                excess = connection.execute(
+                    """
+                    DELETE FROM local_path_history
+                    WHERE normalized_path IN (
+                        SELECT normalized_path FROM local_path_history
+                        ORDER BY exists_flag DESC, last_seen DESC
+                        LIMIT -1 OFFSET ?
+                    )
+                    """,
+                    (safe_max,),
+                ).rowcount
+                return old + excess
+
+        return await asyncio.to_thread(_prune)
+
+    @staticmethod
+    def _path_history_from_row(row: sqlite3.Row) -> PathHistoryItem:
+        return PathHistoryItem(
+            normalized_path=row["normalized_path"],
+            display_name=row["display_name"],
+            root=row["root"],
+            is_dir=bool(row["is_dir"]),
+            first_seen=datetime.fromisoformat(row["first_seen"]),
+            last_seen=datetime.fromisoformat(row["last_seen"]),
+            last_event=row["last_event"],
+            exists=bool(row["exists_flag"]),
+            deleted_at=(
+                datetime.fromisoformat(row["deleted_at"]) if row["deleted_at"] else None
+            ),
+            is_project=bool(row["is_project"]),
+            project_type=row["project_type"],
+        )
 
     async def create_command(self, request: CommandRequest) -> CommandView:
         created = request.created_at.isoformat()

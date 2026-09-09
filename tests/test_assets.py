@@ -106,7 +106,7 @@ def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
     ]
 
     assert profile.findtext(".//Name") == "VoiceLoop v2 PRO"
-    assert len(commands) == 33
+    assert len(commands) == 34
     assert len(individual_phrases) >= 620
     assert len(individual_phrases) == len(set(individual_phrases))
     assert len(command_ids) == len(set(command_ids))
@@ -124,6 +124,7 @@ def test_voiceattack_v2_profile_contains_safe_polish_package() -> None:
     assert any("zaznacz akapit pod kursorem" in phrase for phrase in phrases)
     assert any("zapamiętaj ostatnie źródło" in phrase for phrase in phrases)
     assert any("natychmiastowy stop" in phrase for phrase in phrases)
+    assert any(phrase.startswith("kursor;") for phrase in phrases)
     assert all(
         action.findtext("ActionType") == "Launch"
         for action in profile.findall(".//CommandAction")
@@ -144,10 +145,10 @@ def test_voiceattack_action_audit_validates_profile_without_execution() -> None:
     assert report["status"] == "ok"
     assert report["errors"] == []
     assert report["profile"]["name"] == "VoiceLoop v2 PRO"
-    assert report["profile"]["command_count"] == 33
-    assert report["profile"]["phrase_count"] == 656
+    assert report["profile"]["command_count"] == 34
+    assert report["profile"]["phrase_count"] == 670
     assert report["profile"]["missing_scripts"] == 0
-    assert len(report["inventory"]) == 33
+    assert len(report["inventory"]) == 34
 
 
 def test_one_click_launcher_starts_safe_complete_stack() -> None:
