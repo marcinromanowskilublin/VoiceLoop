@@ -9,6 +9,14 @@ Local code decides what can run.
 ```
 
 [![VoiceLoop CI](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-brightgreen.svg)](LICENSE)
+
+> **Open source — copyright retained.**
+> Copyright © 2026 Marcin Romanowski. The original VoiceLoop implementation,
+> architecture documentation, and diagrams remain copyrighted by the author
+> and are licensed — not transferred — under the
+> [GNU AGPL v3.0 only](LICENSE). See
+> [copyright and attribution details](NOTICE.md).
 
 The unusual part is not “an LLM with tools”. It is that the hard
 boundaries are written as contracts and then hit by tests: a bad step
@@ -189,5 +197,6 @@ not in Git.
 
 Windows-only for the full stack. Optional providers cost money.
 Diarization is not biometrics. Screenpipe can see a lot if you raise
-capture. No public open-source license — review only, no permission
-to copy or redistribute.
+capture. AGPL-covered deployments offered over a network must make the
+corresponding source available as required by the license. The VoiceLoop
+name, logo, and visual identity are not licensed as trademarks.
