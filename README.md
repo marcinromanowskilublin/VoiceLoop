@@ -16,6 +16,16 @@ kills the whole plan, retrieved text cannot invent an action, and
 success is an `ActionResult` from the executor — not a sentence from
 the model.
 
+## Architecture at a glance
+
+![Current VoiceLoop system architecture](docs/img/voiceloop-system-architecture.svg)
+
+*The live control flow, policy boundaries, separate experimental lanes,
+and deterministic STOP path. Canonical implementation details live in
+[`docs/ARCHITECTURE_CURRENT.md`](docs/ARCHITECTURE_CURRENT.md).*
+
+## Local diagnostics panel
+
 ![VoiceLoop local panel](docs/img/voiceloop-panel.png)
 
 *Local diagnostics panel. Development UI, not the final interface.*
@@ -65,6 +75,11 @@ If Qdrant is down, ingest fails closed; user recall may fall back to
 SQLite cosine on `semantic`. Threshold Guard classifies a gate as
 dead, unreachable, over-broad, or drifted instead of assuming
 “search works”.
+
+![VoiceLoop memory and retrieval architecture](docs/img/voiceloop-memory-architecture.svg)
+
+*One five-axis memory collection, its SQLite partner, and a separate
+three-axis capability index used by Routing V2.*
 
 Checked in `tests/test_qdrant_memory.py` (named vectors, RRF,
 content-hash, down-store raises) and

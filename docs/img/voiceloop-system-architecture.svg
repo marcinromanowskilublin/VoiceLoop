@@ -1,0 +1,413 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200" role="img" aria-labelledby="title desc">
+  <title id="title">VoiceLoop system architecture</title>
+  <desc id="desc">Detailed current architecture of VoiceLoop from local inputs through capture, deterministic routing, bounded context, model planning, policy, execution, adapters, and observation.</desc>
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".6" stop-color="#f7fbff"/>
+      <stop offset="1" stop-color="#edf7ff"/>
+    </linearGradient>
+    <linearGradient id="headerBlue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1478ec"/>
+      <stop offset=".55" stop-color="#275bd8"/>
+      <stop offset="1" stop-color="#483bb9"/>
+    </linearGradient>
+    <linearGradient id="cyanBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e7f8ff"/>
+      <stop offset="1" stop-color="#f4fbff"/>
+    </linearGradient>
+    <linearGradient id="greenBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e9fbf6"/>
+      <stop offset="1" stop-color="#f4fffb"/>
+    </linearGradient>
+    <linearGradient id="purpleBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f0edff"/>
+      <stop offset="1" stop-color="#faf8ff"/>
+    </linearGradient>
+    <linearGradient id="redBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff0f1"/>
+      <stop offset="1" stop-color="#fff9f9"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#5a91c7" flood-opacity=".15"/>
+    </filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 9 5 0 10Z" fill="#1b86e8"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 9 5 0 10Z" fill="#17a77a"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 9 5 0 10Z" fill="#725ee8"/>
+    </marker>
+    <style>
+      .page-title { fill: #123a99; font: 800 34px "Segoe UI", Arial, sans-serif; letter-spacing: -.5px; }
+      .page-sub { fill: #5c77a0; font: 15px "Segoe UI", Arial, sans-serif; }
+      .brand { fill: #0d3a90; font: 800 27px "Segoe UI", Arial, sans-serif; }
+      .tag { fill: #5574a2; font: 700 8px "Segoe UI", Arial, sans-serif; letter-spacing: 1.9px; }
+      .section { fill: #164db3; font: 800 14px "Segoe UI", Arial, sans-serif; letter-spacing: .4px; }
+      .section-green { fill: #087a5c; font: 800 14px "Segoe UI", Arial, sans-serif; letter-spacing: .4px; }
+      .section-purple { fill: #5b42ba; font: 800 14px "Segoe UI", Arial, sans-serif; letter-spacing: .4px; }
+      .section-red { fill: #c12d45; font: 800 14px "Segoe UI", Arial, sans-serif; letter-spacing: .4px; }
+      .heading { fill: #123875; font: 800 19px "Segoe UI", Arial, sans-serif; }
+      .body { fill: #35577f; font: 13px "Segoe UI", Arial, sans-serif; }
+      .small { fill: #6480a2; font: 11px "Segoe UI", Arial, sans-serif; }
+      .tiny { fill: #728ba9; font: 10px "Segoe UI", Arial, sans-serif; }
+      .chip { fill: #214d88; font: 700 11px "Segoe UI", Arial, sans-serif; }
+      .mono { fill: #244c92; font: 12px Consolas, "SFMono-Regular", monospace; }
+      .white { fill: #ffffff; }
+      .num { fill: #ffffff; font: 800 14px "Segoe UI", Arial, sans-serif; text-anchor: middle; dominant-baseline: middle; }
+      .timeline-num { fill: #ffffff; font: 800 12px "Segoe UI", Arial, sans-serif; text-anchor: middle; dominant-baseline: middle; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1200" fill="url(#page)"/>
+  <rect width="1600" height="8" fill="url(#headerBlue)"/>
+  <path d="M1450 18 1578 18 1578 94 1522 51Z" fill="#cfeaff"/>
+  <path d="M1498 18 1578 18 1578 72Z" fill="#8dc8f8" opacity=".75"/>
+
+  <!-- Header -->
+  <g transform="translate(28 23)">
+    <rect x="0" y="21" width="7" height="20" rx="3.5" fill="#12bce8"/>
+    <rect x="12" y="12" width="7" height="38" rx="3.5" fill="#16a9ee"/>
+    <rect x="24" y="3" width="7" height="56" rx="3.5" fill="#218ff0"/>
+    <rect x="36" y="10" width="7" height="42" rx="3.5" fill="#346ce4"/>
+    <rect x="48" y="20" width="7" height="23" rx="3.5" fill="#654ed2"/>
+    <text x="68" y="31" class="brand">VoiceLoop</text>
+    <text x="70" y="47" class="tag">LISTEN  UNDERSTAND  ACT</text>
+  </g>
+  <text x="390" y="54" class="page-title">VoiceLoop - System Architecture</text>
+  <text x="392" y="78" class="page-sub">Detailed current flow: deterministic control around bounded model planning</text>
+  <g transform="translate(1198 32)">
+    <rect width="234" height="35" rx="17.5" fill="#eef8ff" stroke="#68afea"/>
+    <circle cx="19" cy="17.5" r="5" fill="#13a776"/>
+    <text x="33" y="22" class="chip">CURRENT REPOSITORY VIEW</text>
+  </g>
+
+  <!-- Row 1 -->
+  <g filter="url(#shadow)">
+    <rect x="24" y="108" width="360" height="150" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="24" y="108" width="360" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="46" cy="125" r="13" fill="#1689e7"/>
+  <text x="46" y="125" class="num">1</text>
+  <text x="65" y="130" class="section">INPUTS</text>
+  <text x="42" y="165" class="heading">Four entry paths, one request contract</text>
+  <g>
+    <rect x="42" y="181" width="151" height="26" rx="7" fill="#eff8ff" stroke="#b4d9f8"/>
+    <text x="54" y="198" class="chip">Microphone / Polish speech</text>
+    <rect x="201" y="181" width="165" height="26" rx="7" fill="#eff8ff" stroke="#b4d9f8"/>
+    <text x="213" y="198" class="chip">Panel / HTTP API</text>
+    <rect x="42" y="214" width="151" height="26" rx="7" fill="#eff8ff" stroke="#b4d9f8"/>
+    <text x="54" y="231" class="chip">VoiceAttack commands</text>
+    <rect x="201" y="214" width="165" height="26" rx="7" fill="#eff8ff" stroke="#b4d9f8"/>
+    <text x="213" y="231" class="chip">Active screen (optional)</text>
+  </g>
+  <text x="42" y="250" class="tiny">Sources: panel, deepgram, voiceattack, api, n8n</text>
+
+  <g filter="url(#shadow)">
+    <rect x="402" y="108" width="390" height="150" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="402" y="108" width="390" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="424" cy="125" r="13" fill="#1689e7"/>
+  <text x="424" y="125" class="num">2</text>
+  <text x="443" y="130" class="section">CAPTURE + STT</text>
+  <g transform="translate(420 158)">
+    <rect width="74" height="42" rx="8" fill="#f3f9ff" stroke="#a6d0f5"/>
+    <text x="15" y="20" class="chip">Audio</text><text x="12" y="34" class="tiny">capture</text>
+    <path d="M80 21H100" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <rect x="107" width="74" height="42" rx="8" fill="#f3f9ff" stroke="#a6d0f5"/>
+    <text x="125" y="20" class="chip">VAD</text><text x="119" y="34" class="tiny">chunking</text>
+    <path d="M187 21H207" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <rect x="214" width="78" height="42" rx="8" fill="#f3f9ff" stroke="#a6d0f5"/>
+    <text x="225" y="20" class="chip">Deepgram</text><text x="230" y="34" class="tiny">Polish STT</text>
+    <path d="M298 21H318" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <rect x="325" width="48" height="42" rx="8" fill="#e9f6ff" stroke="#78baf1"/>
+    <text x="337" y="20" class="chip">Text</text><text x="334" y="34" class="tiny">final</text>
+  </g>
+  <text x="420" y="219" class="mono">TranscriptEnvelopeV1</text>
+  <text x="420" y="239" class="small">raw + normalized text, confidence, words, speaker IDs, final flags</text>
+
+  <g filter="url(#shadow)">
+    <rect x="810" y="108" width="462" height="150" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="810" y="108" width="462" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="832" cy="125" r="13" fill="#1689e7"/>
+  <text x="832" y="125" class="num">3</text>
+  <text x="851" y="130" class="section">INTAKE + DETERMINISTIC GATES</text>
+  <text x="828" y="165" class="heading">AssistantService.handle owns the turn</text>
+  <text x="828" y="188" class="body">&#8226; build CommandRequest and persist the received command</text>
+  <text x="828" y="209" class="body">&#8226; deduplicate normalized text within the 2 second window</text>
+  <text x="828" y="230" class="body">&#8226; STOP, pause, conversation-end, STT and speaker gates run first</text>
+  <text x="828" y="249" class="small">A protected deterministic result never waits for retrieval or an LLM.</text>
+
+  <path d="M384 183H394" fill="none" stroke="#1b86e8" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <path d="M792 183H802" fill="none" stroke="#1b86e8" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+
+  <!-- Row 2 -->
+  <g filter="url(#shadow)">
+    <rect x="24" y="278" width="400" height="224" rx="12" fill="#ffffff" stroke="#8a7be9" stroke-width="1.5"/>
+    <rect x="24" y="278" width="400" height="34" rx="12" fill="url(#purpleBand)"/>
+  </g>
+  <circle cx="46" cy="295" r="13" fill="#725ee8"/>
+  <text x="46" y="295" class="num">4</text>
+  <text x="65" y="300" class="section-purple">ROUTING LANES</text>
+  <text x="42" y="337" class="heading">Rules decide when generation is needed</text>
+  <rect x="42" y="352" width="364" height="41" rx="8" fill="#eef8ff" stroke="#9acbf3"/>
+  <text x="55" y="369" class="chip">LIVE - Router V1</text>
+  <text x="55" y="385" class="small">STOP, voice test, capabilities, simple actions and guards</text>
+  <rect x="42" y="402" width="364" height="41" rx="8" fill="#f3f0ff" stroke="#b9adf4"/>
+  <text x="55" y="419" class="chip" fill="#5b42ba">SHADOW - Routing V2</text>
+  <text x="55" y="435" class="small">segmenter &#8594; capability search &#8594; resolver &#8594; assembler</text>
+  <rect x="42" y="452" width="364" height="32" rx="8" fill="#fff9e9" stroke="#f2d47b"/>
+  <text x="55" y="472" class="small">OPTIONAL - n8n is off by default; failure falls through safely</text>
+  <text x="42" y="495" class="tiny">V2 executes only behind explicit quality and configuration gates.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="442" y="278" width="394" height="224" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="442" y="278" width="394" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="464" cy="295" r="13" fill="#1689e7"/>
+  <text x="464" y="295" class="num">5</text>
+  <text x="483" y="300" class="section">TURNCONTEXT</text>
+  <text x="460" y="337" class="heading">Ephemeral context for one turn</text>
+  <g transform="translate(460 352)">
+    <rect width="170" height="32" rx="7" fill="#eff8ff" stroke="#b4d9f8"/><text x="12" y="20" class="mono">question + session_id</text>
+    <rect x="180" width="170" height="32" rx="7" fill="#eff8ff" stroke="#b4d9f8"/><text x="192" y="20" class="mono">recent_turns</text>
+    <rect y="41" width="170" height="32" rx="7" fill="#eff8ff" stroke="#b4d9f8"/><text x="12" y="61" class="mono">memories + sources</text>
+    <rect x="180" y="41" width="170" height="32" rx="7" fill="#eff8ff" stroke="#b4d9f8"/><text x="192" y="61" class="mono">local_time</text>
+    <rect y="82" width="170" height="32" rx="7" fill="#eff8ff" stroke="#b4d9f8"/><text x="12" y="102" class="mono">screen (optional)</text>
+    <rect x="180" y="82" width="170" height="32" rx="7" fill="#eff8ff" stroke="#b4d9f8"/><text x="192" y="102" class="mono">tool_observations</text>
+  </g>
+  <text x="460" y="482" class="small">Task planning receives no tool observations; conversation may receive bounded ones.</text>
+  <text x="460" y="496" class="tiny">Retrieved text is data. It cannot create intent, action, permission, or success.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="854" y="278" width="418" height="224" rx="12" fill="#ffffff" stroke="#36b994" stroke-width="1.5"/>
+    <rect x="854" y="278" width="418" height="34" rx="12" fill="url(#greenBand)"/>
+  </g>
+  <circle cx="876" cy="295" r="13" fill="#17a77a"/>
+  <text x="876" y="295" class="num">6</text>
+  <text x="895" y="300" class="section-green">RETRIEVAL - TWO SEPARATE COLLECTIONS</text>
+  <rect x="872" y="328" width="382" height="73" rx="8" fill="#edfbf7" stroke="#77cfb6"/>
+  <text x="886" y="347" class="mono">voiceloop_memory</text>
+  <text x="886" y="366" class="body">5 axes: semantic .40, topic .20, intent .15,</text>
+  <text x="886" y="384" class="body">decision .15, person_context .10; weighted RRF k=60</text>
+  <rect x="872" y="410" width="184" height="71" rx="8" fill="#f5fbff" stroke="#a8d1f2"/>
+  <text x="884" y="430" class="mono">SQLite partner</text>
+  <text x="884" y="449" class="small">memories + semantic</text>
+  <text x="884" y="466" class="small">vector fallback</text>
+  <rect x="1065" y="410" width="189" height="71" rx="8" fill="#f5f2ff" stroke="#b9adf4"/>
+  <text x="1077" y="430" class="mono">capabilities_v1</text>
+  <text x="1077" y="449" class="small">semantic, intent,</text>
+  <text x="1077" y="466" class="small">target_context - V2 only</text>
+  <text x="872" y="496" class="tiny">Capability vectors are never merged into personal memory.</text>
+
+  <path d="M224 258V269H224" fill="none" stroke="#1b86e8" stroke-width="2.3" marker-end="url(#arrowBlue)"/>
+  <path d="M1041 258V268H1063" fill="none" stroke="#17a77a" stroke-width="2.3" marker-end="url(#arrowGreen)"/>
+  <path d="M424 390H432" fill="none" stroke="#725ee8" stroke-width="2.3" marker-end="url(#arrowPurple)"/>
+  <path d="M836 390H846" fill="none" stroke="#17a77a" stroke-width="2.3" marker-end="url(#arrowGreen)"/>
+
+  <!-- Row 3 -->
+  <g filter="url(#shadow)">
+    <rect x="24" y="522" width="360" height="216" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="24" y="522" width="360" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="46" cy="539" r="13" fill="#1689e7"/>
+  <text x="46" y="539" class="num">7</text>
+  <text x="65" y="544" class="section">PLAN CONTRACT</text>
+  <text x="42" y="581" class="heading">The model proposes; local code binds</text>
+  <rect x="42" y="595" width="324" height="47" rx="8" fill="#eff8ff" stroke="#a8d1f2"/>
+  <text x="55" y="614" class="mono">ProposedPlan</text>
+  <text x="55" y="632" class="small">intent, response, confidence, clarification, max 12 steps</text>
+  <path d="M204 646V657" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <rect x="42" y="662" width="324" height="47" rx="8" fill="#edfbf7" stroke="#77cfb6"/>
+  <text x="55" y="681" class="mono">CommandPlan</text>
+  <text x="55" y="699" class="small">known actions, UUID dependencies, locally bound targets</text>
+  <text x="42" y="728" class="tiny">Unknown action, bad edge, or fake success claim rejects every step.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="402" y="522" width="408" height="216" rx="12" fill="#ffffff" stroke="#36b994" stroke-width="1.5"/>
+    <rect x="402" y="522" width="408" height="34" rx="12" fill="url(#greenBand)"/>
+  </g>
+  <circle cx="424" cy="539" r="13" fill="#17a77a"/>
+  <text x="424" y="539" class="num">8</text>
+  <text x="443" y="544" class="section-green">POLICY + CONFIRMATION</text>
+  <text x="420" y="581" class="heading">ActionRegistry is the authority boundary</text>
+  <text x="420" y="608" class="body">&#8226; action_id must exist in the registered local allowlist</text>
+  <text x="420" y="631" class="body">&#8226; arguments must match strict per-action JSON schemas</text>
+  <text x="420" y="654" class="body">&#8226; model risk can never lower the registered risk</text>
+  <text x="420" y="677" class="body">&#8226; medium actions keep confirmation when locally required</text>
+  <rect x="420" y="692" width="372" height="29" rx="7" fill="#edfbf7" stroke="#77cfb6"/>
+  <text x="434" y="711" class="small">Desktop identity is revalidated and bound before consent.</text>
+  <text x="420" y="731" class="tiny">No valid policy result reaches the executor queue.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="828" y="522" width="444" height="216" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="828" y="522" width="444" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="850" cy="539" r="13" fill="#1689e7"/>
+  <text x="850" y="539" class="num">9</text>
+  <text x="869" y="544" class="section">EXECUTION</text>
+  <text x="846" y="581" class="heading">One queue, one active plan, typed results</text>
+  <g transform="translate(846 598)">
+    <rect width="121" height="43" rx="8" fill="#f2f9ff" stroke="#a8d1f2"/>
+    <text x="12" y="19" class="chip">Queue limit 10</text><text x="12" y="34" class="tiny">overflow rejected</text>
+    <rect x="131" width="128" height="43" rx="8" fill="#f2f9ff" stroke="#a8d1f2"/>
+    <text x="143" y="19" class="chip">TTL 300 sec</text><text x="143" y="34" class="tiny">consent expires</text>
+    <rect x="269" width="151" height="43" rx="8" fill="#f2f9ff" stroke="#a8d1f2"/>
+    <text x="281" y="19" class="chip">Dependencies</text><text x="281" y="34" class="tiny">first failure stops plan</text>
+  </g>
+  <text x="846" y="667" class="body">submit &#8594; bind targets &#8594; enforce policy &#8594; queue &#8594; handler</text>
+  <rect x="846" y="682" width="408" height="39" rx="8" fill="#edfbf7" stroke="#77cfb6"/>
+  <text x="860" y="699" class="mono">ActionResult(success, message, data)</text>
+  <text x="860" y="715" class="tiny">Only the executor result can establish that work succeeded.</text>
+
+  <path d="M1063 502V512H204V514" fill="none" stroke="#1b86e8" stroke-width="2.3" marker-end="url(#arrowBlue)"/>
+  <path d="M384 630H394" fill="none" stroke="#17a77a" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <path d="M810 630H820" fill="none" stroke="#17a77a" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <path d="M224 502V514" fill="none" stroke="#725ee8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowPurple)"/>
+  <text x="236" y="517" class="tiny">deterministic plan bypass</text>
+
+  <!-- Row 4 -->
+  <g filter="url(#shadow)">
+    <rect x="24" y="758" width="588" height="205" rx="12" fill="#ffffff" stroke="#36b994" stroke-width="1.5"/>
+    <rect x="24" y="758" width="588" height="34" rx="12" fill="url(#greenBand)"/>
+  </g>
+  <circle cx="46" cy="775" r="13" fill="#17a77a"/>
+  <text x="46" y="775" class="num">10</text>
+  <text x="66" y="780" class="section-green">PERSISTENCE + OBSERVATION</text>
+  <text x="42" y="817" class="heading">Canonical records stay local and inspectable</text>
+  <g transform="translate(42 833)">
+    <rect width="171" height="66" rx="8" fill="#edfbf7" stroke="#91d7c3"/>
+    <text x="12" y="19" class="mono">commands</text><text x="12" y="36" class="small">status, plan, result</text><text x="12" y="53" class="small">provider and errors</text>
+    <rect x="181" width="171" height="66" rx="8" fill="#edfbf7" stroke="#91d7c3"/>
+    <text x="193" y="19" class="mono">command_events</text><text x="193" y="36" class="small">ordered transitions</text><text x="193" y="53" class="small">detail JSON + time</text>
+    <rect x="362" width="184" height="66" rx="8" fill="#edfbf7" stroke="#91d7c3"/>
+    <text x="374" y="19" class="mono">conversation / memories</text><text x="374" y="36" class="small">history and explicit facts</text><text x="374" y="53" class="small">meeting records + app_state</text>
+  </g>
+  <text x="42" y="920" class="body">SSE events, health cards, source links, and turn traces expose the live pipeline.</text>
+  <text x="42" y="946" class="small">Observation may inform a later turn; it never becomes a new command by itself.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="630" y="758" width="642" height="205" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="630" y="758" width="642" height="34" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <circle cx="652" cy="775" r="13" fill="#1689e7"/>
+  <text x="652" y="775" class="num">11</text>
+  <text x="672" y="780" class="section">ACTION ADAPTERS</text>
+  <text x="648" y="817" class="heading">Capabilities are explicit and bounded</text>
+  <g transform="translate(648 835)">
+    <rect width="112" height="45" rx="8" fill="#eff8ff" stroke="#a8d1f2"/><text x="13" y="19" class="chip">Windows UIA</text><text x="13" y="34" class="tiny">desktop targets</text>
+    <rect x="122" width="112" height="45" rx="8" fill="#eff8ff" stroke="#a8d1f2"/><text x="135" y="19" class="chip">UI.Vision</text><text x="135" y="34" class="tiny">named macros</text>
+    <rect x="244" width="112" height="45" rx="8" fill="#eff8ff" stroke="#a8d1f2"/><text x="257" y="19" class="chip">Speech / TTS</text><text x="257" y="34" class="tiny">Azure or local</text>
+    <rect x="366" width="112" height="45" rx="8" fill="#eff8ff" stroke="#a8d1f2"/><text x="379" y="19" class="chip">Memory</text><text x="379" y="34" class="tiny">remember / recall</text>
+    <rect x="488" width="125" height="45" rx="8" fill="#eff8ff" stroke="#a8d1f2"/><text x="501" y="19" class="chip">Web / APIs</text><text x="501" y="34" class="tiny">allowlisted clients</text>
+  </g>
+  <text x="648" y="906" class="body">Handlers return messages and structured data; executor wraps them as ActionResult.</text>
+  <rect x="648" y="922" width="606" height="27" rx="7" fill="#fff0f1" stroke="#ef9aaa"/>
+  <text x="661" y="940" class="small" fill="#b92d44">There is no general cmd.exe or PowerShell tool available to the model.</text>
+
+  <path d="M1050 738V748H951V750" fill="none" stroke="#1b86e8" stroke-width="2.3" marker-end="url(#arrowBlue)"/>
+  <path d="M951 963V974H318V969" fill="none" stroke="#17a77a" stroke-width="2.2" marker-end="url(#arrowGreen)"/>
+
+  <!-- Right explanatory rail -->
+  <g filter="url(#shadow)">
+    <rect x="1292" y="108" width="284" height="394" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="1292" y="108" width="284" height="44" rx="12" fill="#e7f5ff"/>
+  </g>
+  <text x="1310" y="135" class="heading">How to read this</text>
+  <g transform="translate(1310 170)">
+    <circle cx="13" cy="13" r="13" fill="#1689e7"/><text x="13" y="13" class="num">1</text>
+    <text x="36" y="9" class="chip">Blue = live control path</text><text x="36" y="26" class="small">one request moves forward</text>
+    <circle cx="13" cy="66" r="13" fill="#725ee8"/><text x="13" y="66" class="num">2</text>
+    <text x="36" y="62" class="chip">Purple = shadow / optional</text><text x="36" y="79" class="small">measures without silent control</text>
+    <circle cx="13" cy="119" r="13" fill="#17a77a"/><text x="13" y="119" class="num">3</text>
+    <text x="36" y="115" class="chip">Green = state / evidence</text><text x="36" y="132" class="small">durable records and results</text>
+    <circle cx="13" cy="172" r="13" fill="#ef5369"/><text x="13" y="172" class="num">4</text>
+    <text x="36" y="168" class="chip">Red = hard boundary</text><text x="36" y="185" class="small">stop, consent, or prohibition</text>
+  </g>
+  <rect x="1310" y="382" width="248" height="96" rx="9" fill="#fff9e9" stroke="#efd477"/>
+  <text x="1325" y="404" class="section" fill="#8e6810">CORE IDEA</text>
+  <text x="1325" y="426" class="small">The model may propose a typed plan.</text>
+  <text x="1325" y="445" class="small">Local code owns action identity, risk,</text>
+  <text x="1325" y="464" class="small">confirmation, execution, and success.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1292" y="522" width="284" height="441" rx="12" fill="#ffffff" stroke="#ef8296" stroke-width="1.5"/>
+    <rect x="1292" y="522" width="284" height="44" rx="12" fill="url(#redBand)"/>
+  </g>
+  <text x="1310" y="549" class="heading" fill="#b82d43">Safety boundaries</text>
+  <rect x="1310" y="586" width="248" height="83" rx="9" fill="#fff0f1" stroke="#ef9aaa"/>
+  <text x="1325" y="607" class="section-red">STOP / PRZERWIJ</text>
+  <text x="1325" y="629" class="small">Deterministic plan calls stop_all().</text>
+  <text x="1325" y="647" class="small">Pending consent, queue, and active task cancel.</text>
+  <rect x="1310" y="684" width="248" height="65" rx="9" fill="#f4f1ff" stroke="#b9adf4"/>
+  <text x="1325" y="705" class="section-purple">SITUATIONSTATE V1</text>
+  <text x="1325" y="726" class="small">Read-only to planning; no action mutation.</text>
+  <rect x="1310" y="764" width="248" height="65" rx="9" fill="#f4f1ff" stroke="#b9adf4"/>
+  <text x="1325" y="785" class="section-purple">COMMITMENT LAYER</text>
+  <text x="1325" y="806" class="small">Text analysis only; not an execution trigger.</text>
+  <rect x="1310" y="844" width="248" height="94" rx="9" fill="#eef8ff" stroke="#a8d1f2"/>
+  <text x="1325" y="866" class="section">TRUST BOUNDARY</text>
+  <text x="1325" y="888" class="small">Memory, screen text, and web results</text>
+  <text x="1325" y="907" class="small">are untrusted context. They cannot add</text>
+  <text x="1325" y="926" class="small">an action or lower a confirmation rule.</text>
+
+  <!-- Example timeline -->
+  <g filter="url(#shadow)">
+    <rect x="24" y="986" width="1552" height="153" rx="12" fill="#ffffff" stroke="#70b5f0" stroke-width="1.5"/>
+    <rect x="24" y="986" width="1552" height="35" rx="12" fill="url(#cyanBand)"/>
+  </g>
+  <text x="43" y="1009" class="section">EXAMPLE TURN TIMELINE - FROM UTTERANCE TO VERIFIED RESULT</text>
+  <g transform="translate(50 1046)">
+    <g transform="translate(0)">
+      <circle cx="15" cy="15" r="15" fill="#1689e7"/><text x="15" y="15" class="timeline-num">1</text>
+      <text x="38" y="12" class="chip">User speaks</text><text x="38" y="28" class="tiny">or types</text>
+    </g>
+    <path d="M132 15H160" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <g transform="translate(170)">
+      <circle cx="15" cy="15" r="15" fill="#1689e7"/><text x="15" y="15" class="timeline-num">2</text>
+      <text x="38" y="12" class="chip">Envelope</text><text x="38" y="28" class="tiny">normalizes STT</text>
+    </g>
+    <path d="M302 15H330" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <g transform="translate(340)">
+      <circle cx="15" cy="15" r="15" fill="#1689e7"/><text x="15" y="15" class="timeline-num">3</text>
+      <text x="38" y="12" class="chip">Intake</text><text x="38" y="28" class="tiny">saves + gates</text>
+    </g>
+    <path d="M462 15H490" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <g transform="translate(500)">
+      <circle cx="15" cy="15" r="15" fill="#725ee8"/><text x="15" y="15" class="timeline-num">4</text>
+      <text x="38" y="12" class="chip">Route</text><text x="38" y="28" class="tiny">deterministic first</text>
+    </g>
+    <path d="M622 15H650" stroke="#725ee8" stroke-width="2" marker-end="url(#arrowPurple)"/>
+    <g transform="translate(660)">
+      <circle cx="15" cy="15" r="15" fill="#17a77a"/><text x="15" y="15" class="timeline-num">5</text>
+      <text x="38" y="12" class="chip">Retrieve</text><text x="38" y="28" class="tiny">only if needed</text>
+    </g>
+    <path d="M792 15H820" stroke="#17a77a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+    <g transform="translate(830)">
+      <circle cx="15" cy="15" r="15" fill="#1689e7"/><text x="15" y="15" class="timeline-num">6</text>
+      <text x="38" y="12" class="chip">Propose</text><text x="38" y="28" class="tiny">typed plan</text>
+    </g>
+    <path d="M952 15H980" stroke="#1b86e8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <g transform="translate(990)">
+      <circle cx="15" cy="15" r="15" fill="#17a77a"/><text x="15" y="15" class="timeline-num">7</text>
+      <text x="38" y="12" class="chip">Policy</text><text x="38" y="28" class="tiny">bind + validate</text>
+    </g>
+    <path d="M1112 15H1140" stroke="#17a77a" stroke-width="2" marker-end="url(#arrowGreen)"/>
+    <g transform="translate(1150)">
+      <circle cx="15" cy="15" r="15" fill="#ef5369"/><text x="15" y="15" class="timeline-num">8</text>
+      <text x="38" y="12" class="chip">Confirm</text><text x="38" y="28" class="tiny">when required</text>
+    </g>
+    <path d="M1282 15H1310" stroke="#ef5369" stroke-width="2" marker-end="url(#arrowBlue)"/>
+    <g transform="translate(1320)">
+      <circle cx="15" cy="15" r="15" fill="#1689e7"/><text x="15" y="15" class="timeline-num">9</text>
+      <text x="38" y="12" class="chip">Execute</text><text x="38" y="28" class="tiny">ActionResult</text>
+    </g>
+  </g>
+  <text x="50" y="1123" class="small">At every stage, failure stays explicit: clarification, rejected, cancelled, failed, or a typed success result.</text>
+
+  <text x="24" y="1174" class="tiny">VoiceLoop | architecture infographic v2 | based on current repository contracts</text>
+  <text x="1576" y="1174" class="tiny" text-anchor="end">Canonical details: docs/ARCHITECTURE_CURRENT.md</text>
+</svg>
