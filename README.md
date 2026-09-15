@@ -1,7 +1,8 @@
 # VoiceLoop
 
-A local Windows assistant for Polish speech. The model may propose a
-typed plan. Local code decides whether anything runs.
+A local Windows context broker for Polish speech, desktop signals, and
+operational memory. Models may propose typed plans; local code decides
+whether anything runs.
 
 ```text
 LLM output is a proposal, not authority.
@@ -150,7 +151,7 @@ coordinator with fakes, not a live Deepgram socket.
 
 - Live STT, live Qdrant, or a real Explorer window. Those are optional
   on the machine, not in CI.
-- That commitments or situation state change what the assistant does.
+- That commitments or situation state change VoiceLoop behavior.
   They are tested *not* to steer the planner.
 - That Routing V2 is good enough to go live. The tests lock the
   refuse-to-guess rules and keep the execute flag off.
