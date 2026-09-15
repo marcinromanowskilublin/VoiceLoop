@@ -1,8 +1,9 @@
 # VoiceLoop
 
-A local Windows context broker for Polish speech, desktop signals, and
-operational memory. Models may propose typed plans; local code decides
-whether anything runs.
+VoiceLoop is a local Windows context broker that assembles speech,
+documents, desktop signals, and connected environmental sources into
+bounded operational context. Models may propose typed plans; local code
+decides whether anything runs.
 
 ```text
 LLM output is a proposal, not authority.
