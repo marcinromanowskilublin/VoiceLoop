@@ -20,6 +20,17 @@ Local code decides what can run.
 > [GNU AGPL v3.0 only](LICENSE). See
 > [copyright and attribution details](NOTICE.md).
 
+## Why context, not more content
+
+Modern systems already produce more content than a model can safely use:
+transcripts, documents, screens, histories, and tool output. The real shortage
+is not content, but relevant, timely, and trustworthy context for the current
+turn. Too little context produces shallow results; indiscriminate context adds
+noise, exposes private data, and can mistake old text for present intent.
+VoiceLoop assembles a bounded, ephemeral context package, preserves source
+provenance, separates evidence from authority, and leaves every action decision
+to local policy.
+
 The unusual part is not “an LLM with tools”. It is that the hard
 boundaries are written as contracts and then hit by tests: a bad step
 kills the whole plan, retrieved text cannot invent an action, and
