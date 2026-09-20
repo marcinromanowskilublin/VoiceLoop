@@ -267,7 +267,7 @@ class OpenAICompatiblePlanner:
                 "conversation_active": conversation_active,
             },
             "actions": actions,
-            "memories": memories[-20:],
+            "memories": memories[:20],
             "screen": screen.model_dump(mode="json", exclude={"image_path"}) if screen else None,
             # Zewnętrzne wyniki nie są potrzebne do wyboru akcji. Trafiają dopiero
             # do bezwykonawczej ścieżki conversation, więc tekst strony nie może
@@ -558,7 +558,7 @@ class OpenAICompatiblePlanner:
         if local_time:
             context["local_time"] = local_time
         if memories:
-            context["memories"] = [str(item)[:900] for item in memories[-8:]]
+            context["memories"] = [str(item)[:900] for item in memories[:8]]
         if screen:
             context["screen"] = screen.model_dump(mode="json", exclude={"image_path"})
         if tool_observations:
@@ -996,7 +996,8 @@ class OpenAICompatiblePlanner:
                     r"zapisz|dodaj|utworz|stworz|zapamietaj|remember|"
                     r"zmien|przemianuj|nazwij|"
                     r"run|execute|open|launch|click|macro|uivision|"
-                    r"paste|wklej|zaznacz|select"
+                    r"paste|wklej|zaznacz|select|"
+                    r"odczytaj|przeczytaj|wpisz|wstaw|zastap"
                     r")\b"
                     r"(?:\s+\S+)?"
                 ),

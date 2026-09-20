@@ -77,6 +77,13 @@ class CommandExecutor:
             return command
 
         if plan.confirmation_required:
+            stale_ids = [
+                request_id
+                for request_id in tuple(self.pending_confirmation)
+                if request_id != plan.request_id
+            ]
+            for request_id in stale_ids:
+                await self.cancel(request_id)
             async with self._state_lock:
                 self.pending_confirmation[plan.request_id] = plan
                 command = await self.memory.update_command(
@@ -133,7 +140,10 @@ class CommandExecutor:
             command = await self.memory.update_command(
                 request_id,
                 status=CommandStatus.CANCELLED,
-                error="Anulowano przez użytkownika.",
+                error=(
+                    "Anulowano przez użytkownika. "
+                    "Nie cofam czynności, która zdążyła się wykonać."
+                ),
             )
             self._resolve_completion(request_id, command)
         if execution is not None:
@@ -169,7 +179,7 @@ class CommandExecutor:
                     await self.memory.update_command(
                         self._current_request_id,
                         status=CommandStatus.CANCELLED,
-                        error="Wykonanie przerwane.",
+                        error="Wykonanie przerwane. Jeśli zapis już się rozpoczął, nie cofam go.",
                     )
         if execution is not None:
             with suppress(asyncio.CancelledError):
@@ -247,7 +257,7 @@ class CommandExecutor:
                     await self._finish_execution(
                         plan,
                         status=CommandStatus.CANCELLED,
-                        error="Wykonanie przerwane.",
+                        error="Wykonanie przerwane. Jeśli zapis już się rozpoczął, nie cofam go.",
                     )
                 except Exception as exc:
                     failed = await self._finish_execution(

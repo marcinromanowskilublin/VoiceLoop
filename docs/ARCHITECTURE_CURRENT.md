@@ -1,8 +1,9 @@
 # VoiceLoop — aktualny baseline architektury
 
-**ETAP 0.** Stan kodu z 7 września 2026.  
+**Baseline.** Stan kodu z 20 września 2026.
 **Źródło prawdy:** `listener/voiceloop/`. Starsze opisy ustępują kodowi.  
-**Ten plik nie zmienia zachowania produkcyjnej pętli.** ETAP 1–3 dodały kontrakty i testy; planer nadal nie wykonuje i nie czyta stanu jako intencji.
+**Ten plik nie zmienia zachowania produkcyjnej pętli.** Planer nadal nie
+wykonuje i nie czyta pamięci, timeline'u ani stanu jako źródła intencji.
 
 Rdzeń zostaje:
 
@@ -10,7 +11,8 @@ Rdzeń zostaje:
 planer → walidacja → allowlista → polityka → executor
 ```
 
-Brak jawnego modelu sytuacji to **PLANOWANE**, nie dziura w executorze.
+Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
+Żaden z nich nie jest źródłem akcji dla executora.
 
 ---
 
@@ -20,7 +22,8 @@ Brak jawnego modelu sytuacji to **PLANOWANE**, nie dziura w executorze.
 
 - Wejście → `CommandRequest` → zapis SQLite + dedupe → STOP/pauza → tanie reguły → (opcjonalnie) n8n → plan LLM albo plan V1 → `enforce_policy` → jedna kolejka executora → `ActionResult`.
 - LLM zwraca `ProposedPlan`. Lokalny kod wiąże go do `CommandPlan`. Model nie wykonuje akcji i nie dostaje powłoki.
-- Allowlista: 42 `ActionSpec` w `listener/voiceloop/actions.py`. 0 akcji `high`. 8 `medium`, z czego 7 wymaga potwierdzenia.
+- Allowlista: 44 `ActionSpec` w `listener/voiceloop/actions.py`. 0 akcji `high`.
+  9 `medium`, z czego 8 wymaga potwierdzenia.
 - `windows_shell.py` = UIA pulpitu i Eksploratora. To nie jest spawn `cmd` / PowerShell dla LLM.
 - Pamięć jest hybrydą SQL + Qdrant w trzech rolach (A/B/C poniżej). To nie jest BM25 i nie jest „brakiem hybrydy”.
 - Capabilities żyją w osobnej kolekcji Qdrant `voiceloop_capabilities_v1`. Nie merge z `voiceloop_memory`.
@@ -30,7 +33,9 @@ Brak jawnego modelu sytuacji to **PLANOWANE**, nie dziura w executorze.
 ### EKSPERYMENT (kod jest, nie steruje produkcją albo nie jest wpięty)
 
 - Routing V2: `routing_v2_enabled=true`, `shadow_mode=true`, `routing_v2_execute=false`. Liczy się obok V1. Live wymaga quality gate + zgodnego fingerprintu + (opcjonalnie) canary.
-- Commitment Layer: detector + scoring + schema, testy w `tests/test_commitment_analysis.py`. Analiza tekstu only. **Nie** importuje jej `assistant.py` ani `app.py`.
+- Commitment Layer: detector + scoring + schema. `assistant.py` uruchamia go
+  wyłącznie jako `commitment.shadow`; wynik trafia do eventu, nie do planu,
+  executora ani trwałego stanu.
 - `EvidenceItem` w `commitments/schema.py` (`rule` / `vector` / `temporal` / `resolver`) — to **obecny** typ commitmentów. Detector emituje wyłącznie `kind="rule"`. To **nie** jest przyszły `EvidenceItemV1` sytuacji.
 - n8n: `n8n_enabled=false`. Webhook dokładnych fraz, bez Execute Command. Pad n8n nie wali asystenta.
 - Hume EVI: szkielet, domyślnie off.
@@ -39,6 +44,11 @@ Brak jawnego modelu sytuacji to **PLANOWANE**, nie dziura w executorze.
 - `EvidenceItemV1` (`situation/evidence.py`) — kontrakt dowodu; nie jest commitment `EvidenceItem` i nie wiąże akcji.
 - `SituationStateV1` — ledger in-memory + `GET /api/v1/situation`. Planer nie czyta go jako intencji. LLM nie pisze. Brak tabeli SQL `situation`.
 - `StateProposal` (`situation/proposal.py`) — model może proponować (`propose_fact` + `evidence_refs`). Lokalne `StatePolicy` + `StateReducer` decydują i wołają `append_event(actor=local_code)`. **Nie** wpięte w planer / `assistant.py`. Tylko testy / przyszły shadow.
+- Context Timeline V1: lokalne tabele zdarzeń/epizodów, FTS5, jawne adaptery
+  Screenpipe i spotkań, sampler foreground, encje z review gate, selektywne
+  wektory, TimeFirstRetriever i harness ewaluacji. Recall jest domyślnie
+  wyłączony (`CONTEXT_TIMELINE_RECALL_ENABLED=false`); brak automatycznych pętli.
+  Pełny kontrakt: [`CONTEXT_TIMELINE_V1.md`](CONTEXT_TIMELINE_V1.md).
 
 ### PLANOWANE (nie wpinąć w planer w tym etapie)
 
@@ -47,6 +57,8 @@ Brak jawnego modelu sytuacji to **PLANOWANE**, nie dziura w executorze.
 - Etapy wektorowe i temporalne commitmentów (schema ma sloty, kod ich nie wypełnia).
 - Live Routing V2 po quality gate z liczbami.
 - Automatyczny prune wektorów (`VECTOR_MEMORY_PRUNE_ENABLED=false`).
+- Background ingest/foreground/prune Context Timeline oraz produkcyjny quality
+  gate na prywatnym gold secie.
 
 Kontrakty ETAP 1–3 są w repo i **nie sterują** planerem:
 
@@ -160,11 +172,25 @@ RRF pamięci: `k=60`, `VECTOR_MEMORY_MIN_SCORE=0.0` (celowo — fusion jest na r
 
 SQL (`data/voiceloop.db`, WAL) jest **partnerem** Qdranta, nie zamiennikiem BM25:
 
-**A — concat do planera.** `AssistantService._create_plan` zbiera równolegle: hitów Qdrant (albo fallback B) **oraz** `memory.list_memories()`. Jeśli wśród wektorów nie ma `source=manual_memory`, dopina 3 albo 30 jawnych wspomnień. Do tego ostatnie streszczenia akcji. Całość idzie do `TurnContext.memories` → LLM. To jest hybryda kontekstowa, nie jeden ranking BM25+wektor.
+**A — Context Pack do planera.** `AssistantService._create_plan` zbiera
+równolegle Qdrant/fallback B, jawne pamięci, ostatnie akcje i komunikaty runtime.
+`ContextAssembler` zachowuje ranking, deduplikuje i przydziela osobne budżety
+źródłom. Typowany `ContextPackV1` ma kompatybilny, jawnie niezaufany widok
+`TurnContext.memories: list[str]`. Najlepszy hit nie wypada już przez podwójne
+cięcie końca listy.
 
 **B — failover `vector_memories`.** Gdy Qdrant wyłączony, padł albo zwrócił pusto, `MemoryStore.search_vector_memories()` robi cosine po JSON osi `semantic` w SQLite. Dual-write `semantic` przy `QDRANT_DUAL_WRITE=true`. Ingest Screenpipe przy padzie Qdranta jest fail-closed (`QdrantUnavailableError`) — nie wolno udawać „brak duplikatu”. Retrieval użytkownika może spaść na SQL; ingest nie.
 
-**C — `remember` / `recall`.** `remember` i `remember_last_source` piszą tabelę `memories` (plus indeks Qdrant przez `ManualMemoryService`, gdy działa). `recall` najpierw Qdrant 5 osi, potem B, na końcu **podłańcuch tekstowy** po `memories` (`retrieval: lexical_fallback`). To nie jest BM25.
+**C — `remember` / `recall`.** `remember` i `remember_last_source` piszą tabelę
+`memories` (plus indeks Qdrant przez `ManualMemoryService`, gdy działa).
+Domyślny recall nadal używa Qdrant → B → podłańcuch tekstowy. Przy jawnym
+`CONTEXT_TIMELINE_RECALL_ENABLED=true` i pytaniu z zakresem czasu najpierw
+uruchamia się TimeFirstRetriever: FTS timeline'u → Screenpipe → semantic scout.
+
+**D — Context Timeline V1 (opt-in).** `context_events` i `context_episodes` są
+kanonicznym, czasowym partnerem pamięci A/B/C. FTS służy do dokładnych nazw i
+okien; Qdrant przechowuje wyłącznie znaczenie epizodów. Żadna z tych tabel nie
+jest tabelą `situation` i nie steruje executorem.
 
 Capabilities **nie** wchodzą do A/B/C. Osobna kolekcja, osobny RRF (normalizacja do stałego zestawu osi capability — inny wariant niż pamięć; nie scalać helperów).
 
@@ -243,6 +269,10 @@ Nie wolno karmić outputu narzędzia z powrotem jako executable intent. Threshol
 | `StateProposal` | `situation/proposal.py` | propozycja stanu; nie jest `CommandPlan` i nie steruje planerem |
 | `ResolutionDecisionV1` | `models.py` | werdykt V2 na subtask |
 | `TurnContext` | `models.py` | kontekst jednej tury planera |
+| `ContextEventV1` | `context/schema.py` | kanoniczna obserwacja na osi czasu |
+| `ContextEpisodeV1` | `context/schema.py` | digest zakresu zdarzeń; jednostka wektoryzacji |
+| `ContextPackV1` | `context/schema.py` | uporządkowany, niewykonywalny kontekst jednej tury |
+| `ContextEntityV1` | `context/entities.py` | zatwierdzona osoba/projekt/tool/org ze stabilnym ID |
 
 ---
 
@@ -256,7 +286,7 @@ Brak `subprocess`, `cmd.exe`, PowerShell. LLM nie dostaje narzędzia „uruchom 
 
 ## Handoff 11.08 vs kod
 
-**§2 (prompt startowy) — częściowo nieaktualny.** Traktuje n8n jako stały pierwszy router, pomija V2 shadow, capabilities, `TranscriptEnvelopeV1`, hybryde A/B/C i to, że `POST /stop` jest soft barge-in. Tabelę akcji z §11 zastępuje `actions.py` (42, nie ~13).
+**§2 (prompt startowy) — częściowo nieaktualny.** Traktuje n8n jako stały pierwszy router, pomija V2 shadow, capabilities, `TranscriptEnvelopeV1`, hybryde A/B/C i to, że `POST /stop` jest soft barge-in. Tabelę akcji z §11 zastępuje `actions.py` (44, nie ~13).
 
 **§10 i Notion (30.08) — obowiązują dla wektorów:** pięć osi, wagi, RRF, dual-write `semantic`, SQLite jako failover, osobna kolekcja capabilities, `VECTOR_MEMORY_MIN_SCORE=0.0`, fail-closed ingest. Notion ma już przestarzale liczby allowlisty (26+7); wygrywa kod.
 
@@ -264,4 +294,10 @@ Brak `subprocess`, `cmd.exe`, PowerShell. LLM nie dostaje narzędzia „uruchom 
 
 ## Następny spokojny krok
 
-ETAP 1–4 (invariants, `EvidenceItemV1`, `SituationStateV1` read-only, `StateProposal` poza planerem) są zrobione. Następny spokojny krok to **ETAP 5: commitment shadow** — nie wpinąć analizatora w produkcyjny stan w tym samym przebiegu.
+Context Timeline ma kontrakty, lokalne magazyny, adaptery jawne, selektywne
+wektory i harness ewaluacji. Następny krok to **prywatny gold set + shadow
+report**, nie automatyczne włączenie workerów. Dopiero raport jakości może
+uzasadnić `CONTEXT_TIMELINE_RECALL_ENABLED=true`.
+
+Commitment shadow pozostaje eventem obserwacyjnym. Nie wpinamy go do
+SituationState ani executora razem z rolloutem timeline'u.

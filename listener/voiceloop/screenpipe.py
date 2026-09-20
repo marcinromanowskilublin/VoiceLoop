@@ -223,42 +223,42 @@ class ScreenpipeClient:
             end=now,
             limit=max(1, min(limit, 50)),
         )
-        results: list[ScreenpipeTextItem] = []
-        seen: set[tuple[str, str, str, str]] = set()
-        for item in reversed(items):
-            content = item.get("content")
-            if not isinstance(content, dict):
-                continue
-            app_name = str(content.get("app_name") or "").strip()
-            window_name = str(content.get("window_name") or "").strip()
-            timestamp = str(
-                content.get("timestamp")
-                or content.get("start_time")
-                or content.get("created_at")
-                or ""
-            ).strip()
-            text = str(
-                content.get("text")
-                or content.get("transcription")
-                or content.get("accessibility_text")
-                or ""
-            ).strip()
-            browser_url = str(content.get("browser_url") or "").strip()
-            key = (timestamp, app_name, window_name, text)
-            if key in seen or not (app_name or window_name or text):
-                continue
-            seen.add(key)
-            results.append(
-                ScreenpipeTextItem(
-                    app_name=app_name,
-                    window_name=window_name,
-                    timestamp=timestamp,
-                    browser_url=browser_url,
-                    text=text[:4000],
-                    content_type=str(item.get("type") or "").strip(),
-                )
+        return _parse_text_items(items)
+
+    async def text_activity_between(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        query: str | None = None,
+        max_results: int = 500,
+    ) -> list[ScreenpipeTextItem]:
+        """Search historical text with pagination across any local medium."""
+
+        if start.tzinfo is None or start.utcoffset() is None:
+            raise ValueError("start must be timezone-aware")
+        if end.tzinfo is None or end.utcoffset() is None:
+            raise ValueError("end must be timezone-aware")
+        if end < start:
+            raise ValueError("end precedes start")
+        max_results = max(1, min(int(max_results), 5000))
+        items: list[dict[str, Any]] = []
+        offset = 0
+        while len(items) < max_results:
+            page_size = min(50, max_results - len(items))
+            page = await self._search(
+                content_type="all",
+                start=start.astimezone(UTC),
+                end=end.astimezone(UTC),
+                limit=page_size,
+                offset=offset,
+                query=(query or "").strip() or None,
             )
-        return results
+            items.extend(page)
+            if len(page) < page_size:
+                break
+            offset += len(page)
+        return _parse_text_items(items)
 
     async def contexts_between(
         self,
@@ -457,6 +457,46 @@ class ScreenpipeClient:
         except ValueError as exc:
             raise ScreenpipeError("Screenpipe zwrócił nieprawidłową odpowiedź.") from exc
         return payload
+
+
+def _parse_text_items(items: list[dict[str, Any]]) -> list[ScreenpipeTextItem]:
+    results: list[ScreenpipeTextItem] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for item in items:
+        content = item.get("content")
+        if not isinstance(content, dict):
+            continue
+        app_name = str(content.get("app_name") or "").strip()
+        window_name = str(content.get("window_name") or "").strip()
+        timestamp = str(
+            content.get("timestamp")
+            or content.get("start_time")
+            or content.get("created_at")
+            or ""
+        ).strip()
+        text = str(
+            content.get("text")
+            or content.get("transcription")
+            or content.get("accessibility_text")
+            or ""
+        ).strip()
+        browser_url = str(content.get("browser_url") or "").strip()
+        key = (timestamp, app_name, window_name, text)
+        if key in seen or not (app_name or window_name or text):
+            continue
+        seen.add(key)
+        results.append(
+            ScreenpipeTextItem(
+                app_name=app_name,
+                window_name=window_name,
+                timestamp=timestamp,
+                browser_url=browser_url,
+                text=text[:4000],
+                content_type=str(item.get("type") or "").strip(),
+            )
+        )
+    results.sort(key=lambda item: item.timestamp)
+    return results
 
 
 def _audio_times(

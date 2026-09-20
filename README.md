@@ -107,6 +107,27 @@ content-hash, down-store raises) and
 `tests/test_threshold_guard.py` (the four diagnoses plus
 “measure, don’t apply”).
 
+### Time is the spine of local context
+
+Context Timeline V1 stores observed activity as time-bounded events, groups
+them into auditable episodes, and keeps exact search in SQLite FTS5. Qdrant is
+an optional semantic scout over episode meaning — not the canonical store and
+not a replacement for timestamps, application names, windows, or provenance.
+
+The implementation includes paginated Screenpipe history, both meeting
+transcript stores, explicit Win32 foreground observations, reviewed person and
+project entities, fail-closed SQL/FTS/Qdrant retention, selective episode
+vectors, and a retrieval evaluation harness. It is deliberately opt-in:
+`CONTEXT_TIMELINE_RECALL_ENABLED=false` remains the default, and no background
+ingest or foreground polling starts automatically.
+
+The complete contract, operating model, failure semantics, configuration, and
+rollout limits are documented in
+[`docs/CONTEXT_TIMELINE_V1.md`](docs/CONTEXT_TIMELINE_V1.md).
+
+Checked in `tests/test_context_foundation.py` and
+`tests/test_context_phase2.py`.
+
 ### Request received is not commitment accepted
 
 Polish “Wyślij mi dokumenty.” is a request that needs user review.

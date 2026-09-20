@@ -10,6 +10,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from .capability_index import CapabilityIndex, CapabilityIndexError
+from .context import ContextAssembler
 from .conversation_telemetry import ConversationTelemetry
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 from .events import EventBus
@@ -33,7 +34,11 @@ from .models import (
 )
 from .n8n_client import N8nClient, N8nUnavailableError
 from .qdrant_memory import QdrantMemoryError, QdrantVectorStore
-from .router import deterministic_plan, normalize_text
+from .router import (
+    confirmation_decision,
+    deterministic_plan,
+    normalize_text,
+)
 from .routing.service import RoutingV2Outcome, RoutingV2Service
 from .screen import ScreenContextService
 from .tts import WindowsTTS
@@ -69,11 +74,17 @@ VOICE_RESULT_ACTIONS = {
     "select_shell_items_by_letter",
     "snap_window_layout",
     "rename_under_cursor",
+    "read_active_notepad",
+    "write_active_notepad",
 }
 PROTECTED_DETERMINISTIC_INTENTS = {
     "list_capabilities",
+    "notepad_help",
+    "read_active_notepad",
     "stop",
+    "voice_confirmation",
     "voice_test",
+    "write_active_notepad",
 }
 CONVERSATION_HISTORY_LIMIT = 24
 CONVERSATION_RAW_HISTORY_LIMIT = 10
@@ -140,6 +151,7 @@ class AssistantService:
         self.telemetry = telemetry
         self.knowledge_tools = knowledge_tools
         self.commitment_shadow_enabled = commitment_shadow_enabled
+        self.context_assembler = ContextAssembler()
         self._latest_tool_observations: list[dict[str, object]] = []
         self.action_definitions = action_definitions
         self.dedupe_seconds = dedupe_seconds
@@ -193,7 +205,12 @@ class AssistantService:
         self._start_conversation_state()
         if cleaned:
             self._conversation_history.append({"role": "assistant", "content": cleaned})
-            await self.memory.add_message("assistant", cleaned, None)
+            await self.memory.add_message(
+                "assistant",
+                cleaned,
+                None,
+                session_id=self._conversation_session_id,
+            )
         await self.events.publish(
             "conversation.started",
             {"style": self._conversation_style, "greeting": cleaned},
@@ -211,7 +228,12 @@ class AssistantService:
             assistant_text=assistant_text,
         )
         if assistant_text.strip():
-            await self.memory.add_message("assistant", assistant_text.strip(), request_id)
+            await self.memory.add_message(
+                "assistant",
+                assistant_text.strip(),
+                request_id,
+                session_id=self._conversation_session_id,
+            )
 
     async def _emit_commitment_shadow(self, request: CommandRequest) -> None:
         if not self.commitment_shadow_enabled:
@@ -254,6 +276,12 @@ class AssistantService:
             LOGGER.exception("Commitment shadow failed")
 
     async def handle(self, request: CommandRequest) -> CommandAccepted:
+        decision = confirmation_decision(request.text or request.command_id or "")
+        if decision == "confirm" or (
+            decision == "cancel" and await self._pending_confirmation_id()
+        ):
+            return await self._handle_voice_confirmation(request, decision)
+
         safety_plan = deterministic_plan(request)
         if safety_plan and safety_plan.intent == "stop":
             return await self._handle_stop_request(request, safety_plan)
@@ -300,7 +328,6 @@ class AssistantService:
         self._remember_fingerprint(fingerprint, request.request_id)
         input_text = (request.text or request.command_id or "").strip()
         self._latest_tool_observations = []
-        await self.memory.add_message("user", input_text, request.request_id)
         await self.memory.update_command(
             request.request_id,
             status=CommandStatus.PLANNING,
@@ -328,6 +355,12 @@ class AssistantService:
             request,
             starts_conversation=starts_conversation,
         )
+        await self.memory.add_message(
+            "user",
+            input_text,
+            request.request_id,
+            session_id=request.interaction_session_id,
+        )
 
         if self._conversation_active and self._ends_conversation(input_text):
             self._end_conversation_state()
@@ -351,15 +384,23 @@ class AssistantService:
             safety_plan,
             conversation_active=conversation_active,
         )
+        protected_now = bool(
+            gated_deterministic is not None
+            and gated_deterministic.intent in PROTECTED_DETERMINISTIC_INTENTS
+        )
+        skip_routing_v2 = protected_now or self._notepad_voice_lane_enabled()
         route_in_background = bool(
             conversation_active
+            and not skip_routing_v2
             and self.routing_v2 is not None
             and self.routing_v2.settings.routing_v2_shadow_mode
             and hasattr(self.routing_v2, "live_execution_requested")
             and not self.routing_v2.live_execution_requested
             and not OpenAICompatiblePlanner._is_explicit_action_request(input_text)
         )
-        if route_in_background:
+        if skip_routing_v2:
+            routing_v2_outcome = None
+        elif route_in_background:
             routing_task = asyncio.create_task(
                 self._evaluate_routing_v2(
                     request,
@@ -417,6 +458,7 @@ class AssistantService:
             history_override=conversation_history,
         )
         plan = self._gate_planned_voice_action(request, plan)
+        plan = self._restrict_to_allowlist(plan)
         managed_execution = bool(
             request.managed_voice_turn
             and plan.steps
@@ -464,7 +506,12 @@ class AssistantService:
 
         await self.memory.create_command(request)
         input_text = (request.text or request.command_id or "").strip()
-        await self.memory.add_message("user", input_text, request.request_id)
+        await self.memory.add_message(
+            "user",
+            input_text,
+            request.request_id,
+            session_id=request.interaction_session_id,
+        )
         await self.memory.update_command(
             request.request_id,
             status=CommandStatus.SUCCEEDED,
@@ -547,7 +594,12 @@ class AssistantService:
             and not plan.confirmation_required
             and not plan.requires_clarification
         ):
-            await self.memory.add_message("assistant", plan.response_text, request.request_id)
+            await self.memory.add_message(
+                "assistant",
+                plan.response_text,
+                request.request_id,
+                session_id=request.interaction_session_id,
+            )
         await self.events.publish(
             "command.planned",
             {
@@ -627,7 +679,10 @@ class AssistantService:
         history_coro = (
             asyncio.sleep(0, result=history_override)
             if history_override is not None
-            else self.memory.recent_messages(limit=12)
+            else self.memory.recent_messages(
+                limit=12,
+                session_id=request.interaction_session_id,
+            )
         )
         screen_coro = (
             self.screen.capture(request.request_id)
@@ -661,6 +716,7 @@ class AssistantService:
             if knowledge_lookup is not None
             else []
         )
+        context_notices: list[str] = []
         if knowledge_lookup is not None and knowledge_lookup.error:
             tool_observations.append(
                 ToolObservation(
@@ -671,7 +727,7 @@ class AssistantService:
                     provider="knowledge_tools",
                 )
             )
-            memories.append(
+            context_notices.append(
                 "Aktualne wyszukiwanie nie powiodło się: "
                 f"{knowledge_lookup.error[:500]}. "
                 "Nie przedstawiaj świeżych danych jako sprawdzonych."
@@ -693,24 +749,32 @@ class AssistantService:
                     "process_name": screen_snapshot.process_name,
                 },
             )
+        manual_contexts: list[str] = []
         if not any("source=manual_memory;" in context for context in memories):
             memory_limit = 3 if memories else 30
-            memories.extend(
+            manual_contexts = [
                 item.content for item in reversed(memory_items[:memory_limit])
-            )
-        if self._recent_action_summaries:
-            memories.extend(self._recent_action_summaries[-5:])
+            ]
+        context_pack = self.context_assembler.assemble(
+            question=text,
+            session_id=request.interaction_session_id,
+            vector_contexts=memories,
+            manual_contexts=manual_contexts,
+            action_summaries=self._recent_action_summaries,
+            notices=context_notices,
+        )
         turn_context = TurnContext(
             question=text,
             session_id=request.interaction_session_id,
             recent_turns=list(history[-12:]),
-            memories=list(memories[-20:]),
+            memories=context_pack.memory_strings(limit=20),
+            context_pack=context_pack,
             tool_observations=tool_observations,
             local_time=datetime.now().astimezone().isoformat(),
             screen=screen_snapshot,
             sources={
                 "history_messages": len(history),
-                "memory_items": len(memories),
+                "memory_items": len(context_pack.items),
                 "knowledge_sources": len(tool_observations),
             },
         )
@@ -720,9 +784,10 @@ class AssistantService:
                 "context_ready",
                 metadata={
                     "history_messages": len(history),
-                    "memory_items": len(memories),
+                    "memory_items": len(context_pack.items),
                     "screen_included": screen_snapshot is not None,
                     "knowledge_sources": len(tool_observations),
+                    "context_sources": context_pack.sources,
                 },
             )
         try:
@@ -952,6 +1017,188 @@ class AssistantService:
                 provider="stt_confidence_gate",
             )
         return plan
+
+    def _notepad_voice_lane_enabled(self) -> bool:
+        settings = getattr(getattr(self.executor, "actions", None), "settings", None)
+        return bool(getattr(settings, "notepad_voice_lane", False))
+
+    def _allowed_action_ids(self) -> frozenset[str]:
+        settings = getattr(getattr(self.executor, "actions", None), "settings", None)
+        resolver = getattr(settings, "resolved_voice_action_allowlist", None)
+        if callable(resolver):
+            return frozenset(resolver())
+        if isinstance(resolver, frozenset):
+            return resolver
+        return frozenset()
+
+    def _restrict_to_allowlist(self, plan: CommandPlan) -> CommandPlan:
+        allowed = self._allowed_action_ids()
+        if not allowed or not plan.steps:
+            return plan
+        blocked = [step.action_id for step in plan.steps if step.action_id not in allowed]
+        if not blocked:
+            return plan
+        return CommandPlan(
+            request_id=plan.request_id,
+            intent=plan.intent,
+            response_text=(
+                "Ta operacja jest poza zakresem tej sesji. "
+                "Dostępne są odczyt aktywnej notatki i wpisanie podanej treści."
+            ),
+            confidence=plan.confidence,
+            requires_clarification=True,
+            clarification_question=(
+                "Powiedz „odczytaj notatkę” albo „wpisz w notatniku” i dosłowną treść."
+            ),
+            provider="voice_allowlist",
+        )
+
+    async def _handle_voice_confirmation(
+        self,
+        request: CommandRequest,
+        decision: str,
+    ) -> CommandAccepted:
+        pending_id = await self._pending_confirmation_id()
+        existing = await self.memory.get_command(request.request_id)
+        if existing is None:
+            await self.memory.create_command(request)
+            await self.memory.add_message(
+                "user",
+                (request.text or request.command_id or "").strip(),
+                request.request_id,
+                session_id=request.interaction_session_id,
+            )
+        if pending_id is None:
+            plan = CommandPlan(
+                request_id=request.request_id,
+                intent="voice_confirmation",
+                response_text="Nie mam oczekującej zmiany do potwierdzenia.",
+                confidence=1.0,
+                provider="voice_confirmation",
+            )
+            command = await self.memory.update_command(
+                request.request_id,
+                status=CommandStatus.SUCCEEDED,
+                plan=plan,
+            )
+            return CommandAccepted(
+                request_id=request.request_id,
+                status=command.status if command else CommandStatus.SUCCEEDED,
+                plan=plan,
+            )
+
+        if decision == "cancel":
+            command = await self.executor.cancel(pending_id)
+            plan = CommandPlan(
+                request_id=request.request_id,
+                intent="voice_confirmation",
+                response_text="Anulowałam oczekującą zmianę. Nie zapisuję jej w Notatniku.",
+                confidence=1.0,
+                provider="voice_confirmation",
+            )
+            await self.memory.update_command(
+                request.request_id,
+                status=CommandStatus.SUCCEEDED,
+                plan=plan,
+            )
+            return CommandAccepted(
+                request_id=request.request_id,
+                status=CommandStatus.SUCCEEDED,
+                plan=plan,
+            )
+
+        pending_plan = None
+        pending_map = getattr(self.executor, "pending_confirmation", {})
+        if isinstance(pending_map, dict):
+            pending_plan = pending_map.get(pending_id)
+        if pending_plan is None:
+            stored = await self.memory.get_command(pending_id)
+            pending_plan = stored.plan if stored is not None else None
+        revalidate = getattr(self.executor.actions, "revalidate_bound_targets", None)
+        if callable(revalidate) and pending_plan is not None:
+            try:
+                await revalidate(pending_plan)
+            except Exception as exc:
+                await self.executor.cancel(pending_id)
+                plan = CommandPlan(
+                    request_id=request.request_id,
+                    intent="voice_confirmation",
+                    response_text=(
+                        f"Zgoda nie obowiązuje. {exc}".strip()[:2000]
+                    ),
+                    confidence=1.0,
+                    provider="voice_confirmation",
+                )
+                await self.memory.update_command(
+                    request.request_id,
+                    status=CommandStatus.SUCCEEDED,
+                    plan=plan,
+                )
+                return CommandAccepted(
+                    request_id=request.request_id,
+                    status=CommandStatus.SUCCEEDED,
+                    plan=plan,
+                )
+
+        command = await self.executor.confirm(pending_id)
+        if (
+            request.managed_voice_turn
+            and command is not None
+            and command.status
+            in {CommandStatus.QUEUED, CommandStatus.EXECUTING, CommandStatus.RECEIVED}
+        ):
+            waiter = getattr(self.executor, "wait_for_completion", None)
+            if callable(waiter):
+                command = await waiter(pending_id)
+        result_text = self._confirmation_result_text(command)
+        plan = CommandPlan(
+            request_id=request.request_id,
+            intent="voice_confirmation",
+            response_text=result_text,
+            confidence=1.0,
+            provider="voice_confirmation",
+        )
+        await self.memory.update_command(
+            request.request_id,
+            status=CommandStatus.SUCCEEDED,
+            plan=plan,
+        )
+        return CommandAccepted(
+            request_id=request.request_id,
+            status=command.status if command is not None else CommandStatus.SUCCEEDED,
+            plan=plan,
+        )
+
+    async def _pending_confirmation_id(self) -> str | None:
+        pending_map = getattr(self.executor, "pending_confirmation", {})
+        if isinstance(pending_map, dict) and pending_map:
+            if len(pending_map) == 1:
+                return next(iter(pending_map))
+            return tuple(pending_map)[-1]
+        recent = await self.memory.recent_commands(limit=20)
+        awaiting = [
+            item.request_id
+            for item in recent
+            if item.status is CommandStatus.AWAITING_CONFIRMATION
+        ]
+        if len(awaiting) == 1:
+            return awaiting[0]
+        return awaiting[0] if awaiting else None
+
+    def _confirmation_result_text(self, command) -> str:
+        if command is None:
+            return "Nie udało się potwierdzić operacji."
+        if command.status is CommandStatus.CANCELLED:
+            return command.error or "Operacja została anulowana. Nie cofam już wykonanego zapisu."
+        results = getattr(command, "results", None) or []
+        messages = [result.message.strip() for result in results if result.message.strip()]
+        if messages:
+            return " ".join(dict.fromkeys(messages))[:2000]
+        if command.status is CommandStatus.FAILED:
+            return (command.error or "Nie udało się wykonać potwierdzonej zmiany.")[:2000]
+        if command.status is CommandStatus.SUCCEEDED:
+            return "Gotowe."
+        return (command.error or command.response_text or "Sprawdź wynik operacji.")[:2000]
 
     def _action_available_in_voiceattack(self, action_id: str) -> bool:
         return any(
