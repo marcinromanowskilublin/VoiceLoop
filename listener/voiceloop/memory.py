@@ -11,6 +11,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .context.entities import (
+    ContextEntityCandidateV1,
+    ContextEntityKind,
+    ContextEntityV1,
+    normalize_entity_text,
+)
 from .context.schema import ContextEpisodeV1, ContextEventV1, ForegroundConfidence
 from .models import (
     ActionResult,
@@ -340,6 +346,46 @@ class MemoryStore:
                         UNIQUE(source, source_id)
                     );
 
+                    CREATE TABLE IF NOT EXISTS context_entities (
+                        entity_id TEXT PRIMARY KEY,
+                        canonical TEXT NOT NULL,
+                        normalized_canonical TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        aliases_json TEXT NOT NULL DEFAULT '[]',
+                        sensitivity TEXT NOT NULL DEFAULT 'private_personal',
+                        approved INTEGER NOT NULL DEFAULT 0,
+                        evidence_source_ids_json TEXT NOT NULL DEFAULT '[]',
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(kind, normalized_canonical)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_entity_aliases (
+                        entity_id TEXT NOT NULL,
+                        alias TEXT NOT NULL,
+                        normalized_alias TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY(entity_id, normalized_alias),
+                        FOREIGN KEY(entity_id) REFERENCES context_entities(entity_id)
+                            ON DELETE CASCADE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_entity_candidates (
+                        candidate_id TEXT PRIMARY KEY,
+                        canonical TEXT NOT NULL,
+                        normalized_canonical TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        aliases_json TEXT NOT NULL DEFAULT '[]',
+                        evidence_source_ids_json TEXT NOT NULL,
+                        strong_evidence_count INTEGER NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        sensitivity TEXT NOT NULL DEFAULT 'private_personal',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(kind, normalized_canonical)
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_commands_created
                         ON commands(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_command_events_request
@@ -380,6 +426,10 @@ class MemoryStore:
                         ON context_episodes(source, started_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_context_episodes_hash
                         ON context_episodes(content_hash);
+                    CREATE INDEX IF NOT EXISTS idx_context_entity_alias
+                        ON context_entity_aliases(normalized_alias);
+                    CREATE INDEX IF NOT EXISTS idx_context_entity_candidate_status
+                        ON context_entity_candidates(status, updated_at DESC);
                     """
                 )
                 try:
@@ -741,6 +791,48 @@ class MemoryStore:
 
         return self._context_episode_from_row(await asyncio.to_thread(_upsert))
 
+    async def get_context_episode(
+        self,
+        episode_id: str,
+    ) -> ContextEpisodeV1 | None:
+        def _get() -> sqlite3.Row | None:
+            with self._connect() as connection:
+                return connection.execute(
+                    "SELECT * FROM context_episodes WHERE episode_id = ?",
+                    (episode_id,),
+                ).fetchone()
+
+        row = await asyncio.to_thread(_get)
+        return self._context_episode_from_row(row) if row is not None else None
+
+    async def list_expired_context_episodes(
+        self,
+        *,
+        now: datetime | None = None,
+        limit: int = 500,
+    ) -> list[ContextEpisodeV1]:
+        cutoff = self._aware_iso(now or datetime.now(UTC))
+        safe_limit = max(1, min(int(limit), 5000))
+
+        def _list() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM context_episodes
+                    WHERE deleted_at IS NULL
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= ?
+                    ORDER BY expires_at ASC
+                    LIMIT ?
+                    """,
+                    (cutoff, safe_limit),
+                ).fetchall()
+
+        return [
+            self._context_episode_from_row(row)
+            for row in await asyncio.to_thread(_list)
+        ]
+
     async def search_context_episodes(
         self,
         *,
@@ -895,6 +987,259 @@ class MemoryStore:
                 }
 
         return await asyncio.to_thread(_prune)
+
+    async def upsert_context_entity(
+        self,
+        entity: ContextEntityV1,
+    ) -> ContextEntityV1:
+        aliases = tuple(dict.fromkeys((entity.canonical, *entity.aliases)))
+
+        def _upsert() -> sqlite3.Row:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO context_entities(
+                        entity_id, canonical, normalized_canonical, kind,
+                        aliases_json, sensitivity, approved,
+                        evidence_source_ids_json, metadata_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(entity_id) DO UPDATE SET
+                        canonical = excluded.canonical,
+                        normalized_canonical = excluded.normalized_canonical,
+                        kind = excluded.kind,
+                        aliases_json = excluded.aliases_json,
+                        sensitivity = excluded.sensitivity,
+                        approved = excluded.approved,
+                        evidence_source_ids_json = excluded.evidence_source_ids_json,
+                        metadata_json = excluded.metadata_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        entity.entity_id,
+                        entity.canonical,
+                        entity.normalized_canonical,
+                        entity.kind.value,
+                        self._json_dump(aliases),
+                        entity.sensitivity,
+                        int(entity.approved),
+                        self._json_dump(entity.evidence_source_ids),
+                        self._json_dump(entity.metadata),
+                        entity.created_at.isoformat(),
+                        entity.updated_at.isoformat(),
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM context_entity_aliases WHERE entity_id = ?",
+                    (entity.entity_id,),
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO context_entity_aliases(
+                        entity_id, alias, normalized_alias, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        (
+                            entity.entity_id,
+                            alias,
+                            self._normalize_entity_alias(alias),
+                            entity.updated_at.isoformat(),
+                        )
+                        for alias in aliases
+                        if self._normalize_entity_alias(alias)
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM context_entities WHERE entity_id = ?",
+                    (entity.entity_id,),
+                ).fetchone()
+                assert row is not None
+                return row
+
+        return self._context_entity_from_row(await asyncio.to_thread(_upsert))
+
+    async def resolve_context_entities(
+        self,
+        value: str,
+        *,
+        kind: str | None = None,
+    ) -> list[ContextEntityV1]:
+        normalized = self._normalize_entity_alias(value)
+        if not normalized:
+            return []
+
+        def _resolve() -> list[sqlite3.Row]:
+            conditions = ["a.normalized_alias = ?", "e.approved = 1"]
+            parameters: list[Any] = [normalized]
+            if kind:
+                conditions.append("e.kind = ?")
+                parameters.append(kind)
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT e.* FROM context_entities e
+                    JOIN context_entity_aliases a ON a.entity_id = e.entity_id
+                    WHERE
+                    """
+                    + " AND ".join(conditions)
+                    + " ORDER BY e.updated_at DESC",
+                    parameters,
+                ).fetchall()
+
+        return [
+            self._context_entity_from_row(row)
+            for row in await asyncio.to_thread(_resolve)
+        ]
+
+    async def upsert_context_entity_candidate(
+        self,
+        candidate: ContextEntityCandidateV1,
+    ) -> ContextEntityCandidateV1:
+        def _upsert() -> sqlite3.Row:
+            with self._connect() as connection:
+                existing = connection.execute(
+                    """
+                    SELECT * FROM context_entity_candidates
+                    WHERE kind = ? AND normalized_canonical = ?
+                    """,
+                    (candidate.kind.value, candidate.normalized_canonical),
+                ).fetchone()
+                if existing is not None:
+                    aliases = tuple(
+                        dict.fromkeys(
+                            (
+                                *self._json_string_tuple(existing["aliases_json"]),
+                                *candidate.aliases,
+                            )
+                        )
+                    )
+                    evidence = tuple(
+                        dict.fromkeys(
+                            (
+                                *self._json_string_tuple(
+                                    existing["evidence_source_ids_json"]
+                                ),
+                                *candidate.evidence_source_ids,
+                            )
+                        )
+                    )
+                    connection.execute(
+                        """
+                        UPDATE context_entity_candidates
+                        SET aliases_json = ?, evidence_source_ids_json = ?,
+                            strong_evidence_count = ?, updated_at = ?
+                        WHERE candidate_id = ?
+                        """,
+                        (
+                            self._json_dump(aliases),
+                            self._json_dump(evidence),
+                            max(
+                                int(existing["strong_evidence_count"]),
+                                candidate.strong_evidence_count,
+                            ),
+                            candidate.updated_at.isoformat(),
+                            existing["candidate_id"],
+                        ),
+                    )
+                    candidate_id = existing["candidate_id"]
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO context_entity_candidates(
+                            candidate_id, canonical, normalized_canonical, kind,
+                            aliases_json, evidence_source_ids_json,
+                            strong_evidence_count, status, sensitivity,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            candidate.candidate_id,
+                            candidate.canonical,
+                            candidate.normalized_canonical,
+                            candidate.kind.value,
+                            self._json_dump(candidate.aliases),
+                            self._json_dump(candidate.evidence_source_ids),
+                            candidate.strong_evidence_count,
+                            candidate.status,
+                            candidate.sensitivity,
+                            candidate.created_at.isoformat(),
+                            candidate.updated_at.isoformat(),
+                        ),
+                    )
+                    candidate_id = candidate.candidate_id
+                row = connection.execute(
+                    """
+                    SELECT * FROM context_entity_candidates
+                    WHERE candidate_id = ?
+                    """,
+                    (candidate_id,),
+                ).fetchone()
+                assert row is not None
+                return row
+
+        return self._context_entity_candidate_from_row(
+            await asyncio.to_thread(_upsert)
+        )
+
+    async def list_context_entity_candidates(
+        self,
+        *,
+        status: str = "pending",
+        limit: int = 100,
+    ) -> list[ContextEntityCandidateV1]:
+        safe_limit = max(1, min(int(limit), 1000))
+
+        def _list() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM context_entity_candidates
+                    WHERE status = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status, safe_limit),
+                ).fetchall()
+
+        return [
+            self._context_entity_candidate_from_row(row)
+            for row in await asyncio.to_thread(_list)
+        ]
+
+    async def update_context_entity_candidate_status(
+        self,
+        candidate_id: str,
+        *,
+        status: str,
+    ) -> ContextEntityCandidateV1 | None:
+        if status not in {"pending", "approved", "rejected"}:
+            raise ValueError("invalid entity candidate status")
+        updated_at = _now_iso()
+
+        def _update() -> sqlite3.Row | None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE context_entity_candidates
+                    SET status = ?, updated_at = ?
+                    WHERE candidate_id = ?
+                    """,
+                    (status, updated_at, candidate_id),
+                )
+                return connection.execute(
+                    """
+                    SELECT * FROM context_entity_candidates
+                    WHERE candidate_id = ?
+                    """,
+                    (candidate_id,),
+                ).fetchone()
+
+        row = await asyncio.to_thread(_update)
+        return (
+            self._context_entity_candidate_from_row(row)
+            if row is not None
+            else None
+        )
 
     async def upsert_path_event(
         self,
@@ -2149,6 +2494,62 @@ class MemoryStore:
         if not isinstance(value, list):
             return ()
         return tuple(str(item) for item in value if str(item).strip())
+
+    @staticmethod
+    def _json_dump(value: object) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _normalize_entity_alias(value: str) -> str:
+        return normalize_entity_text(value)
+
+    @classmethod
+    def _context_entity_from_row(cls, row: sqlite3.Row) -> ContextEntityV1:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        return ContextEntityV1(
+            entity_id=row["entity_id"],
+            canonical=row["canonical"],
+            normalized_canonical=row["normalized_canonical"],
+            kind=ContextEntityKind(row["kind"]),
+            aliases=tuple(
+                alias
+                for alias in cls._json_string_tuple(row["aliases_json"])
+                if normalize_entity_text(alias)
+                != normalize_entity_text(row["canonical"])
+            ),
+            sensitivity=row["sensitivity"],
+            approved=bool(row["approved"]),
+            evidence_source_ids=cls._json_string_tuple(
+                row["evidence_source_ids_json"]
+            ),
+            metadata=metadata if isinstance(metadata, dict) else {},
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @classmethod
+    def _context_entity_candidate_from_row(
+        cls,
+        row: sqlite3.Row,
+    ) -> ContextEntityCandidateV1:
+        return ContextEntityCandidateV1(
+            candidate_id=row["candidate_id"],
+            canonical=row["canonical"],
+            normalized_canonical=row["normalized_canonical"],
+            kind=ContextEntityKind(row["kind"]),
+            aliases=cls._json_string_tuple(row["aliases_json"]),
+            evidence_source_ids=cls._json_string_tuple(
+                row["evidence_source_ids_json"]
+            ),
+            strong_evidence_count=int(row["strong_evidence_count"]),
+            status=row["status"],
+            sensitivity=row["sensitivity"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
 
     @classmethod
     def _context_episode_from_row(cls, row: sqlite3.Row) -> ContextEpisodeV1:

@@ -8,10 +8,19 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .schema import ContextEventV1, ContextItemV1, ContextPackV1
+from ..memory_vectorization import memory_query_documents
+from .schema import (
+    ContextEventV1,
+    ContextItemV1,
+    ContextPackV1,
+    ContextScope,
+    ContextTrust,
+)
 
 if TYPE_CHECKING:
+    from ..embeddings import OpenAICompatibleEmbeddingClient
     from ..memory import MemoryStore
+    from ..qdrant_memory import QdrantVectorStore
     from ..screenpipe import ScreenpipeClient
 
 _STOPWORDS = {
@@ -103,9 +112,15 @@ class TimeFirstRetriever:
         *,
         memory: MemoryStore,
         screenpipe: ScreenpipeClient | None = None,
+        embeddings: OpenAICompatibleEmbeddingClient | None = None,
+        qdrant: QdrantVectorStore | None = None,
+        min_exact_evidence: int = 2,
     ) -> None:
         self.memory = memory
         self.screenpipe = screenpipe
+        self.embeddings = embeddings
+        self.qdrant = qdrant
+        self.min_exact_evidence = max(1, min(int(min_exact_evidence), 10))
 
     async def retrieve(
         self,
@@ -157,6 +172,15 @@ class TimeFirstRetriever:
             items.extend(
                 self._screenpipe_context_items(raw_items, existing=items)
             )
+        if len(items) < self.min_exact_evidence:
+            items.extend(
+                await self._semantic_scout(
+                    query,
+                    plan=plan,
+                    existing=items,
+                    limit=safe_limit - len(items),
+                )
+            )
         selected = tuple(items[:safe_limit])
         source_counts: dict[str, int] = {}
         for item in selected:
@@ -167,6 +191,76 @@ class TimeFirstRetriever:
             items=selected,
             sources=source_counts,
         )
+
+    async def _semantic_scout(
+        self,
+        query: str,
+        *,
+        plan: TimeFirstQueryPlan,
+        existing: list[ContextItemV1],
+        limit: int,
+    ) -> list[ContextItemV1]:
+        if (
+            limit <= 0
+            or self.embeddings is None
+            or self.qdrant is None
+            or not self.embeddings.enabled
+            or not self.qdrant.enabled
+            or not self.embeddings.accepts_private_text()
+            or not self.qdrant.accepts_private_data()
+        ):
+            return []
+        from ..embeddings import EmbeddingUnavailableError
+        from ..qdrant_memory import QdrantMemoryError
+
+        query_documents = memory_query_documents(query[:2000])
+        axes = ("semantic", *_reserve_axes_for(query))
+        results: list[ContextItemV1] = []
+        seen = {item.content_hash for item in existing}
+        try:
+            for axis in axes:
+                document = query_documents.get(axis)
+                if not document:
+                    continue
+                vectors = await self.embeddings.embed_queries([document])
+                if len(vectors) != 1:
+                    continue
+                hits = await self.qdrant.search(
+                    query_vectors={axis: vectors[0]},
+                    vector_names=(axis,),
+                    limit=max(1, limit - len(results)),
+                    min_score=0.0,
+                )
+                for hit in hits:
+                    if not _hit_matches_time(hit, plan):
+                        continue
+                    item = ContextItemV1(
+                        source=hit.source,
+                        source_id=hit.source_id,
+                        scope=ContextScope.EPISODIC,
+                        kind="semantic_retrieval",
+                        title=hit.title,
+                        content=hit.content,
+                        started_at=_hit_time(hit),
+                        trust=ContextTrust.DERIVED,
+                        confidence=min(max(float(hit.score), 0.0), 1.0),
+                        retrieval_score=float(hit.score),
+                        selection_reason=f"semantic_scout:{axis}",
+                        metadata=(
+                            hit.metadata if isinstance(hit.metadata, dict) else {}
+                        ),
+                    )
+                    if item.content_hash in seen:
+                        continue
+                    seen.add(item.content_hash)
+                    results.append(item)
+                    if len(results) >= limit:
+                        return results
+                if len(results) >= min(self.min_exact_evidence, limit):
+                    break
+        except (EmbeddingUnavailableError, QdrantMemoryError):
+            return []
+        return results
 
     @staticmethod
     def _screenpipe_context_items(
@@ -222,3 +316,55 @@ def _parse_timestamp(value: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _reserve_axes_for(query: str) -> tuple[str, ...]:
+    normalized = _normalized_text(query)
+    axes: list[str] = []
+    markers = (
+        ("decision", ("ustal", "decyz", "zdecyd", "postanow")),
+        ("intent", ("dlaczego", "po co", "cel", "zamiar")),
+        ("person_context", ("kto", "komu", "kogo", "z kim", "osob")),
+        ("topic", ("temat", "o czym", "projekt")),
+    )
+    for axis, values in markers:
+        if any(value in normalized for value in values):
+            axes.append(axis)
+    return tuple(axes)
+
+
+def _hit_source_time(hit) -> datetime | None:
+    metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
+    provenance = metadata.get("provenance")
+    provenance = provenance if isinstance(provenance, dict) else {}
+    raw = (
+        provenance.get("time")
+        or metadata.get("time")
+        or metadata.get("timestamp")
+    )
+    if raw is None or not str(raw).strip():
+        return None
+    return _parse_timestamp(str(raw))
+
+
+def _hit_time(hit) -> datetime:
+    source_time = _hit_source_time(hit)
+    if source_time is not None:
+        return source_time
+    created_at = getattr(hit, "created_at", None)
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None or created_at.utcoffset() is None:
+            return created_at.replace(tzinfo=UTC)
+        return created_at.astimezone(UTC)
+    return datetime.now(UTC)
+
+
+def _hit_matches_time(hit, plan: TimeFirstQueryPlan) -> bool:
+    if plan.start is None and plan.end is None:
+        return True
+    source_time = _hit_source_time(hit)
+    if source_time is None:
+        return False
+    if plan.start is not None and source_time < plan.start:
+        return False
+    return plan.end is None or source_time <= plan.end

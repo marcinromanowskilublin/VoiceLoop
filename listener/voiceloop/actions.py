@@ -2929,12 +2929,16 @@ class ActionRegistry:
             retriever = TimeFirstRetriever(
                 memory=self.memory,
                 screenpipe=self.screenpipe,
+                embeddings=self.embeddings,
+                qdrant=self.qdrant,
             )
             try:
                 timeline_pack = await retriever.retrieve(query, limit=10)
             except ScreenpipeError:
                 timeline_pack = await TimeFirstRetriever(
                     memory=self.memory,
+                    embeddings=self.embeddings,
+                    qdrant=self.qdrant,
                 ).retrieve(query, limit=10)
             if timeline_pack.items:
                 timeline_items = [
