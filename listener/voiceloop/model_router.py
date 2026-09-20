@@ -996,7 +996,8 @@ class OpenAICompatiblePlanner:
                     r"zapisz|dodaj|utworz|stworz|zapamietaj|remember|"
                     r"zmien|przemianuj|nazwij|"
                     r"run|execute|open|launch|click|macro|uivision|"
-                    r"paste|wklej|zaznacz|select"
+                    r"paste|wklej|zaznacz|select|"
+                    r"odczytaj|przeczytaj|wpisz|wstaw|zastap"
                     r")\b"
                     r"(?:\s+\S+)?"
                 ),

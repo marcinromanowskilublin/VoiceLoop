@@ -11,6 +11,40 @@ from .models import (
     SegmentationDecisionV1,
 )
 
+ACTION_CONFIRM_PHRASES = {
+    "potwierdz",
+    "potwierdzam",
+    "tak potwierdz",
+    "tak potwierdzam",
+    "zatwierdz",
+    "zatwierdzam",
+    "zgadzam sie",
+    "tak zastepuj",
+    "potwierdzam zamiane",
+    "potwierdzam zmiane",
+    "tak zastep tresc",
+}
+ACTION_CANCEL_PHRASES = {
+    "anuluj",
+    "anuluj zadanie",
+    "anuluj zmiane",
+    "nie potwierdzam",
+    "nie zatwierdzaj",
+    "rezygnuje",
+    "nie zastepuj",
+}
+
+
+def confirmation_decision(value: str) -> str | None:
+    text = normalize_text(value)
+    if not text:
+        return None
+    if text in ACTION_CONFIRM_PHRASES:
+        return "confirm"
+    if text in ACTION_CANCEL_PHRASES:
+        return "cancel"
+    return None
+
 
 def normalize_text(value: str) -> str:
     normalized = value.casefold().replace("ł", "l")
@@ -83,6 +117,40 @@ def deterministic_plan(request: CommandRequest) -> CommandPlan | None:
             response_text="Sprawdzam komendy VoiceAttack i wszystkie własne akcje VoiceLoop.",
             action_id="list_capabilities",
             args={"query": request.text or ""},
+        )
+
+    if _is_notepad_help_command(text):
+        return CommandPlan(
+            request_id=request.request_id,
+            intent="notepad_help",
+            response_text=(
+                "Mogę odczytać aktywną notatkę albo wpisać podaną dosłownie treść. "
+                "Powiedz „odczytaj notatkę” albo „wpisz w notatniku” i treść."
+            ),
+            confidence=1.0,
+            provider="deterministic",
+        )
+
+    if _is_read_active_notepad_command(text):
+        return _single_step(
+            request,
+            intent="read_active_notepad",
+            response_text="Odczytuję aktywną notatkę.",
+            action_id="read_active_notepad",
+        )
+
+    notepad_write = _extract_write_active_notepad(raw, text)
+    if notepad_write is not None:
+        return _single_step(
+            request,
+            intent="write_active_notepad",
+            response_text=(
+                "Mogę zastąpić treść aktywnej notatki podanym tekstem. "
+                "Powiedz potwierdzam albo anuluj."
+            ),
+            action_id="write_active_notepad",
+            args={"text": notepad_write},
+            risk=RiskLevel.MEDIUM,
         )
 
     if _is_open_calendar_command(text):
@@ -1404,6 +1472,77 @@ def _is_stop_command(text: str) -> bool:
             "stop wszystko",
         ),
     )
+
+
+def _is_notepad_help_command(text: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "co mozesz zrobic z ta notatka",
+            "co mozesz zrobic z ta notatka",
+            "co mozesz zrobic z notatka",
+            "co mozesz zrobic z notatnikiem",
+            "co potrafisz z ta notatka",
+            "co umiesz z ta notatka",
+        ),
+    )
+
+
+def _is_read_active_notepad_command(text: str) -> bool:
+    return _is_exact_alias(
+        text,
+        (
+            "read_active_notepad",
+            "odczytaj notatke",
+            "odczytaj notatnik",
+            "odczytaj aktywna notatke",
+            "odczytaj aktywny notatnik",
+            "przeczytaj notatke",
+            "przeczytaj notatnik",
+            "przeczytaj aktywna notatke",
+            "co jest w notatniku",
+            "co jest w notatce",
+            "co jest w tej notatce",
+            "co jest w tej notatce",
+        ),
+    ) or (
+        _contains_any(text, ("odczytaj", "przeczytaj"))
+        and _contains_any(text, ("notatk", "notatnik"))
+        and not _contains_any(text, ("wpisz", "wstaw", "zastap", "wklej"))
+    )
+
+
+def _extract_write_active_notepad(raw: str, text: str) -> str | None:
+    match = re.search(
+        r"(?:wpisz|napisz|wstaw|wklej|zastap(?:\s+tresc)?)"
+        r"(?:\s+(?:to|tekst|tresc))?"
+        r"\s+(?:w|do)\s+"
+        r"(?:notatniku|notatnik|notatce|notatka|notepad)\s*[:,-]?\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        content = match.group(1).strip()
+        return content or None
+    match = re.search(
+        r"zastap\s+(?:tresc\s+)?(?:w\s+)?(?:notatce|notatki|notatniku)\s*[:,-]?\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        content = match.group(1).strip()
+        return content or None
+    if _is_exact_alias(
+        text,
+        (
+            "write_active_notepad",
+            "wpisz w notatniku",
+            "wpisz do notatnika",
+            "zastap tresc notatki",
+        ),
+    ):
+        return None
+    return None
 
 
 def _safe_paste_step(request: CommandRequest, raw: str) -> CommandPlan | None:

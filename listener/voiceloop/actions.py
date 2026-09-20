@@ -113,6 +113,8 @@ CAPABILITY_LABELS = {
     "open_shell_item": "otwierać widoczny element pulpitu lub Eksploratora",
     "open_url": "otwierać bezpieczny adres URL",
     "paste_text_safe": "bezpiecznie wklejać tekst",
+    "read_active_notepad": "odczytywać aktywną notatkę",
+    "write_active_notepad": "wpisywać podaną treść do aktywnego Notatnika",
     "recall": "przeszukiwać pamięć",
     "remember": "zapamiętywać informacje",
     "remember_last_source": "zapamiętywać ostatnie źródło",
@@ -137,7 +139,12 @@ def _capability_category(action_id: str) -> str:
         return "kursor i okna"
     if action_id.startswith(("copy_", "select_", "rename_", "minimize_", "close_")):
         return "okna i tekst"
-    if action_id in {"describe_active_window", "describe_text_target"}:
+    if action_id in {
+        "describe_active_window",
+        "describe_text_target",
+        "read_active_notepad",
+        "write_active_notepad",
+    }:
         return "okna i tekst"
     if action_id in {"remember", "recall", "remember_last_source"}:
         return "pamięć"
@@ -833,6 +840,71 @@ class ActionRegistry:
         )
         self._register(
             ActionSpec(
+                id="read_active_notepad",
+                description=(
+                    "Odczytuje tekst aktywnego Notatnika Windows bez myszy. "
+                    "Odmawia, gdy cel nie jest jednoznaczny."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "expected_process_id": {"type": "integer", "minimum": 1},
+                        "expected_hwnd": {"type": "integer", "minimum": 1},
+                        "expected_process_name": {"type": "string", "maxLength": 80},
+                        "expected_window_class": {"type": "string", "maxLength": 120},
+                        "expected_window_title": {"type": "string", "maxLength": 300},
+                        "expected_automation_id": {"type": "string", "maxLength": 200},
+                        "expected_runtime_id": {"type": "string", "maxLength": 300},
+                        "expected_document_name": {"type": "string", "maxLength": 200},
+                    },
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.LOW,
+                confirmation_required=False,
+                handler=self._read_active_notepad,
+                execution_layer=2,
+                routing_examples=(
+                    "odczytaj notatkę",
+                    "co jest w notatniku",
+                ),
+            )
+        )
+        self._register(
+            ActionSpec(
+                id="write_active_notepad",
+                description=(
+                    "Zastępuje tekst aktywnego Notatnika dosłownie podaną treścią "
+                    "po potwierdzeniu i sprawdza odczyt."
+                ),
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1, "maxLength": 8000},
+                        "expected_process_id": {"type": "integer", "minimum": 1},
+                        "expected_hwnd": {"type": "integer", "minimum": 1},
+                        "expected_process_name": {"type": "string", "maxLength": 80},
+                        "expected_window_class": {"type": "string", "maxLength": 120},
+                        "expected_window_title": {"type": "string", "maxLength": 300},
+                        "expected_automation_id": {"type": "string", "maxLength": 200},
+                        "expected_runtime_id": {"type": "string", "maxLength": 300},
+                        "expected_document_name": {"type": "string", "maxLength": 200},
+                        "expected_source_text": {"type": "string", "maxLength": 20000},
+                    },
+                    "required": ["text"],
+                    "additionalProperties": False,
+                },
+                risk=RiskLevel.MEDIUM,
+                confirmation_required=True,
+                handler=self._write_active_notepad,
+                execution_layer=2,
+                routing_examples=(
+                    "wpisz w notatniku podaną treść",
+                    "zastąp treść notatki podanym tekstem",
+                ),
+            )
+        )
+        self._register(
+            ActionSpec(
                 id="paste_text_safe",
                 description=(
                     "Wkleja tekst do aktywnego pola tylko gdy cel wygląda bezpiecznie "
@@ -1112,6 +1184,26 @@ class ActionRegistry:
 
     async def bind_execution_targets(self, plan: CommandPlan) -> CommandPlan:
         for step in plan.steps:
+            if step.action_id in {"read_active_notepad", "write_active_notepad"}:
+                from .notepad_document import resolve_active_notepad
+
+                snapshot = await asyncio.to_thread(resolve_active_notepad)
+                step.args.update(snapshot.identity.as_args())
+                if step.action_id == "write_active_notepad":
+                    step.args["expected_source_text"] = snapshot.text
+                    preview = str(step.args.get("text") or "").strip()
+                    if len(preview) > 180:
+                        preview = preview[:177] + "..."
+                    name = (
+                        snapshot.identity.document_name
+                        or snapshot.identity.window_title
+                        or "Notatnik"
+                    )
+                    plan.response_text = (
+                        f"Zastąpić treść w Notatniku „{name}” tekstem: {preview}? "
+                        "Powiedz potwierdzam albo anuluj."
+                    )[:2000]
+                continue
             if step.action_id in {"hover_shell_item", "open_shell_item"}:
                 from .windows_shell import WindowsShellLocator
 
@@ -1143,10 +1235,39 @@ class ActionRegistry:
             }
         return plan
 
+    async def revalidate_bound_targets(self, plan: CommandPlan) -> CommandPlan:
+        from .notepad_document import identity_from_args, resolve_active_notepad
+
+        for step in plan.steps:
+            if step.action_id != "write_active_notepad":
+                continue
+            expected = identity_from_args(step.args)
+            if expected is None:
+                raise RuntimeError(
+                    "Brak związanej tożsamości Notatnika. Wydaj polecenie ponownie."
+                )
+            snapshot = await asyncio.to_thread(resolve_active_notepad)
+            mismatches = expected.mismatches(snapshot.identity)
+            if mismatches:
+                raise RuntimeError(
+                    "Cel Notatnika zmienił się po przygotowaniu operacji. "
+                    f"Zmienione pola: {', '.join(mismatches)}."
+                )
+            expected_source = step.args.get("expected_source_text")
+            if expected_source is not None and snapshot.text != expected_source:
+                raise RuntimeError(
+                    "Treść notatki zmieniła się po przygotowaniu operacji. "
+                    "Oczekująca zgoda nie obowiązuje."
+                )
+        return plan
+
     def enforce_policy(self, step: PlanStep) -> PlanStep:
         spec = self._specs.get(step.action_id)
         if spec is None:
             raise ValueError(f"unknown action: {step.action_id}")
+        allowed = self.settings.resolved_voice_action_allowlist
+        if allowed and step.action_id not in allowed:
+            raise ValueError(f"action not allowed in this session: {step.action_id}")
         from .routing.validation import validate_arguments
 
         argument_errors = validate_arguments(step.args, spec.args_schema)
@@ -1180,6 +1301,8 @@ class ActionRegistry:
         try:
             message, data = await spec.handler(step.args)
             success = True
+            if data.get("verified") is False:
+                success = False
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1401,6 +1524,12 @@ class ActionRegistry:
 
     async def _paste_text_safe(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         return await asyncio.to_thread(self._paste_text_safe_sync, args)
+
+    async def _read_active_notepad(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._read_active_notepad_sync, args)
+
+    async def _write_active_notepad(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return await asyncio.to_thread(self._write_active_notepad_sync, args)
 
     async def _describe_recent_activity(
         self,
@@ -1669,21 +1798,63 @@ class ActionRegistry:
         win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
 
     @staticmethod
+    def _read_active_notepad_sync(args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        from .notepad_document import identity_from_args, read_active_notepad
+
+        snapshot = read_active_notepad(identity_from_args(args))
+        name = snapshot.identity.document_name or snapshot.identity.window_title or "Notatnik"
+        body = snapshot.text.strip()
+        if not body:
+            message = f"Notatnik „{name}” jest pusty."
+        else:
+            spoken = body if len(body) <= 800 else body[:797] + "..."
+            message = f"W Notatniku „{name}” jest: {spoken}"
+        return message[:2000], {**snapshot.public_data(), "text": snapshot.text}
+
+    @staticmethod
+    def _write_active_notepad_sync(args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        from .notepad_document import identity_from_args, write_active_notepad
+
+        return write_active_notepad(
+            str(args.get("text") or ""),
+            expected=identity_from_args(args),
+            expected_source_text=(
+                None
+                if "expected_source_text" not in args
+                else str(args.get("expected_source_text") or "")
+            ),
+        )
+
+    @staticmethod
     def _describe_text_target_sync() -> tuple[str, dict[str, Any]]:
         info = ActionRegistry._text_target_info_sync()
         window_title = str(info.get("window_title") or "brak")
         field_name = str(info.get("field_name") or "brak nazwy")
-        if info.get("looks_like_address_bar"):
+        if info.get("target_source") == "active_notepad":
+            message = (
+                f"Cel to edytor aktywnego Notatnika „{window_title}” "
+                f"(dokument: „{field_name}”)."
+            )
+        elif info.get("looks_like_address_bar"):
             message = (
                 f"Wykryłem pasek adresu lub wyszukiwania w oknie „{window_title}” "
                 f"(pole: „{field_name}”). Nie wpisuję tam tekstu."
             )
         elif info.get("is_editable"):
-            message = f"Pisanie wygląda bezpiecznie w oknie „{window_title}”, pole: „{field_name}”."
+            source = str(info.get("target_source") or "focused_control")
+            if source == "cursor":
+                message = (
+                    f"Pisanie wygląda bezpiecznie w oknie „{window_title}”, pole: „{field_name}”, "
+                    "ale cel pochodzi z kursora, nie z aktywnego fokusu."
+                )
+            else:
+                message = (
+                    f"Pisanie wygląda bezpiecznie w oknie „{window_title}”, pole: „{field_name}”."
+                )
         else:
             message = (
                 f"Nie wykryłem aktywnego pola tekstowego w oknie „{window_title}”. "
-                "Najpierw kliknij docelowe pole wpisywania."
+                "Ustaw fokus w edytorze i spróbuj ponownie."
             )
         return message, info
 
@@ -1713,15 +1884,22 @@ class ActionRegistry:
                 f"Aktywna aplikacja to „{process_name or window_title}”, "
                 f"a oczekiwana zawiera „{expected_app}”."
             )
+        if info.get("target_source") == "active_notepad":
+            return ActionRegistry._write_active_notepad_sync({"text": text})
         if not info.get("is_editable"):
             raise RuntimeError(
-                "Nie wykryłem aktywnego pola tekstowego pod kursorem. "
-                "Kliknij pole wpisywania i spróbuj ponownie."
+                "Nie wykryłem aktywnego pola tekstowego z fokusu klawiatury. "
+                "Ustaw fokus w edytorze i spróbuj ponownie."
             )
         if info.get("looks_like_address_bar") and not allow_address_bar:
             raise RuntimeError(
                 "Wykryłem pasek adresu lub wyszukiwania. "
                 "Dla bezpieczeństwa przerwałem wpisywanie tekstu."
+            )
+        if info.get("target_source") == "cursor":
+            raise RuntimeError(
+                "Fokus klawiatury i pole pod kursorem różnią się. "
+                "Nie wklejam na podstawie pozycji myszy."
             )
 
         ActionRegistry._write_clipboard_text_sync(text)
@@ -1735,6 +1913,7 @@ class ActionRegistry:
                 "field_name": field_name,
                 "characters": len(text),
                 "safe_for_typing": bool(info.get("safe_for_typing")),
+                "target_source": str(info.get("target_source") or "focused_control"),
             },
         )
 
@@ -1756,6 +1935,7 @@ class ActionRegistry:
         window_title = (win32gui.GetWindowText(hwnd) or "").strip()
 
         process_name = ""
+        process_id = 0
         try:
             _, process_id = win32process.GetWindowThreadProcessId(hwnd)
             handle = win32api.OpenProcess(
@@ -1770,26 +1950,57 @@ class ActionRegistry:
         except Exception:
             process_name = ""
 
-        cursor_x, cursor_y = win32api.GetCursorPos()
-        field_name = ""
-        control_type = ""
-        automation_id = ""
-        class_name = ""
-        try:
-            from pywinauto import Desktop
+        from .notepad_document import (
+            focused_text_target,
+            is_notepad_process,
+            resolve_active_notepad,
+        )
 
-            wrapper = Desktop(backend="uia").from_point(cursor_x, cursor_y)
-            field_name = (getattr(wrapper, "window_text", lambda: "")() or "").strip()
-            element_info = getattr(wrapper, "element_info", None)
-            if element_info is not None:
-                element_name = str(getattr(element_info, "name", "") or "").strip()
-                if element_name:
-                    field_name = element_name
-                control_type = str(getattr(element_info, "control_type", "") or "").strip()
-                automation_id = str(getattr(element_info, "automation_id", "") or "").strip()
-                class_name = str(getattr(element_info, "class_name", "") or "").strip()
-        except Exception:
-            pass
+        if is_notepad_process(process_name):
+            snapshot = resolve_active_notepad()
+            return {
+                "window_title": snapshot.identity.window_title,
+                "process_name": snapshot.identity.process_name,
+                "process_id": snapshot.identity.process_id,
+                "hwnd": snapshot.identity.hwnd,
+                "field_name": snapshot.identity.document_name,
+                "control_type": snapshot.identity.control_type,
+                "automation_id": snapshot.identity.automation_id,
+                "class_name": snapshot.identity.control_class,
+                "cursor_x": None,
+                "cursor_y": None,
+                "is_editable": True,
+                "looks_like_address_bar": False,
+                "safe_for_typing": True,
+                "target_source": "active_notepad",
+            }
+
+        focused = focused_text_target()
+        field_name = str((focused or {}).get("field_name") or "")
+        control_type = str((focused or {}).get("control_type") or "")
+        automation_id = str((focused or {}).get("automation_id") or "")
+        class_name = str((focused or {}).get("class_name") or "")
+        target_source = "focused_control" if focused else ""
+        cursor_x = None
+        cursor_y = None
+        if focused is None:
+            cursor_x, cursor_y = win32api.GetCursorPos()
+            try:
+                from pywinauto import Desktop
+
+                wrapper = Desktop(backend="uia").from_point(cursor_x, cursor_y)
+                field_name = (getattr(wrapper, "window_text", lambda: "")() or "").strip()
+                element_info = getattr(wrapper, "element_info", None)
+                if element_info is not None:
+                    element_name = str(getattr(element_info, "name", "") or "").strip()
+                    if element_name:
+                        field_name = element_name
+                    control_type = str(getattr(element_info, "control_type", "") or "").strip()
+                    automation_id = str(getattr(element_info, "automation_id", "") or "").strip()
+                    class_name = str(getattr(element_info, "class_name", "") or "").strip()
+                target_source = "cursor"
+            except Exception:
+                target_source = "cursor"
 
         control_lower = control_type.casefold()
         class_lower = class_name.casefold()
@@ -1820,6 +2031,7 @@ class ActionRegistry:
         return {
             "window_title": window_title,
             "process_name": process_name,
+            "process_id": int(process_id or 0),
             "field_name": field_name,
             "control_type": control_type,
             "automation_id": automation_id,
@@ -1829,29 +2041,39 @@ class ActionRegistry:
             "is_editable": bool(is_editable),
             "looks_like_address_bar": bool(looks_like_address_bar),
             "safe_for_typing": safe_for_typing,
+            "target_source": target_source or "unknown",
         }
 
     @staticmethod
     def _copy_selected_text_sync() -> tuple[str, dict[str, Any]]:
+        from .notepad_document import focused_selection_text
+
+        selected = focused_selection_text()
+        if selected:
+            return (
+                "Odczytałem zaznaczony tekst z aktywnego pola.",
+                {"text": selected, "source": "uia_selection"},
+            )
+
         previous = ActionRegistry._read_clipboard_text_sync()
         ActionRegistry._send_copy_shortcut_sync()
         copied = ""
         for _ in range(10):
             time.sleep(0.05)
             copied = ActionRegistry._read_clipboard_text_sync()
-            if copied.strip():
+            if copied.strip() and copied.strip() != previous.strip():
                 break
         copied = copied.strip()
         if not copied:
             raise RuntimeError(
                 "Nie wykryłem zaznaczonego tekstu do skopiowania. Najpierw zaznacz tekst."
             )
-
-        if previous.strip() and copied == previous.strip():
-            message = "Zaznaczony tekst jest już w schowku."
-        else:
-            message = "Skopiowałem zaznaczony tekst."
-        return message, {"text": copied, "source": "selection"}
+        if copied == previous.strip():
+            raise RuntimeError(
+                "Kopiowanie nic nie zmieniło w schowku. "
+                "Nie mam wiarygodnego zaznaczenia i nie używam starej zawartości schowka."
+            )
+        return "Skopiowałem zaznaczony tekst.", {"text": copied, "source": "selection"}
 
     @staticmethod
     def _copy_text_under_cursor_sync() -> tuple[str, dict[str, Any]]:
@@ -2793,6 +3015,9 @@ class ActionRegistry:
     async def _list_capabilities(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         catalog = self.capability_catalog()
         actions = list(catalog["voiceloop_actions"])
+        allowed = self.settings.resolved_voice_action_allowlist
+        if allowed:
+            actions = [item for item in actions if item.get("id") in allowed]
         query = " ".join(str(args.get("query") or "").casefold().split())
         query_tokens = {
             token.strip(".,!?;:„”\"'")

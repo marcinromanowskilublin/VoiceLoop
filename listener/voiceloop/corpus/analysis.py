@@ -130,6 +130,14 @@ _ROUTING_HOLDOUTS: dict[str, tuple[str, ...]] = {
         "wstaw do Cursora tekst zrób krótkie streszczenie",
         "wklej do Gemini treść podaj trzy wnioski",
     ),
+    "read_active_notepad": (
+        "przeczytaj na głos to co jest w notatniku",
+        "powiedz treść aktywnej notatki",
+    ),
+    "write_active_notepad": (
+        "wpisz do notatnika zdanie VoiceLoop demo holdout",
+        "zastąp treść w notatce tekstem lista zakupów",
+    ),
     "describe_recent_activity": (
         "podsumuj ekran z ostatnich czterdziestu pięciu minut",
         "opisz programy używane przez ostatnią godzinę",
@@ -204,6 +212,8 @@ _ROUTING_HOLDOUT_EXPECTED_ARGS: dict[tuple[str, int], dict] = {
         "text": "podaj trzy wnioski",
         "expected_window": "gemini",
     },
+    ("write_active_notepad", 0): {"text": "VoiceLoop demo holdout"},
+    ("write_active_notepad", 1): {"text": "lista zakupów"},
     ("describe_recent_activity", 0): {"minutes": 45},
     ("describe_recent_activity", 1): {"minutes": 60},
     ("create_note", 0): {"text": "jutro odbiór wyników"},

@@ -117,6 +117,9 @@ class Settings(BaseSettings):
         "corpus/routing_calibration/observations-v1.db"
     )
     routing_v2_calibration_queue_limit: int = 4096
+    # Wąski tor demo: Router V1 + Notatnik. Nie obchodzi bramki V2.
+    notepad_voice_lane: bool = False
+    voice_action_allowlist: str = ""
     qdrant_enabled: bool = True
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_api_key: SecretStr | None = None
@@ -277,6 +280,13 @@ class Settings(BaseSettings):
         if not path.is_absolute():
             path = self.data_dir / path
         return path.resolve()
+
+    @property
+    def resolved_voice_action_allowlist(self) -> frozenset[str]:
+        raw = self.voice_action_allowlist.strip()
+        if not raw and self.notepad_voice_lane:
+            raw = "read_active_notepad,write_active_notepad"
+        return frozenset(part.strip() for part in raw.split(",") if part.strip())
 
     @property
     def vector_memory_weights(self) -> dict[str, float]:
