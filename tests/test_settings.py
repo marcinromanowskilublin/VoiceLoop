@@ -43,6 +43,11 @@ def test_env_example_matches_stabilization_defaults(tmp_path) -> None:
     )
     assert values["SCREENPIPE_VECTOR_MEMORY_ENABLED"] == "false"
     assert settings.screenpipe_vector_memory_enabled is False
+    assert values["CONTEXT_TIMELINE_RECALL_ENABLED"] == "false"
+    assert settings.context_timeline_recall_enabled is False
+    assert int(values["CONTEXT_TIMELINE_BUCKET_MINUTES"]) == (
+        settings.context_timeline_bucket_minutes
+    )
     assert hasattr(settings, "voiceattack_registration_key")
 
 

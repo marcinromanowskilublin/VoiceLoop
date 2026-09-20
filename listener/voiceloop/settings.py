@@ -172,6 +172,9 @@ class Settings(BaseSettings):
     screenpipe_vector_memory_enabled: bool = False
     screenpipe_vector_poll_seconds: int = 300
     screenpipe_vector_recent_minutes: int = 10
+    context_timeline_recall_enabled: bool = False
+    context_timeline_bucket_minutes: int = 10
+    context_timeline_max_results: int = 500
     windows_context_enabled: bool = True
     windows_context_roots: str = ""
     windows_context_reconcile_seconds: int = 120

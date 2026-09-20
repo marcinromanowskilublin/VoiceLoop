@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from .context.retrieval import TimeFirstRetriever, build_time_first_query
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 from .manual_memory import ManualMemoryService
 from .memory import MemoryStore
@@ -2923,6 +2924,41 @@ class ActionRegistry:
         query = str(args.get("query") or "").strip()
         if not query:
             raise ValueError("Brak zapytania do pamięci.")
+        timeline_plan = build_time_first_query(query)
+        if self.settings.context_timeline_recall_enabled and timeline_plan.used_time_filter:
+            retriever = TimeFirstRetriever(
+                memory=self.memory,
+                screenpipe=self.screenpipe,
+            )
+            try:
+                timeline_pack = await retriever.retrieve(query, limit=10)
+            except ScreenpipeError:
+                timeline_pack = await TimeFirstRetriever(
+                    memory=self.memory,
+                ).retrieve(query, limit=10)
+            if timeline_pack.items:
+                timeline_items = [
+                    item.model_dump(mode="json") for item in timeline_pack.items
+                ]
+                return (
+                    f"Znaleziono {len(timeline_items)} wpisów na osi czasu.",
+                    {
+                        "items": timeline_items,
+                        "retrieval": "timeline_v1",
+                        "time_filter": {
+                            "start": (
+                                timeline_plan.start.isoformat()
+                                if timeline_plan.start
+                                else None
+                            ),
+                            "end": (
+                                timeline_plan.end.isoformat()
+                                if timeline_plan.end
+                                else None
+                            ),
+                        },
+                    },
+                )
         vector_items: list[dict[str, Any]] = []
         if (
             self.embeddings is not None

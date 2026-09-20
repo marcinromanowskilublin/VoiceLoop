@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .context.schema import ContextEpisodeV1, ContextEventV1, ForegroundConfidence
 from .models import (
     ActionResult,
     CommandPlan,
@@ -19,6 +22,8 @@ from .models import (
     MemoryItem,
     TranscriptEnvelopeV1,
 )
+
+LOGGER = logging.getLogger("voiceloop.memory")
 
 
 def _now_iso() -> str:
@@ -122,6 +127,7 @@ class PathHistoryItem:
 class MemoryStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
+        self._context_fts_enabled = False
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=10)
@@ -174,6 +180,7 @@ class MemoryStore:
                     CREATE TABLE IF NOT EXISTS conversation (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         request_id TEXT,
+                        session_id TEXT,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
                         created_at TEXT NOT NULL
@@ -286,6 +293,53 @@ class MemoryStore:
                         project_type TEXT NOT NULL DEFAULT ''
                     );
 
+                    CREATE TABLE IF NOT EXISTS context_events (
+                        event_id TEXT PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        started_at TEXT NOT NULL,
+                        ended_at TEXT,
+                        app_name TEXT NOT NULL DEFAULT '',
+                        process_name TEXT NOT NULL DEFAULT '',
+                        window_title TEXT NOT NULL DEFAULT '',
+                        is_foreground INTEGER,
+                        foreground_confidence TEXT NOT NULL DEFAULT 'unknown',
+                        focus_duration_ms INTEGER,
+                        text TEXT NOT NULL DEFAULT '',
+                        content_hash TEXT NOT NULL,
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
+                        sensitivity TEXT NOT NULL DEFAULT 'private',
+                        expires_at TEXT,
+                        deleted_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(source, source_id)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_episodes (
+                        episode_id TEXT PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        started_at TEXT NOT NULL,
+                        ended_at TEXT NOT NULL,
+                        title TEXT NOT NULL DEFAULT '',
+                        summary TEXT NOT NULL,
+                        source_event_ids_json TEXT NOT NULL,
+                        app_names_json TEXT NOT NULL DEFAULT '[]',
+                        person_ids_json TEXT NOT NULL DEFAULT '[]',
+                        project_ids_json TEXT NOT NULL DEFAULT '[]',
+                        vector_spaces_json TEXT NOT NULL DEFAULT '[]',
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
+                        content_hash TEXT NOT NULL,
+                        sensitivity TEXT NOT NULL DEFAULT 'private',
+                        expires_at TEXT,
+                        deleted_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(source, source_id)
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_commands_created
                         ON commands(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_command_events_request
@@ -312,8 +366,52 @@ class MemoryStore:
                         ON local_path_history(display_name);
                     CREATE INDEX IF NOT EXISTS idx_local_path_history_project
                         ON local_path_history(is_project, last_seen DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_events_time
+                        ON context_events(started_at DESC, ended_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_events_source
+                        ON context_events(source, started_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_events_app
+                        ON context_events(app_name, started_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_events_hash
+                        ON context_events(content_hash);
+                    CREATE INDEX IF NOT EXISTS idx_context_episodes_time
+                        ON context_episodes(started_at DESC, ended_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_episodes_source
+                        ON context_episodes(source, started_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_episodes_hash
+                        ON context_episodes(content_hash);
                     """
                 )
+                try:
+                    connection.execute(
+                        """
+                        CREATE VIRTUAL TABLE IF NOT EXISTS context_events_fts
+                        USING fts5(
+                            event_id UNINDEXED,
+                            text,
+                            window_title,
+                            app_name,
+                            tokenize='unicode61 remove_diacritics 2'
+                        )
+                        """
+                    )
+                    connection.execute(
+                        """
+                        CREATE VIRTUAL TABLE IF NOT EXISTS context_episodes_fts
+                        USING fts5(
+                            episode_id UNINDEXED,
+                            title,
+                            summary,
+                            app_names,
+                            tokenize='unicode61 remove_diacritics 2'
+                        )
+                        """
+                    )
+                except sqlite3.OperationalError as exc:
+                    self._context_fts_enabled = False
+                    LOGGER.warning("SQLite FTS5 unavailable for context events: %s", exc)
+                else:
+                    self._context_fts_enabled = True
                 columns = {
                     row["name"]
                     for row in connection.execute(
@@ -325,8 +423,478 @@ class MemoryStore:
                         "ALTER TABLE meeting_transcript_segments "
                         "ADD COLUMN emotion_json TEXT"
                     )
+                conversation_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(conversation)"
+                    ).fetchall()
+                }
+                if "session_id" not in conversation_columns:
+                    connection.execute(
+                        "ALTER TABLE conversation ADD COLUMN session_id TEXT"
+                    )
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_conversation_session
+                    ON conversation(session_id, id DESC)
+                    """
+                )
 
         await asyncio.to_thread(_initialize)
+
+    @property
+    def context_fts_enabled(self) -> bool:
+        return self._context_fts_enabled
+
+    async def upsert_context_event(self, event: ContextEventV1) -> ContextEventV1:
+        """Persist one canonical timeline event and keep the FTS projection in sync."""
+
+        metadata_json = json.dumps(
+            event.metadata,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+        def _upsert() -> sqlite3.Row:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO context_events(
+                        event_id, source, source_id, event_type, started_at, ended_at,
+                        app_name, process_name, window_title, is_foreground,
+                        foreground_confidence, focus_duration_ms, text, content_hash,
+                        metadata_json, sensitivity, expires_at, deleted_at,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source, source_id) DO UPDATE SET
+                        event_type = excluded.event_type,
+                        started_at = excluded.started_at,
+                        ended_at = excluded.ended_at,
+                        app_name = excluded.app_name,
+                        process_name = excluded.process_name,
+                        window_title = excluded.window_title,
+                        is_foreground = excluded.is_foreground,
+                        foreground_confidence = excluded.foreground_confidence,
+                        focus_duration_ms = excluded.focus_duration_ms,
+                        text = excluded.text,
+                        content_hash = excluded.content_hash,
+                        metadata_json = excluded.metadata_json,
+                        sensitivity = excluded.sensitivity,
+                        expires_at = excluded.expires_at,
+                        deleted_at = excluded.deleted_at,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        event.event_id,
+                        event.source,
+                        event.source_id,
+                        event.event_type,
+                        event.started_at.isoformat(),
+                        event.ended_at.isoformat() if event.ended_at else None,
+                        event.app_name,
+                        event.process_name,
+                        event.window_title,
+                        (
+                            None
+                            if event.is_foreground is None
+                            else int(event.is_foreground)
+                        ),
+                        event.foreground_confidence.value,
+                        event.focus_duration_ms,
+                        event.text,
+                        event.content_hash,
+                        metadata_json,
+                        event.sensitivity,
+                        event.expires_at.isoformat() if event.expires_at else None,
+                        event.deleted_at.isoformat() if event.deleted_at else None,
+                        event.created_at.isoformat(),
+                        event.updated_at.isoformat(),
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT * FROM context_events
+                    WHERE source = ? AND source_id = ?
+                    """,
+                    (event.source, event.source_id),
+                ).fetchone()
+                assert row is not None
+                if self._context_fts_enabled:
+                    connection.execute(
+                        "DELETE FROM context_events_fts WHERE event_id = ?",
+                        (row["event_id"],),
+                    )
+                    if row["deleted_at"] is None:
+                        connection.execute(
+                            """
+                            INSERT INTO context_events_fts(
+                                event_id, text, window_title, app_name
+                            ) VALUES (?, ?, ?, ?)
+                            """,
+                            (
+                                row["event_id"],
+                                row["text"],
+                                row["window_title"],
+                                row["app_name"],
+                            ),
+                        )
+                return row
+
+        return self._context_event_from_row(await asyncio.to_thread(_upsert))
+
+    async def get_context_event(self, event_id: str) -> ContextEventV1 | None:
+        def _get() -> sqlite3.Row | None:
+            with self._connect() as connection:
+                return connection.execute(
+                    "SELECT * FROM context_events WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone()
+
+        row = await asyncio.to_thread(_get)
+        return self._context_event_from_row(row) if row is not None else None
+
+    async def search_context_events(
+        self,
+        *,
+        query: str = "",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        source: str | None = None,
+        app_name: str | None = None,
+        is_foreground: bool | None = None,
+        limit: int = 50,
+        include_expired: bool = False,
+    ) -> list[ContextEventV1]:
+        safe_limit = max(1, min(int(limit), 500))
+        fts_query = self._context_fts_query(query)
+
+        def _search() -> list[sqlite3.Row]:
+            joins: list[str] = []
+            conditions = ["e.deleted_at IS NULL"]
+            parameters: list[Any] = []
+            if fts_query and self._context_fts_enabled:
+                joins.append(
+                    "JOIN context_events_fts f ON f.event_id = e.event_id"
+                )
+                conditions.append("context_events_fts MATCH ?")
+                parameters.append(fts_query)
+            elif query.strip():
+                tokens = self._context_query_tokens(query)
+                for token in tokens:
+                    pattern = f"%{token}%"
+                    conditions.append(
+                        "(e.text LIKE ? OR e.window_title LIKE ? OR e.app_name LIKE ?)"
+                    )
+                    parameters.extend((pattern, pattern, pattern))
+            if start is not None:
+                conditions.append("COALESCE(e.ended_at, e.started_at) >= ?")
+                parameters.append(self._aware_iso(start))
+            if end is not None:
+                conditions.append("e.started_at <= ?")
+                parameters.append(self._aware_iso(end))
+            if source:
+                conditions.append("e.source = ?")
+                parameters.append(source)
+            if app_name:
+                conditions.append("LOWER(e.app_name) = LOWER(?)")
+                parameters.append(app_name)
+            if is_foreground is not None:
+                conditions.append("e.is_foreground = ?")
+                parameters.append(int(is_foreground))
+            if not include_expired:
+                conditions.append("(e.expires_at IS NULL OR e.expires_at > ?)")
+                parameters.append(_now_iso())
+            order = (
+                "bm25(context_events_fts) ASC, e.started_at DESC"
+                if fts_query and self._context_fts_enabled
+                else "e.started_at DESC"
+            )
+            sql = (
+                "SELECT e.* FROM context_events e "
+                + " ".join(joins)
+                + " WHERE "
+                + " AND ".join(conditions)
+                + f" ORDER BY {order} LIMIT ?"
+            )
+            parameters.append(safe_limit)
+            with self._connect() as connection:
+                return connection.execute(sql, parameters).fetchall()
+
+        rows = await asyncio.to_thread(_search)
+        return [self._context_event_from_row(row) for row in rows]
+
+    async def tombstone_context_event(
+        self,
+        event_id: str,
+        *,
+        deleted_at: datetime | None = None,
+    ) -> bool:
+        timestamp = self._aware_iso(deleted_at or datetime.now(UTC))
+
+        def _delete() -> bool:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE context_events
+                    SET deleted_at = ?, updated_at = ?
+                    WHERE event_id = ? AND deleted_at IS NULL
+                    """,
+                    (timestamp, timestamp, event_id),
+                )
+                if cursor.rowcount and self._context_fts_enabled:
+                    connection.execute(
+                        "DELETE FROM context_events_fts WHERE event_id = ?",
+                        (event_id,),
+                    )
+                return cursor.rowcount > 0
+
+        return await asyncio.to_thread(_delete)
+
+    async def upsert_context_episode(
+        self,
+        episode: ContextEpisodeV1,
+    ) -> ContextEpisodeV1:
+        def dump(value: object) -> str:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+        def _upsert() -> sqlite3.Row:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO context_episodes(
+                        episode_id, source, source_id, started_at, ended_at,
+                        title, summary, source_event_ids_json, app_names_json,
+                        person_ids_json, project_ids_json, vector_spaces_json,
+                        metadata_json, content_hash, sensitivity, expires_at,
+                        deleted_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source, source_id) DO UPDATE SET
+                        started_at = excluded.started_at,
+                        ended_at = excluded.ended_at,
+                        title = excluded.title,
+                        summary = excluded.summary,
+                        source_event_ids_json = excluded.source_event_ids_json,
+                        app_names_json = excluded.app_names_json,
+                        person_ids_json = excluded.person_ids_json,
+                        project_ids_json = excluded.project_ids_json,
+                        vector_spaces_json = excluded.vector_spaces_json,
+                        metadata_json = excluded.metadata_json,
+                        content_hash = excluded.content_hash,
+                        sensitivity = excluded.sensitivity,
+                        expires_at = excluded.expires_at,
+                        deleted_at = excluded.deleted_at,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        episode.episode_id,
+                        episode.source,
+                        episode.source_id,
+                        episode.started_at.isoformat(),
+                        episode.ended_at.isoformat(),
+                        episode.title,
+                        episode.summary,
+                        dump(episode.source_event_ids),
+                        dump(episode.app_names),
+                        dump(episode.person_ids),
+                        dump(episode.project_ids),
+                        dump(episode.vector_spaces),
+                        dump(episode.metadata),
+                        episode.content_hash,
+                        episode.sensitivity,
+                        episode.expires_at.isoformat() if episode.expires_at else None,
+                        episode.deleted_at.isoformat() if episode.deleted_at else None,
+                        episode.created_at.isoformat(),
+                        episode.updated_at.isoformat(),
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT * FROM context_episodes
+                    WHERE source = ? AND source_id = ?
+                    """,
+                    (episode.source, episode.source_id),
+                ).fetchone()
+                assert row is not None
+                if self._context_fts_enabled:
+                    connection.execute(
+                        "DELETE FROM context_episodes_fts WHERE episode_id = ?",
+                        (row["episode_id"],),
+                    )
+                    if row["deleted_at"] is None:
+                        app_names = " ".join(
+                            self._json_string_tuple(row["app_names_json"])
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO context_episodes_fts(
+                                episode_id, title, summary, app_names
+                            ) VALUES (?, ?, ?, ?)
+                            """,
+                            (
+                                row["episode_id"],
+                                row["title"],
+                                row["summary"],
+                                app_names,
+                            ),
+                        )
+                return row
+
+        return self._context_episode_from_row(await asyncio.to_thread(_upsert))
+
+    async def search_context_episodes(
+        self,
+        *,
+        query: str = "",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        source: str | None = None,
+        limit: int = 20,
+        include_expired: bool = False,
+    ) -> list[ContextEpisodeV1]:
+        safe_limit = max(1, min(int(limit), 200))
+        fts_query = self._context_fts_query(query)
+
+        def _search() -> list[sqlite3.Row]:
+            joins: list[str] = []
+            conditions = ["e.deleted_at IS NULL"]
+            parameters: list[Any] = []
+            if fts_query and self._context_fts_enabled:
+                joins.append(
+                    "JOIN context_episodes_fts f ON f.episode_id = e.episode_id"
+                )
+                conditions.append("context_episodes_fts MATCH ?")
+                parameters.append(fts_query)
+            elif query.strip():
+                for token in self._context_query_tokens(query):
+                    pattern = f"%{token}%"
+                    conditions.append("(e.title LIKE ? OR e.summary LIKE ?)")
+                    parameters.extend((pattern, pattern))
+            if start is not None:
+                conditions.append("e.ended_at >= ?")
+                parameters.append(self._aware_iso(start))
+            if end is not None:
+                conditions.append("e.started_at <= ?")
+                parameters.append(self._aware_iso(end))
+            if source:
+                conditions.append("e.source = ?")
+                parameters.append(source)
+            if not include_expired:
+                conditions.append("(e.expires_at IS NULL OR e.expires_at > ?)")
+                parameters.append(_now_iso())
+            order = (
+                "bm25(context_episodes_fts) ASC, e.started_at DESC"
+                if fts_query and self._context_fts_enabled
+                else "e.started_at DESC"
+            )
+            sql = (
+                "SELECT e.* FROM context_episodes e "
+                + " ".join(joins)
+                + " WHERE "
+                + " AND ".join(conditions)
+                + f" ORDER BY {order} LIMIT ?"
+            )
+            parameters.append(safe_limit)
+            with self._connect() as connection:
+                return connection.execute(sql, parameters).fetchall()
+
+        rows = await asyncio.to_thread(_search)
+        return [self._context_episode_from_row(row) for row in rows]
+
+    async def tombstone_context_episode(
+        self,
+        episode_id: str,
+        *,
+        deleted_at: datetime | None = None,
+    ) -> bool:
+        timestamp = self._aware_iso(deleted_at or datetime.now(UTC))
+
+        def _delete() -> bool:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE context_episodes
+                    SET deleted_at = ?, updated_at = ?
+                    WHERE episode_id = ? AND deleted_at IS NULL
+                    """,
+                    (timestamp, timestamp, episode_id),
+                )
+                if cursor.rowcount and self._context_fts_enabled:
+                    connection.execute(
+                        "DELETE FROM context_episodes_fts WHERE episode_id = ?",
+                        (episode_id,),
+                    )
+                return cursor.rowcount > 0
+
+        return await asyncio.to_thread(_delete)
+
+    async def prune_expired_context_records(
+        self,
+        *,
+        now: datetime | None = None,
+        dry_run: bool = True,
+    ) -> dict[str, int]:
+        cutoff = self._aware_iso(now or datetime.now(UTC))
+
+        def _prune() -> dict[str, int]:
+            with self._connect() as connection:
+                event_rows = connection.execute(
+                    """
+                    SELECT event_id FROM context_events
+                    WHERE deleted_at IS NULL
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                episode_rows = connection.execute(
+                    """
+                    SELECT episode_id FROM context_episodes
+                    WHERE deleted_at IS NULL
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                if dry_run:
+                    return {
+                        "events": len(event_rows),
+                        "episodes": len(episode_rows),
+                    }
+                connection.execute(
+                    """
+                    UPDATE context_events
+                    SET deleted_at = ?, updated_at = ?
+                    WHERE deleted_at IS NULL
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= ?
+                    """,
+                    (cutoff, cutoff, cutoff),
+                )
+                connection.execute(
+                    """
+                    UPDATE context_episodes
+                    SET deleted_at = ?, updated_at = ?
+                    WHERE deleted_at IS NULL
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= ?
+                    """,
+                    (cutoff, cutoff, cutoff),
+                )
+                if self._context_fts_enabled:
+                    connection.executemany(
+                        "DELETE FROM context_events_fts WHERE event_id = ?",
+                        ((row["event_id"],) for row in event_rows),
+                    )
+                    connection.executemany(
+                        "DELETE FROM context_episodes_fts WHERE episode_id = ?",
+                        ((row["episode_id"],) for row in episode_rows),
+                    )
+                return {
+                    "events": len(event_rows),
+                    "episodes": len(episode_rows),
+                }
+
+        return await asyncio.to_thread(_prune)
 
     async def upsert_path_event(
         self,
@@ -650,34 +1218,57 @@ class MemoryStore:
             )
         return events
 
-    async def add_message(self, role: str, content: str, request_id: str | None = None) -> None:
+    async def add_message(
+        self,
+        role: str,
+        content: str,
+        request_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
         def _add() -> None:
             with self._connect() as connection:
                 connection.execute(
                     """
-                    INSERT INTO conversation(request_id, role, content, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO conversation(
+                        request_id, session_id, role, content, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
-                    (request_id, role, content[:20000], _now_iso()),
+                    (
+                        request_id,
+                        session_id[:120] if session_id else None,
+                        role,
+                        content[:20000],
+                        _now_iso(),
+                    ),
                 )
 
         await asyncio.to_thread(_add)
 
-    async def recent_messages(self, limit: int = 12) -> list[dict[str, str]]:
+    async def recent_messages(
+        self,
+        limit: int = 12,
+        *,
+        session_id: str | None = None,
+    ) -> list[dict[str, str]]:
         safe_limit = max(1, min(limit, 100))
 
         def _list() -> list[sqlite3.Row]:
             with self._connect() as connection:
+                where = "WHERE session_id = ?" if session_id else ""
+                parameters: tuple[Any, ...] = (
+                    (session_id, safe_limit) if session_id else (safe_limit,)
+                )
                 return connection.execute(
-                    """
+                    f"""
                     SELECT role, content FROM (
                         SELECT id, role, content
                         FROM conversation
+                        {where}
                         ORDER BY id DESC
                         LIMIT ?
                     ) ORDER BY id ASC
                     """,
-                    (safe_limit,),
+                    parameters,
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -1491,6 +2082,105 @@ class MemoryStore:
                 return cursor.rowcount
 
         return await asyncio.to_thread(_prune)
+
+    @staticmethod
+    def _aware_iso(value: datetime) -> str:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("context time filters must be timezone-aware")
+        return value.astimezone(UTC).isoformat()
+
+    @staticmethod
+    def _context_query_tokens(query: str) -> list[str]:
+        return [
+            token
+            for token in re.findall(r"[\w-]+", query.casefold(), flags=re.UNICODE)
+            if len(token) > 1
+        ][:16]
+
+    @classmethod
+    def _context_fts_query(cls, query: str) -> str:
+        tokens = cls._context_query_tokens(query)
+        return " OR ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
+
+    @staticmethod
+    def _context_event_from_row(row: sqlite3.Row) -> ContextEventV1:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        raw_foreground = row["is_foreground"]
+        return ContextEventV1(
+            event_id=row["event_id"],
+            source=row["source"],
+            source_id=row["source_id"],
+            event_type=row["event_type"],
+            started_at=datetime.fromisoformat(row["started_at"]),
+            ended_at=(
+                datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None
+            ),
+            app_name=row["app_name"],
+            process_name=row["process_name"],
+            window_title=row["window_title"],
+            is_foreground=(
+                None if raw_foreground is None else bool(raw_foreground)
+            ),
+            foreground_confidence=ForegroundConfidence(row["foreground_confidence"]),
+            focus_duration_ms=row["focus_duration_ms"],
+            text=row["text"],
+            content_hash=row["content_hash"],
+            metadata=metadata if isinstance(metadata, dict) else {},
+            sensitivity=row["sensitivity"],
+            expires_at=(
+                datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+            ),
+            deleted_at=(
+                datetime.fromisoformat(row["deleted_at"]) if row["deleted_at"] else None
+            ),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _json_string_tuple(raw: str) -> tuple[str, ...]:
+        try:
+            value = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return ()
+        if not isinstance(value, list):
+            return ()
+        return tuple(str(item) for item in value if str(item).strip())
+
+    @classmethod
+    def _context_episode_from_row(cls, row: sqlite3.Row) -> ContextEpisodeV1:
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        return ContextEpisodeV1(
+            episode_id=row["episode_id"],
+            source=row["source"],
+            source_id=row["source_id"],
+            started_at=datetime.fromisoformat(row["started_at"]),
+            ended_at=datetime.fromisoformat(row["ended_at"]),
+            title=row["title"],
+            summary=row["summary"],
+            source_event_ids=cls._json_string_tuple(row["source_event_ids_json"]),
+            app_names=cls._json_string_tuple(row["app_names_json"]),
+            person_ids=cls._json_string_tuple(row["person_ids_json"]),
+            project_ids=cls._json_string_tuple(row["project_ids_json"]),
+            vector_spaces=cls._json_string_tuple(row["vector_spaces_json"]),
+            metadata=metadata if isinstance(metadata, dict) else {},
+            content_hash=row["content_hash"],
+            sensitivity=row["sensitivity"],
+            expires_at=(
+                datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+            ),
+            deleted_at=(
+                datetime.fromisoformat(row["deleted_at"]) if row["deleted_at"] else None
+            ),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
 
     @staticmethod
     def _meeting_session_from_row(row: sqlite3.Row) -> MeetingSession:

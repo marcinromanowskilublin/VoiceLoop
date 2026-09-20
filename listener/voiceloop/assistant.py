@@ -10,6 +10,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from .capability_index import CapabilityIndex, CapabilityIndexError
+from .context import ContextAssembler
 from .conversation_telemetry import ConversationTelemetry
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 from .events import EventBus
@@ -150,6 +151,7 @@ class AssistantService:
         self.telemetry = telemetry
         self.knowledge_tools = knowledge_tools
         self.commitment_shadow_enabled = commitment_shadow_enabled
+        self.context_assembler = ContextAssembler()
         self._latest_tool_observations: list[dict[str, object]] = []
         self.action_definitions = action_definitions
         self.dedupe_seconds = dedupe_seconds
@@ -203,7 +205,12 @@ class AssistantService:
         self._start_conversation_state()
         if cleaned:
             self._conversation_history.append({"role": "assistant", "content": cleaned})
-            await self.memory.add_message("assistant", cleaned, None)
+            await self.memory.add_message(
+                "assistant",
+                cleaned,
+                None,
+                session_id=self._conversation_session_id,
+            )
         await self.events.publish(
             "conversation.started",
             {"style": self._conversation_style, "greeting": cleaned},
@@ -221,7 +228,12 @@ class AssistantService:
             assistant_text=assistant_text,
         )
         if assistant_text.strip():
-            await self.memory.add_message("assistant", assistant_text.strip(), request_id)
+            await self.memory.add_message(
+                "assistant",
+                assistant_text.strip(),
+                request_id,
+                session_id=self._conversation_session_id,
+            )
 
     async def _emit_commitment_shadow(self, request: CommandRequest) -> None:
         if not self.commitment_shadow_enabled:
@@ -316,7 +328,6 @@ class AssistantService:
         self._remember_fingerprint(fingerprint, request.request_id)
         input_text = (request.text or request.command_id or "").strip()
         self._latest_tool_observations = []
-        await self.memory.add_message("user", input_text, request.request_id)
         await self.memory.update_command(
             request.request_id,
             status=CommandStatus.PLANNING,
@@ -343,6 +354,12 @@ class AssistantService:
         self._attach_interaction_session_id(
             request,
             starts_conversation=starts_conversation,
+        )
+        await self.memory.add_message(
+            "user",
+            input_text,
+            request.request_id,
+            session_id=request.interaction_session_id,
         )
 
         if self._conversation_active and self._ends_conversation(input_text):
@@ -489,7 +506,12 @@ class AssistantService:
 
         await self.memory.create_command(request)
         input_text = (request.text or request.command_id or "").strip()
-        await self.memory.add_message("user", input_text, request.request_id)
+        await self.memory.add_message(
+            "user",
+            input_text,
+            request.request_id,
+            session_id=request.interaction_session_id,
+        )
         await self.memory.update_command(
             request.request_id,
             status=CommandStatus.SUCCEEDED,
@@ -572,7 +594,12 @@ class AssistantService:
             and not plan.confirmation_required
             and not plan.requires_clarification
         ):
-            await self.memory.add_message("assistant", plan.response_text, request.request_id)
+            await self.memory.add_message(
+                "assistant",
+                plan.response_text,
+                request.request_id,
+                session_id=request.interaction_session_id,
+            )
         await self.events.publish(
             "command.planned",
             {
@@ -652,7 +679,10 @@ class AssistantService:
         history_coro = (
             asyncio.sleep(0, result=history_override)
             if history_override is not None
-            else self.memory.recent_messages(limit=12)
+            else self.memory.recent_messages(
+                limit=12,
+                session_id=request.interaction_session_id,
+            )
         )
         screen_coro = (
             self.screen.capture(request.request_id)
@@ -686,6 +716,7 @@ class AssistantService:
             if knowledge_lookup is not None
             else []
         )
+        context_notices: list[str] = []
         if knowledge_lookup is not None and knowledge_lookup.error:
             tool_observations.append(
                 ToolObservation(
@@ -696,7 +727,7 @@ class AssistantService:
                     provider="knowledge_tools",
                 )
             )
-            memories.append(
+            context_notices.append(
                 "Aktualne wyszukiwanie nie powiodło się: "
                 f"{knowledge_lookup.error[:500]}. "
                 "Nie przedstawiaj świeżych danych jako sprawdzonych."
@@ -718,24 +749,32 @@ class AssistantService:
                     "process_name": screen_snapshot.process_name,
                 },
             )
+        manual_contexts: list[str] = []
         if not any("source=manual_memory;" in context for context in memories):
             memory_limit = 3 if memories else 30
-            memories.extend(
+            manual_contexts = [
                 item.content for item in reversed(memory_items[:memory_limit])
-            )
-        if self._recent_action_summaries:
-            memories.extend(self._recent_action_summaries[-5:])
+            ]
+        context_pack = self.context_assembler.assemble(
+            question=text,
+            session_id=request.interaction_session_id,
+            vector_contexts=memories,
+            manual_contexts=manual_contexts,
+            action_summaries=self._recent_action_summaries,
+            notices=context_notices,
+        )
         turn_context = TurnContext(
             question=text,
             session_id=request.interaction_session_id,
             recent_turns=list(history[-12:]),
-            memories=list(memories[-20:]),
+            memories=context_pack.memory_strings(limit=20),
+            context_pack=context_pack,
             tool_observations=tool_observations,
             local_time=datetime.now().astimezone().isoformat(),
             screen=screen_snapshot,
             sources={
                 "history_messages": len(history),
-                "memory_items": len(memories),
+                "memory_items": len(context_pack.items),
                 "knowledge_sources": len(tool_observations),
             },
         )
@@ -745,9 +784,10 @@ class AssistantService:
                 "context_ready",
                 metadata={
                     "history_messages": len(history),
-                    "memory_items": len(memories),
+                    "memory_items": len(context_pack.items),
                     "screen_included": screen_snapshot is not None,
                     "knowledge_sources": len(tool_observations),
+                    "context_sources": context_pack.sources,
                 },
             )
         try:
@@ -1026,6 +1066,7 @@ class AssistantService:
                 "user",
                 (request.text or request.command_id or "").strip(),
                 request.request_id,
+                session_id=request.interaction_session_id,
             )
         if pending_id is None:
             plan = CommandPlan(

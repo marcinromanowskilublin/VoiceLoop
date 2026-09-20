@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from .context.schema import ContextPackV1
+
 SCHEMA_VERSION = 1
 
 
@@ -518,6 +520,7 @@ class TurnContext(BaseModel):
     session_id: str | None = Field(default=None, max_length=120)
     recent_turns: list[dict[str, str]] = Field(default_factory=list)
     memories: list[str] = Field(default_factory=list)
+    context_pack: ContextPackV1 | None = None
     tool_observations: list[ToolObservation] = Field(default_factory=list)
     local_time: str = Field(max_length=120)
     screen: ScreenSnapshot | None = None
