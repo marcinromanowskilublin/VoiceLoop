@@ -1,6 +1,7 @@
-# EvidenceItemV1 (ETAP 2)
+# EvidenceItemV1
 
-**Ten plik nie wpiną dowodu w planer.** Nie nadpisuje `commitments.schema.EvidenceItem`.  
+**Ten kontrakt nie wpina dowodu w planer.** Nie nadpisuje
+`commitments.schema.EvidenceItem`.
 Pamięć A/B/C zostaje retrieval. Ten kontrakt tylko opisuje dowód sytuacji.
 
 ## Typ

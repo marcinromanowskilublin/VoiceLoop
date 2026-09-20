@@ -1,7 +1,9 @@
-# SituationState V1 (ETAP 3)
+# SituationState V1
 
-**Read-only względem planera.** LLM nie pisze stanu. `StateProposal` (ETAP 4) istnieje poza planerem: schema → `StatePolicy` → `StateReducer` → `append_event`.  
-Commitment analyzer nie jest wpięty w produkcyjny stan (shadow = ETAP 5).
+**Read-only względem planera.** LLM nie pisze stanu. `StateProposal` istnieje
+poza planerem: schema → `StatePolicy` → `StateReducer` → `append_event`.
+Commitment analyzer nie jest wpięty w produkcyjny stan; publikuje wyłącznie
+shadow event.
 
 ## Model
 

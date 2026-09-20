@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">VoiceLoop safe execution model</title>
+  <desc id="desc">A human request may receive an LLM proposal, but only local validation, policy, confirmation, and the executor can produce an action result. The model has no direct execution authority.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8Z" fill="#6f8498"/>
+    </marker>
+    <style>
+      .title{font:700 24px "Segoe UI",Arial,sans-serif;fill:#f2f6fa}
+      .sub{font:13px "Segoe UI",Arial,sans-serif;fill:#8fa2b5}
+      .label{font:600 13px "Segoe UI",Arial,sans-serif;fill:#e8eef4;text-anchor:middle}
+      .small{font:11px "Segoe UI",Arial,sans-serif;fill:#91a4b7;text-anchor:middle}
+      .boundary{font:700 11px "Segoe UI",Arial,sans-serif;fill:#b9a7ff;letter-spacing:1px}
+      .blocked{font:600 11px "Segoe UI",Arial,sans-serif;fill:#f08b96;text-anchor:middle}
+      .footer{font:10px "Segoe UI",Arial,sans-serif;fill:#687b8e}
+      .line{fill:none;stroke:#6f8498;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+
+  <rect width="1200" height="360" rx="12" fill="#0b0f14"/>
+  <text x="40" y="42" class="title">Safe execution model</text>
+  <text x="40" y="65" class="sub">The model proposes. Local code decides.</text>
+
+  <g transform="translate(40 112)">
+    <rect width="120" height="64" rx="8" fill="#121821" stroke="#415264"/>
+    <text x="60" y="29" class="label">Human</text>
+    <text x="60" y="47" class="small">voice / text / API</text>
+  </g>
+  <path d="M160 144H195" class="line"/>
+
+  <g transform="translate(202 112)">
+    <rect width="120" height="64" rx="8" fill="#121821" stroke="#415264"/>
+    <text x="60" y="37" class="label">Request</text>
+  </g>
+  <path d="M322 144H357" class="line"/>
+
+  <g transform="translate(364 87)">
+    <rect width="154" height="114" rx="10" fill="#151423" stroke="#8f7be8" stroke-width="2"/>
+    <text x="12" y="18" class="boundary">MODEL BOUNDARY</text>
+    <rect x="14" y="34" width="126" height="48" rx="7" fill="#1d1932" stroke="#6d5cc0"/>
+    <text x="77" y="55" class="label">ProposedPlan</text>
+    <text x="77" y="72" class="small">proposal only</text>
+    <text x="77" y="101" class="small" fill="#b9a7ff">No direct authority</text>
+  </g>
+  <path d="M518 144H553" class="line"/>
+
+  <g transform="translate(560 112)">
+    <rect width="120" height="64" rx="8" fill="#10201c" stroke="#3ca47f"/>
+    <text x="60" y="29" class="label">Local validation</text>
+    <text x="60" y="47" class="small">schema + binding</text>
+  </g>
+  <path d="M680 144H715" class="line"/>
+
+  <g transform="translate(722 112)">
+    <rect width="120" height="64" rx="8" fill="#10201c" stroke="#3ca47f"/>
+    <text x="60" y="29" class="label">Local policy</text>
+    <text x="60" y="47" class="small">allowlist + risk</text>
+  </g>
+  <path d="M842 144H877" class="line"/>
+
+  <g transform="translate(884 112)">
+    <rect width="120" height="64" rx="8" fill="#241e11" stroke="#c79c42"/>
+    <text x="60" y="29" class="label">Confirmation</text>
+    <text x="60" y="47" class="small">when required</text>
+  </g>
+  <path d="M1004 144H1039" class="line"/>
+
+  <g transform="translate(1046 87)">
+    <rect width="114" height="114" rx="10" fill="#101b25" stroke="#4f90c9"/>
+    <text x="57" y="31" class="label">Executor</text>
+    <text x="57" y="50" class="small">single queue</text>
+    <path d="M20 68H94" stroke="#46677f"/>
+    <text x="57" y="91" class="label" fill="#8dc8ff">ActionResult</text>
+  </g>
+
+  <g transform="translate(366 238)">
+    <text x="76" y="0" class="blocked">NO DIRECT PATH</text>
+    <path d="M10 18H142" stroke="#713c46" stroke-width="1.5" stroke-dasharray="5 5"/>
+    <g transform="translate(0 31)">
+      <rect width="66" height="32" rx="6" fill="#1c1418" stroke="#7a3d49"/>
+      <text x="33" y="21" class="blocked">shell</text>
+      <rect x="76" width="66" height="32" rx="6" fill="#1c1418" stroke="#7a3d49"/>
+      <text x="109" y="21" class="blocked">Windows</text>
+      <rect x="152" width="78" height="32" rx="6" fill="#1c1418" stroke="#7a3d49"/>
+      <text x="191" y="21" class="blocked">filesystem</text>
+      <rect x="240" width="70" height="32" rx="6" fill="#1c1418" stroke="#7a3d49"/>
+      <text x="275" y="21" class="blocked">executor</text>
+    </g>
+  </g>
+
+  <text x="40" y="336" class="footer">VoiceLoop 0.3.0 · Architecture rev 0.030 · 2026-09-20</text>
+  <text x="1160" y="336" class="footer" text-anchor="end">Model proposes · Local code decides</text>
+</svg>

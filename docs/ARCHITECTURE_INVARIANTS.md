@@ -1,7 +1,8 @@
-# VoiceLoop — invariants architektury (ETAP 1)
+# VoiceLoop — architecture invariants
 
-**Źródło prawdy:** `listener/voiceloop/` oraz `tests/test_architecture_invariants.py`.  
-**Ten plik nie zmienia zachowania.** Nie implementuje `SituationState`. Nie rusza allowlisty, risk levels, confirmation ani dual-write Qdrant.
+**Źródło prawdy:** `listener/voiceloop/` oraz
+`tests/test_architecture_invariants.py`.
+Ten dokument opisuje istniejące granice i nie zmienia zachowania runtime.
 
 Rdzeń, który zamrażamy:
 
@@ -19,7 +20,8 @@ Baseline trzech półek: [`ARCHITECTURE_CURRENT.md`](ARCHITECTURE_CURRENT.md).
 
 Każdy `INV-0N` jest już prawdziwy w kodzie. Testy **czytają publiczne API** i asercje statyczne. Nie dodają nowej akcji, nie obniżają ryzyka, nie pomijają confirmation.
 
-`EvidenceItem` w `commitments/schema.py` (`rule` / `vector` / `temporal` / `resolver`) to **obecny** typ commitmentów. To **nie** jest przyszły `EvidenceItemV1` sytuacji. Nie zmieniać commitment `EvidenceItem`.
+`EvidenceItem` w `commitments/schema.py` (`rule` / `vector` / `temporal` /
+`resolver`) to typ commitmentów. Nie mylić go z sytuacyjnym `EvidenceItemV1`.
 
 `windows_shell.py` = UIA pulpitu i Eksploratora. „Brak shell” oznacza: brak spawn `cmd` / PowerShell dla LLM. To **nie** jest zakaz `open_shell_item`.
 
@@ -85,7 +87,11 @@ Capabilities żyją w `voiceloop_capabilities_v1`. Pamięć w `voiceloop_memory`
 
 **Kod.** `ActionRegistry._register`, `enforce_policy`. `CommandPlan.confirmation_required`. `CommandExecutor.submit` / `confirm`. Assembler: HIGH ⇒ confirmation.
 
-**Stan katalogu (7.09.2026).** 0 akcji `high`. Medium z confirmation: m.in. `open_shell_item`, `close_window_under_cursor`, `rename_under_cursor`, `paste_text_safe`, `run_uivision_macro`, `remember`, `remember_last_source`. `create_note` jest medium **bez** zgody — nie zmieniać tego w ETAPIE 1.
+**Stan katalogu (20.09.2026).** 0 akcji `high`. Medium z confirmation:
+`open_shell_item`, `close_window_under_cursor`, `rename_under_cursor`,
+`write_active_notepad`, `paste_text_safe`, `run_uivision_macro`, `remember`,
+`remember_last_source`. `create_note` pozostaje medium bez zgody; nie mylić go
+z focus-bound `write_active_notepad`.
 
 ---
 
@@ -113,7 +119,9 @@ Commitment Layer jest **EKSPERYMENTEM** (analiza tekstu, poza routingiem). Invar
 
 ## INV-09 — State mutation requires provenance
 
-**Zdanie.** Nie ma cichego zapisu „faktu” z LLM do SQLite jako stanu. Brak tabeli SQL `situation`. Stan V1 (ETAP 3) to ledger zdarzeń + redukcja, nie CRUD UPDATE.
+**Zdanie.** Nie ma cichego zapisu „faktu” z LLM do SQLite jako stanu. Brak
+tabeli SQL `situation`. SituationState V1 to ledger zdarzeń + redukcja, nie
+CRUD UPDATE.
 
 **Kod.** `situation/state.py` (`SituationEvent`, `SituationStore.append_event`, `reduce_events`). `GET /api/v1/situation` jest read-only. Brak POST/PUT.
 
@@ -123,7 +131,10 @@ Commitment Layer jest **EKSPERYMENTEM** (analiza tekstu, poza routingiem). Invar
 
 ## INV-10 — LLM never writes SituationState directly
 
-**Zdanie.** Planer zwraca `CommandPlan`. Nie importuje `SituationStore`. Nie woła `append_event` ani `apply_state_proposal`. `StateProposal` (ETAP 4) idzie wyłącznie przez lokalne `StatePolicy` → `StateReducer` → `append_event`. LLM nie jest aktorem zapisu.
+**Zdanie.** Planer zwraca `CommandPlan`. Nie importuje `SituationStore`. Nie
+woła `append_event` ani `apply_state_proposal`. `StateProposal` idzie wyłącznie
+przez lokalne `StatePolicy` → `StateReducer` → `append_event`. LLM nie jest
+aktorem zapisu.
 
 **Kod.** `model_router.py` `plan()`. `situation/proposal.py`. `SituationActor.LOCAL_CODE` jest jedynym aktorem zapisu.
 
@@ -166,7 +177,7 @@ Plik: `tests/test_architecture_invariants.py`.
 Uruchomienie (z `listener/`, venv):
 
 ```text
-python -m pytest -c pyproject.toml tests/test_architecture_invariants.py -q
+python -m pytest -c pyproject.toml ../tests/test_architecture_invariants.py -q
 ```
 
 Adversarial w suite: memory-as-command, request-as-commitment, unknown-action.

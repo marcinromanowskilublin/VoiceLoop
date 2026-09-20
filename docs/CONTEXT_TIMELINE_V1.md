@@ -1,5 +1,7 @@
 # Context Timeline V1
 
+**VoiceLoop:** 0.3.0
+
 Context Timeline jest lokalną, niewykonywalną warstwą dowodową VoiceLoop.
 Czas jest osią główną; aplikacje, okna, osoby i projekty są metadanymi, a
 embeddingi opisują znaczenie epizodów. Żaden element timeline'u nie może

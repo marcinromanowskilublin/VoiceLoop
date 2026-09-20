@@ -1,5 +1,6 @@
 # VoiceLoop — aktualny baseline architektury
 
+**Wersja:** 0.3.0
 **Baseline.** Stan kodu z 20 września 2026.
 **Źródło prawdy:** `listener/voiceloop/`. Starsze opisy ustępują kodowi.  
 **Ten plik nie zmienia zachowania produkcyjnej pętli.** Planer nadal nie
@@ -52,7 +53,8 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 
 ### PLANOWANE (nie wpinąć w planer w tym etapie)
 
-- Wpięcie commitment analyzer w produkcyjny stan (shadow = ETAP 5).
+- Wpięcie commitment analyzer w trwały produkcyjny stan; obecny shadow event
+  pozostaje obserwacyjny.
 - Wpięcie `SituationStateV1` w routing / executor jako źródło akcji — **zakazane**.
 - Etapy wektorowe i temporalne commitmentów (schema ma sloty, kod ich nie wypełnia).
 - Live Routing V2 po quality gate z liczbami.
@@ -60,7 +62,7 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 - Background ingest/foreground/prune Context Timeline oraz produkcyjny quality
   gate na prywatnym gold secie.
 
-Kontrakty ETAP 1–3 są w repo i **nie sterują** planerem:
+Kontrakty dowodu i stanu są w repo i **nie sterują** planerem:
 
 - invariants: [`ARCHITECTURE_INVARIANTS.md`](ARCHITECTURE_INVARIANTS.md)
 - dowód: [`EVIDENCE_V1.md`](EVIDENCE_V1.md) — `EvidenceItemV1` ≠ commitment `EvidenceItem`
@@ -218,11 +220,26 @@ Domyślne `Settings.llm_primary` w kodzie: `"local"`. Live stack często stawia 
 
 `enforce_policy(step)`: nieznane `action_id` → wyjątek; argumenty vs schema; model **nie obniży** ryzyka ze speca; lokalny wymóg zgody albo `high` wymusza `confirmation_required`.
 
-`bind_execution_targets`: tuż przed kolejką wiąże cel UIA / HWND dla `hover_shell_item`, `open_shell_item`, `close_window_under_cursor`. To nie jest nowa akcja z LLM.
+`bind_execution_targets`: tuż przed kolejką wiąże cel UIA / HWND dla
+`hover_shell_item`, `open_shell_item`, `close_window_under_cursor` oraz akcji
+aktywnego Notatnika. To nie jest nowa akcja z LLM.
 
-42 `action_id` (kod `actions.py`, nie tabela z handoffu §11):
+44 `action_id` (kod `actions.py`):
 
-`open_calendar`, `open_browser`, `open_url`, `open_folder`, `open_app`, `hover_shell_item`, `open_shell_item`, `select_shell_folder`, `select_shell_file`, `select_shell_items_by_extension`, `select_shell_items_by_letter`, `select_listed_candidate`, `cursor_center`, `cursor_return`, `snap_window_layout`, `open_chat`, `search_web`, `open_gpt_chat`, `open_gemini_chat`, `describe_active_window`, `minimize_active_window`, `minimize_all_windows`, `minimize_window_under_cursor`, `close_window_under_cursor`, `copy_selected_text`, `copy_text_under_cursor`, `copy_email_under_cursor`, `copy_number_under_cursor`, `copy_sentence_under_cursor`, `select_sentence_under_cursor`, `select_paragraph_under_cursor`, `rename_under_cursor`, `describe_text_target`, `paste_text_safe`, `describe_recent_activity`, `create_note`, `run_uivision_macro`, `remember`, `remember_last_source`, `recall`, `list_capabilities`, `speak_text`.
+`open_calendar`, `open_browser`, `open_url`, `open_folder`, `open_app`,
+`hover_shell_item`, `open_shell_item`, `select_shell_folder`,
+`select_shell_file`, `select_shell_items_by_extension`,
+`select_shell_items_by_letter`, `select_listed_candidate`, `cursor_center`,
+`cursor_return`, `snap_window_layout`, `open_chat`, `search_web`,
+`open_gpt_chat`, `open_gemini_chat`, `describe_active_window`,
+`minimize_active_window`, `minimize_all_windows`, `minimize_window_under_cursor`,
+`close_window_under_cursor`, `copy_selected_text`, `copy_text_under_cursor`,
+`copy_email_under_cursor`, `copy_number_under_cursor`,
+`copy_sentence_under_cursor`, `select_sentence_under_cursor`,
+`select_paragraph_under_cursor`, `rename_under_cursor`, `describe_text_target`,
+`read_active_notepad`, `write_active_notepad`, `paste_text_safe`,
+`describe_recent_activity`, `create_note`, `run_uivision_macro`, `remember`,
+`remember_last_source`, `recall`, `list_capabilities`, `speak_text`.
 
 Potwierdzenie (medium): `open_shell_item`, `close_window_under_cursor`, `rename_under_cursor`, `paste_text_safe`, `run_uivision_macro`, `remember`, `remember_last_source`. `create_note` jest medium bez zgody. High = 0.
 
@@ -284,11 +301,11 @@ Brak `subprocess`, `cmd.exe`, PowerShell. LLM nie dostaje narzędzia „uruchom 
 
 ---
 
-## Handoff 11.08 vs kod
+## Documentation authority
 
-**§2 (prompt startowy) — częściowo nieaktualny.** Traktuje n8n jako stały pierwszy router, pomija V2 shadow, capabilities, `TranscriptEnvelopeV1`, hybryde A/B/C i to, że `POST /stop` jest soft barge-in. Tabelę akcji z §11 zastępuje `actions.py` (44, nie ~13).
-
-**§10 i Notion (30.08) — obowiązują dla wektorów:** pięć osi, wagi, RRF, dual-write `semantic`, SQLite jako failover, osobna kolekcja capabilities, `VECTOR_MEMORY_MIN_SCORE=0.0`, fail-closed ingest. Notion ma już przestarzale liczby allowlisty (26+7); wygrywa kod.
+Ten dokument i aktualny kod zastępują wcześniejsze handoffy, dzienne plany oraz
+snapshoty operacyjne. Materiały pod `docs/archive/` służą wyłącznie historii
+projektu i nie są kontraktem runtime.
 
 ---
 

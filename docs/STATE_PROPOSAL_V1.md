@@ -1,6 +1,7 @@
-# StateProposal V1 (ETAP 4)
+# StateProposal V1
 
-**Ten plik nie wpiną propozycji w planer.** `assistant.py` nadal nie importuje `situation`.  
+**Ten kontrakt nie wpina propozycji w planer.** `assistant.py` nadal nie
+importuje `situation`.
 LLM nie pisze `SituationState`. Nie ma nowej akcji w `ActionRegistry`.
 
 ## Ścieżka
@@ -43,4 +44,4 @@ Zaakceptowana propozycja **dopisuje** zdarzenie. Nie robi CRUD UPDATE na hipotez
 - import w `assistant.py` / `model_router.py` / `router.py`
 - zapis LLM do SQLite
 - nowa akcja, zmiana risk, panel
-- ETAP 5 (commitment shadow)
+- zapis commitment shadow do SituationState
