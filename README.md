@@ -16,26 +16,33 @@ general shell tool.
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-brightgreen.svg)](LICENSE)
 [![Version: 0.3.0](https://img.shields.io/badge/version-0.3.0-6e8fb3.svg)](CHANGELOG.md)
 
-## What you can see live
+## What You Can See Live
 
-- A loopback-only diagnostics panel with component health, command status,
-  conversation traces and action results.
-- A Polish voice session with interruption, deterministic STOP and TTS resume.
-- A typed plan moving through allowlist, local risk policy, confirmation and a
-  single executor queue.
-- A focus-bound Notepad read/write flow that confirms replacement and verifies
-  the write by reading it back; its constrained voice-lane mode is opt-in.
-- Local memory and context diagnostics. Context Timeline recall remains off by
-  default until its private quality gate passes.
+VoiceLoop runs as a local control panel backed by a FastAPI core. The panel
+shows component health, conversation state, recent command results, answer
+sources, local memories and turn latency without exposing a general shell tool
+to the model.
 
-![VoiceLoop safe execution model](docs/img/voiceloop-safe-execution.svg)
+![VoiceLoop local panel showing conversation, health and local controls](docs/img/voiceloop-panel.png)
 
-## Local diagnostics panel
+Live capabilities include:
 
-![VoiceLoop local panel](docs/img/voiceloop-panel.png)
+- Polish voice and text input with deterministic STOP.
+- Typed action plans that pass local allowlists, schemas, risk policy and
+  confirmation before execution.
+- A single executor queue whose `ActionResult` is the only source of execution
+  success.
+- Optional Notepad read/write, local memory, Screenpipe, Qdrant and cloud model
+  integrations behind explicit settings.
 
-The panel is a development and diagnostics surface, not a claim of final
-product UI.
+## Safety Model
+
+![VoiceLoop safe execution model: model proposes, local code decides](docs/img/voiceloop-safe-execution.svg)
+
+VoiceLoop is built around one boundary: the model may propose a response or a
+typed plan, but local code decides whether anything can happen. Retrieved
+context cannot create an action, lower risk, replace confirmation or claim that
+work succeeded.
 
 ## Quick start
 
@@ -59,27 +66,14 @@ Verify the core from `listener/`:
 .\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q
 ```
 
-## Architecture at a glance
+## Architecture At A Glance
 
-![Current VoiceLoop system architecture](docs/img/voiceloop-system-architecture.svg)
+![VoiceLoop active request flow from input through local policy and executor](docs/img/voiceloop-system-architecture.svg)
 
-The active path is deterministic around the model:
-
-```text
-CommandRequest
-  -> deterministic guards / STOP
-  -> Router V1
-  -> optional bounded context
-  -> ProposedPlan
-  -> local binding
-  -> allowlist + risk + confirmation
-  -> CommandExecutor
-  -> ActionResult
-```
-
-Routing V2 is shadow by default. Commitment analysis emits a shadow event.
-Situation State is read-only to planning. None of those paths can silently
-create an executable action.
+The production path is deliberately narrow: hard guards and Router V1 run
+before the LLM path, bounded context is supplied only as untrusted evidence, and
+local policy gates every executable step. Routing V2, commitment analysis and
+Situation State remain shadow or read-only paths by default.
 
 Canonical details:
 [`docs/ARCHITECTURE_CURRENT.md`](docs/ARCHITECTURE_CURRENT.md).
@@ -159,75 +153,47 @@ handler runs can establish success.
 
 Checked in invariant `INV-11`.
 
-## Context, memory and retrieval
+## Context, Memory And Retrieval
 
-![VoiceLoop memory and context architecture](docs/img/voiceloop-memory-architecture.svg)
+![VoiceLoop memory architecture: SQLite is canonical, Qdrant is a derived index](docs/img/voiceloop-memory-architecture.svg)
 
-VoiceLoop deliberately separates exact records from semantic retrieval:
+VoiceLoop keeps exact records and semantic search deliberately separate:
 
-- SQLite owns canonical commands, conversation, explicit memories, meeting
-  transcripts, timeline events, episodes, timestamps and reviewed entities.
-- Qdrant provides derived semantic indexes. It is not the source of truth for
-  time.
-- Planner context, explicit user recall, Context Timeline and capability search
-  are separate read paths.
-- Capability vectors live in a separate collection and cannot pollute personal
-  memory.
+- SQLite is the canonical store for text, timestamps, command state, explicit
+  memories, meeting transcripts, timeline events, episodes and reviewed
+  entities.
+- Qdrant is a derived semantic index. It ranks candidates, but SQLite remains
+  the source of truth for content and time.
+- Planner context, user recall and time-first timeline recall are separate read
+  paths. Capability vectors live in a separate collection and cannot pollute
+  personal memory.
+- Retrieved context is untrusted. It can inform a response, but it cannot
+  authorize execution.
 
-Memory supports five named spaces: `semantic`, `topic`, `intent`, `decision`
-and `person_context`. The separate capability index uses `semantic`, `intent`
-and `target_context`.
+Memory retrieval uses five named spaces: `semantic`, `topic`, `intent`,
+`decision` and `person_context`. The capability index uses a separate
+three-axis collection: `semantic`, `intent` and `target_context`.
 
-Each memory axis embeds a separate description of the same record. Empty
-aspects are omitted. The model and vector dimension are configuration-dependent;
-these are not five separately trained models or five memory collections.
+Time-first recall is opt-in. When a question has a time range, it checks
+SQLite/FTS first, can consult historical Screenpipe evidence, and accepts
+semantic candidates only when their canonical SQLite episode and source hashes
+still match.
 
-| Read path | Current behavior |
-|---|---|
-| Planner memory | Five query views, weighted reciprocal-rank fusion (RRF), then bounded Context Pack assembly. |
-| Default user recall | The same five memory axes; SQLite semantic fallback, then literal explicit-memory lookup when needed. |
-| Opt-in time-first recall | A recognized time range, SQLite/FTS, optional historical Screenpipe, then semantic candidates checked against canonical SQLite episodes and source versions. |
-| Capability matching | A separate three-axis index over registered actions; retrieval does not authorize execution. |
-
-Time-first recall tries `semantic` first, then query-relevant reserve axes if
-it still lacks enough accepted items. The stopping rule currently depends on
-item counts; it does not yet implement question importance or calibrated
-evidence sufficiency. Planner memory still uses its existing five-axis path.
-
-### A semantic match needs a current source
-
-For time-first semantic recall, Qdrant supplies a candidate ID and ranking.
-SQLite supplies the content and time. A candidate is rejected if its episode
-is missing, stale, deleted, expired or outside the requested interval, or if
-any referenced source event is missing, changed, deleted or expired.
-
-Ranking stays in `retrieval_score`; it is not copied into `confidence`.
-An empty result for a recognized time range stays empty instead of falling
-back to a search across other dates. Invalid, timezone-free or out-of-range
-Screenpipe timestamps are discarded.
-
-Legacy points without canonical episode references and source-version hashes
-are not accepted by this time-first semantic path. Episode indexing is an
-explicit API operation with SQLite access, not an automatic startup migration.
-These controls do not replace the planner's existing retrieval path.
-
-### Retrieval is measured, not believed
-
-If Qdrant is unavailable, the default recall and planner paths may fall back
-to local SQLite cosine on `semantic`. Time-first recall preserves its time
-boundary and can return no evidence. Screenpipe ingestion fails closed instead
-of treating an unavailable store as “no duplicate”. Threshold Guard classifies
-dead, unreachable, over-broad and drifted gates instead of assuming search works.
+Retrieval is measured, not assumed. If Qdrant is unavailable, planner/default
+recall may fall back to SQLite semantic search; time-first recall preserves its
+time boundary and may return no evidence. Threshold Guard classifies dead,
+unreachable, over-broad and drifted gates instead of treating every threshold as
+meaningful.
 
 Checked in `tests/test_qdrant_memory.py`, `tests/test_threshold_guard.py`,
 `tests/test_context_foundation.py`, `tests/test_context_phase2.py`,
 `tests/test_context_phase3.py` and `tests/test_context_retrieval_integrity.py`.
 
-The local `voiceloop.corpus` CLI provides `ingest-context-documents`,
-`migrate-memories-to-timeline`, `prune-context-timeline` (dry-run unless
-`--apply`) and `report-context-retrieval`. These are explicit operator commands,
-not background jobs. See the [operation contracts](docs/CONTEXT_TIMELINE_V1.md)
-for their write effects and rollout limits.
+The local `voiceloop.corpus` CLI provides explicit operator commands for
+document ingest, memory migration, timeline pruning and retrieval comparison.
+They are not background jobs. See the
+[operation contracts](docs/CONTEXT_TIMELINE_V1.md) for write effects and
+rollout limits.
 
 Full contracts:
 

@@ -1,199 +1,108 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
   <title id="title">VoiceLoop system architecture</title>
-  <desc id="desc">Current VoiceLoop control flow. Requests pass deterministic guards, Router V1, optional context assembly and an LLM proposal. Local code binds actions, enforces allowlists and risk, obtains confirmation, and executes through one queue. Routing V2 and commitment analysis remain shadow paths; context cannot create intent.</desc>
+  <desc id="desc">VoiceLoop request flow. Requests pass deterministic guards and Router V1 first. If needed, bounded context goes to an LLM proposal, then local code validates, confirms and executes through one queue. Shadow features do not control execution.</desc>
   <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0L8 4L0 8Z" fill="#71869a"/>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#8aa0b8"/>
     </marker>
-    <marker id="arrowActive" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0L8 4L0 8Z" fill="#51cfa0"/>
+    <marker id="arrowLocal" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#52d89a"/>
     </marker>
     <style>
-      .h1{font:700 27px "Segoe UI",Arial,sans-serif;fill:#f3f7fa}
-      .sub{font:13px "Segoe UI",Arial,sans-serif;fill:#91a4b6}
-      .band{font:700 11px "Segoe UI",Arial,sans-serif;letter-spacing:1.1px}
-      .node{font:600 13px "Segoe UI",Arial,sans-serif;fill:#eaf0f5;text-anchor:middle}
-      .small{font:11px "Segoe UI",Arial,sans-serif;fill:#91a4b6;text-anchor:middle}
-      .tiny{font:10px "Segoe UI",Arial,sans-serif;fill:#708397}
-      .footer{font:10px "Segoe UI",Arial,sans-serif;fill:#687b8e}
-      .active{fill:#10201c;stroke:#3ba47e;stroke-width:1.5}
-      .neutral{fill:#121821;stroke:#435668;stroke-width:1.5}
-      .context{fill:#101b25;stroke:#4f86b4;stroke-width:1.5}
-      .model{fill:#181529;stroke:#8e7ae3;stroke-width:2}
-      .shadow{fill:#201b10;stroke:#c99c43;stroke-width:1.5;stroke-dasharray:7 5}
-      .result{fill:#0f1b27;stroke:#5898d2;stroke-width:1.5}
-      .flow{fill:none;stroke:#71869a;stroke-width:2;marker-end:url(#arrow)}
-      .localFlow{fill:none;stroke:#51cfa0;stroke-width:2.2;marker-end:url(#arrowActive)}
-      .contextFlow{fill:none;stroke:#5683a8;stroke-width:1.7;marker-end:url(#arrow)}
-      .shadowFlow{fill:none;stroke:#c99c43;stroke-width:1.7;stroke-dasharray:7 5;marker-end:url(#arrow)}
+      .h1{font:800 34px "Segoe UI",Arial,sans-serif;fill:#f6f8fb}
+      .sub{font:15px "Segoe UI",Arial,sans-serif;fill:#a9b7c8}
+      .band{font:800 12px "Segoe UI",Arial,sans-serif;letter-spacing:1.4px}
+      .node{font:700 16px "Segoe UI",Arial,sans-serif;fill:#f3f7fb;text-anchor:middle}
+      .small{font:13px "Segoe UI",Arial,sans-serif;fill:#a9b7c8;text-anchor:middle}
+      .micro{font:12px "Segoe UI",Arial,sans-serif;fill:#9fb0c4;text-anchor:middle}
+      .box{rx:18}
+      .intake{fill:#121a27;stroke:#506278;stroke-width:1.8}
+      .context{fill:#0f2231;stroke:#7dd3fc;stroke-width:2}
+      .model{fill:#1b1730;stroke:#a78bfa;stroke-width:2.2}
+      .local{fill:#10251d;stroke:#52d89a;stroke-width:2.2}
+      .confirm{fill:#261f10;stroke:#f8d36b;stroke-width:2}
+      .shadow{fill:#1b1720;stroke:#8aa0b8;stroke-width:1.5;stroke-dasharray:7 6}
+      .flow{fill:none;stroke:#8aa0b8;stroke-width:2.6;marker-end:url(#arrow)}
+      .localFlow{fill:none;stroke:#52d89a;stroke-width:3;marker-end:url(#arrowLocal)}
+      .dash{fill:none;stroke:#8aa0b8;stroke-width:1.8;stroke-dasharray:7 6}
     </style>
   </defs>
 
-  <rect width="1440" height="900" rx="12" fill="#0b0f14"/>
-  <text x="40" y="45" class="h1">VoiceLoop system architecture</text>
-  <text x="40" y="69" class="sub">Typed proposals inside deterministic local control</text>
+  <rect width="1200" height="560" rx="24" fill="#070910"/>
+  <circle cx="1100" cy="-80" r="320" fill="#312e81" opacity=".28"/>
+  <circle cx="110" cy="45" r="240" fill="#075985" opacity=".24"/>
+  <text x="48" y="54" class="band" fill="#74f0b6">ACTIVE PATH</text>
+  <text x="48" y="94" class="h1">Deterministic shell around an LLM proposal</text>
+  <text x="48" y="121" class="sub">Router V1 and hard guards run first. The model proposes only when local code asks it to.</text>
 
-  <g transform="translate(978 25)">
-    <line x1="0" y1="12" x2="30" y2="12" stroke="#51cfa0" stroke-width="2"/>
-    <text x="40" y="16" class="tiny" fill="#8ddfbe">ACTIVE / PRODUCTION</text>
-    <line x1="180" y1="12" x2="210" y2="12" stroke="#c99c43" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="220" y="16" class="tiny" fill="#e6bd68">SHADOW / EXPERIMENTAL</text>
-    <line x1="0" y1="37" x2="30" y2="37" stroke="#5683a8" stroke-width="2"/>
-    <text x="40" y="41" class="tiny" fill="#80aed2">CONTEXT ONLY</text>
+  <rect x="42" y="160" width="1116" height="98" rx="24" fill="#0d1421" stroke="#223047"/>
+  <text x="66" y="190" class="band" fill="#a9b7c8">1. INTAKE</text>
+  <g transform="translate(82 204)">
+    <rect width="170" height="44" rx="14" class="intake"/>
+    <text x="85" y="29" class="node">Panel / Voice / API</text>
   </g>
-
-  <rect x="30" y="92" width="1380" height="112" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="48" y="116" class="band" fill="#8ddfbe">ACTIVE INTAKE AND DETERMINISTIC CONTROL</text>
-
-  <g transform="translate(50 132)">
-    <rect width="150" height="52" rx="7" class="neutral"/>
-    <text x="75" y="22" class="node">User / Voice / API</text>
-    <text x="75" y="40" class="small">panel · VoiceAttack · HTTP</text>
+  <path d="M252 226H303" class="flow"/>
+  <g transform="translate(320 204)">
+    <rect width="176" height="44" rx="14" class="intake"/>
+    <text x="88" y="29" class="node">CommandRequest</text>
   </g>
-  <path d="M200 158H238" class="flow"/>
-  <g transform="translate(245 132)">
-    <rect width="132" height="52" rx="7" class="context"/>
-    <text x="66" y="22" class="node">Deepgram STT</text>
-    <text x="66" y="40" class="small">voice input only</text>
+  <path d="M496 226H547" class="flow"/>
+  <g transform="translate(564 190)">
+    <rect width="202" height="68" rx="17" class="local"/>
+    <text x="101" y="29" class="node">Hard guards</text>
+    <text x="101" y="51" class="small">STOP, confidence, speaker</text>
   </g>
-  <path d="M377 158H415" class="flow"/>
-  <g transform="translate(422 132)">
-    <rect width="146" height="52" rx="7" class="neutral"/>
-    <text x="73" y="31" class="node">CommandRequest</text>
-  </g>
-  <path d="M568 158H606" class="flow"/>
-  <g transform="translate(613 132)">
-    <rect width="174" height="52" rx="7" class="active"/>
-    <text x="87" y="22" class="node">Deterministic guards</text>
-    <text x="87" y="40" class="small">STOP · confidence · speaker</text>
-  </g>
-  <path d="M787 158H825" class="localFlow"/>
-  <g transform="translate(832 132)">
-    <rect width="132" height="52" rx="7" class="active"/>
-    <text x="66" y="22" class="node">Router V1</text>
-    <text x="66" y="40" class="small">deterministic first</text>
-  </g>
-  <path d="M964 158H1002" class="shadowFlow"/>
-  <g transform="translate(1009 132)">
-    <rect width="150" height="52" rx="7" class="shadow"/>
-    <text x="75" y="22" class="node">Routing V2</text>
-    <text x="75" y="40" class="small">shadow by default</text>
-  </g>
-  <path d="M1159 158H1197" class="shadowFlow"/>
-  <g transform="translate(1204 132)">
-    <rect width="174" height="52" rx="7" class="shadow"/>
-    <text x="87" y="22" class="node">Commitment Layer</text>
-    <text x="87" y="40" class="small">shadow event only</text>
+  <path d="M766 226H817" class="localFlow"/>
+  <g transform="translate(834 190)">
+    <rect width="190" height="68" rx="17" class="local"/>
+    <text x="95" y="29" class="node">Router V1</text>
+    <text x="95" y="51" class="small">deterministic first</text>
   </g>
 
-  <rect x="30" y="224" width="1380" height="276" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="48" y="249" class="band" fill="#80aed2">CONTEXT ASSEMBLY AND MODEL PROPOSAL</text>
-
-  <g transform="translate(50 278)">
-    <rect width="154" height="46" rx="7" class="context"/>
-    <text x="77" y="28" class="node">SQLite</text>
-    <rect y="58" width="154" height="46" rx="7" class="context"/>
-    <text x="77" y="86" class="node">Qdrant memory</text>
-    <rect y="116" width="154" height="46" rx="7" class="context"/>
-    <text x="77" y="144" class="node">Screenpipe</text>
-    <rect y="174" width="154" height="46" rx="7" class="context"/>
-    <text x="77" y="194" class="node">Context Timeline</text>
-    <text x="77" y="211" class="small">recall off by default</text>
+  <rect x="42" y="282" width="1116" height="116" rx="24" fill="#0d1421" stroke="#223047"/>
+  <text x="66" y="313" class="band" fill="#7dd3fc">2. CONTEXT AND PROPOSAL</text>
+  <g transform="translate(130 330)">
+    <rect width="208" height="52" rx="16" class="context"/>
+    <text x="104" y="23" class="node">Bounded context</text>
+    <text x="104" y="41" class="small">memory, history, optional screen</text>
   </g>
-  <path d="M204 301H292" class="contextFlow"/>
-  <path d="M204 359H292" class="contextFlow"/>
-  <path d="M204 417H292" class="contextFlow"/>
-  <path d="M204 475H292" class="contextFlow"/>
-
-  <g transform="translate(300 330)">
-    <rect width="190" height="94" rx="9" class="context"/>
-    <text x="95" y="31" class="node">ContextAssembler</text>
-    <text x="95" y="51" class="small">budget · dedupe · provenance</text>
-    <text x="95" y="72" class="node" fill="#8dc8ff">ContextPackV1</text>
+  <path d="M338 356H407" class="flow"/>
+  <g transform="translate(424 314)">
+    <rect width="242" height="84" rx="19" class="model"/>
+    <text x="121" y="35" class="node">LLM boundary</text>
+    <text x="121" y="59" class="small">conversation or ProposedPlan</text>
   </g>
-  <path d="M490 377H548" class="contextFlow"/>
-
-  <g transform="translate(556 286)">
-    <rect width="250" height="182" rx="11" class="model"/>
-    <text x="16" y="23" class="band" fill="#b9a7ff">LLM BOUNDARY</text>
-    <rect x="22" y="44" width="206" height="70" rx="8" fill="#201a38" stroke="#6f5fc3"/>
-    <text x="125" y="71" class="node">LLM planner</text>
-    <text x="125" y="92" class="small">conversation or ProposedPlan</text>
-    <text x="125" y="143" class="node" fill="#c6b8ff">LLM PROPOSES</text>
-    <text x="125" y="164" class="small">No direct execution authority</text>
+  <path d="M666 356H735" class="flow"/>
+  <g transform="translate(752 330)">
+    <rect width="244" height="52" rx="16" class="local"/>
+    <text x="122" y="23" class="node">Local plan binding</text>
+    <text x="122" y="41" class="small">known actions only</text>
   </g>
 
-  <path d="M898 184V276H826" class="localFlow"/>
-  <g transform="translate(830 286)">
-    <rect width="186" height="70" rx="8" class="active"/>
-    <text x="93" y="27" class="node">Deterministic</text>
-    <text x="93" y="47" class="node">CommandPlan</text>
+  <rect x="42" y="422" width="1116" height="86" rx="24" fill="#0d1421" stroke="#223047"/>
+  <text x="66" y="453" class="band" fill="#74f0b6">3. LOCAL AUTHORITY</text>
+  <g transform="translate(220 452)">
+    <rect width="190" height="44" rx="14" class="local"/>
+    <text x="95" y="29" class="node">Policy gates</text>
   </g>
-  <path d="M806 377H1052" class="flow"/>
-  <path d="M1016 321H1052" class="localFlow"/>
-
-  <g transform="translate(1060 330)">
-    <rect width="176" height="94" rx="9" class="active"/>
-    <text x="88" y="31" class="node">Local binding</text>
-    <text x="88" y="51" class="small">known actions · target identity</text>
-    <text x="88" y="73" class="node" fill="#8ddfbe">CommandPlan</text>
+  <path d="M410 474H461" class="localFlow"/>
+  <g transform="translate(478 452)">
+    <rect width="154" height="44" rx="14" class="confirm"/>
+    <text x="77" y="29" class="node">Confirm</text>
   </g>
-
-  <g transform="translate(1260 286)">
-    <rect width="118" height="70" rx="8" class="context"/>
-    <text x="59" y="26" class="node">Situation State</text>
-    <text x="59" y="46" class="small">read-only API</text>
-    <text x="59" y="61" class="small">no control path</text>
+  <path d="M632 474H683" class="localFlow"/>
+  <g transform="translate(700 452)">
+    <rect width="170" height="44" rx="14" class="local"/>
+    <text x="85" y="29" class="node">Executor queue</text>
   </g>
-
-  <rect x="30" y="520" width="1380" height="242" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="48" y="545" class="band" fill="#8ddfbe">LOCAL AUTHORITY BOUNDARY</text>
-  <text x="1230" y="545" class="band" fill="#8ddfbe">LOCAL CODE DECIDES</text>
-
-  <g transform="translate(74 595)">
-    <rect width="184" height="72" rx="8" class="active"/>
-    <text x="92" y="28" class="node">ActionRegistry</text>
-    <text x="92" y="49" class="small">registered allowlist</text>
-  </g>
-  <path d="M258 631H306" class="localFlow"/>
-  <g transform="translate(314 595)">
-    <rect width="184" height="72" rx="8" class="active"/>
-    <text x="92" y="28" class="node">Argument validation</text>
-    <text x="92" y="49" class="small">strict per-action schema</text>
-  </g>
-  <path d="M498 631H546" class="localFlow"/>
-  <g transform="translate(554 595)">
-    <rect width="184" height="72" rx="8" class="active"/>
-    <text x="92" y="28" class="node">Local risk policy</text>
-    <text x="92" y="49" class="small">model cannot lower risk</text>
-  </g>
-  <path d="M738 631H786" class="localFlow"/>
-  <g transform="translate(794 595)">
-    <rect width="184" height="72" rx="8" fill="#241e11" stroke="#c99c43" stroke-width="1.5"/>
-    <text x="92" y="28" class="node">Confirmation gate</text>
-    <text x="92" y="49" class="small">when locally required</text>
-  </g>
-  <path d="M978 631H1026" class="localFlow"/>
-  <g transform="translate(1034 581)">
-    <rect width="184" height="100" rx="9" class="active"/>
-    <text x="92" y="28" class="node">CommandExecutor</text>
-    <text x="92" y="49" class="small">single queue · one active plan</text>
-    <text x="92" y="72" class="small">ActionSpec handler</text>
-  </g>
-  <path d="M1218 631H1266" class="localFlow"/>
-  <g transform="translate(1274 595)">
-    <rect width="104" height="72" rx="8" class="result"/>
-    <text x="52" y="28" class="node">ActionResult</text>
-    <text x="52" y="49" class="small">success lives here</text>
+  <path d="M870 474H921" class="localFlow"/>
+  <g transform="translate(938 452)">
+    <rect width="128" height="44" rx="14" class="context"/>
+    <text x="64" y="29" class="node">ActionResult</text>
   </g>
 
-  <path d="M1148 424V570H166V587" class="localFlow"/>
-
-  <rect x="30" y="782" width="1380" height="72" rx="9" fill="#111820" stroke="#2c3c4a"/>
-  <text x="52" y="809" class="band" fill="#f08b96">PROHIBITED DIRECT PATHS</text>
-  <text x="52" y="833" class="sub">LLM  -X’  shell   ·   Windows   ·   filesystem   ·   CommandExecutor</text>
-  <text x="1390" y="809" class="band" fill="#8ddfbe" text-anchor="end">MODEL PROPOSES · LOCAL CODE DECIDES</text>
-
-  <text x="40" y="882" class="footer">VoiceLoop 0.3.0 · Architecture rev 0.030 · 2026-09-20</text>
-  <text x="1400" y="882" class="footer" text-anchor="end">Source of truth: listener/voiceloop + architecture invariants</text>
+  <g transform="translate(82 522)">
+    <rect width="1036" height="28" rx="14" class="shadow"/>
+    <text x="518" y="19" class="micro">Shadow only: Routing V2, commitment analysis and Situation State can observe or report; they do not create executable actions.</text>
+  </g>
 </svg>

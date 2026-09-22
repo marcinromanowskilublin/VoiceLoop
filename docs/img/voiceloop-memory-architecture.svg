@@ -1,168 +1,86 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
   <title id="title">VoiceLoop memory and context architecture</title>
-  <desc id="desc">Current local memory architecture. SQLite stores canonical records, timestamps, events and episodes. Qdrant is a derived semantic index with five named memory vectors, while capabilities use a separate collection. Planner context, user recall, Context Timeline, and capability search remain distinct paths. Retrieved context cannot create intent.</desc>
+  <desc id="desc">SQLite stores canonical records, text and time. Qdrant stores derived semantic indexes for ranking. Planner context, user recall and timeline recall stay separate, and retrieved context cannot create executable intent.</desc>
   <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0L8 4L0 8Z" fill="#71869a"/>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#8aa0b8"/>
     </marker>
-    <marker id="arrowContext" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-      <path d="M0 0L8 4L0 8Z" fill="#5f91b9"/>
+    <marker id="arrowContext" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#7dd3fc"/>
     </marker>
     <style>
-      .h1{font:700 27px "Segoe UI",Arial,sans-serif;fill:#f3f7fa}
-      .sub{font:13px "Segoe UI",Arial,sans-serif;fill:#91a4b6}
-      .section{font:700 11px "Segoe UI",Arial,sans-serif;letter-spacing:1.1px}
-      .node{font:600 13px "Segoe UI",Arial,sans-serif;fill:#eaf0f5;text-anchor:middle}
-      .small{font:11px "Segoe UI",Arial,sans-serif;fill:#91a4b6;text-anchor:middle}
-      .tiny{font:10px "Segoe UI",Arial,sans-serif;fill:#708397}
-      .mono{font:600 12px Consolas,"SFMono-Regular",monospace;fill:#dbe7f0}
-      .footer{font:10px "Segoe UI",Arial,sans-serif;fill:#687b8e}
-      .source{fill:#121821;stroke:#435668;stroke-width:1.4}
-      .sql{fill:#10201c;stroke:#3ba47e;stroke-width:1.5}
-      .vector{fill:#15172a;stroke:#7466c7;stroke-width:1.5}
-      .capability{fill:#201b10;stroke:#c99c43;stroke-width:1.5;stroke-dasharray:7 5}
-      .role{fill:#101b25;stroke:#4f86b4;stroke-width:1.5}
-      .flow{fill:none;stroke:#71869a;stroke-width:1.8;marker-end:url(#arrow)}
-      .contextFlow{fill:none;stroke:#5f91b9;stroke-width:1.8;marker-end:url(#arrowContext)}
-      .derived{fill:none;stroke:#8e7ae3;stroke-width:1.7;stroke-dasharray:7 5;marker-end:url(#arrow)}
+      .h1{font:800 34px "Segoe UI",Arial,sans-serif;fill:#f6f8fb}
+      .sub{font:15px "Segoe UI",Arial,sans-serif;fill:#a9b7c8}
+      .section{font:800 12px "Segoe UI",Arial,sans-serif;letter-spacing:1.4px}
+      .node{font:700 17px "Segoe UI",Arial,sans-serif;fill:#f3f7fb;text-anchor:middle}
+      .small{font:13px "Segoe UI",Arial,sans-serif;fill:#a9b7c8;text-anchor:middle}
+      .tiny{font:12px "Segoe UI",Arial,sans-serif;fill:#9fb0c4;text-anchor:middle}
+      .source{fill:#121a27;stroke:#506278;stroke-width:1.8}
+      .sql{fill:#10251d;stroke:#52d89a;stroke-width:2.2}
+      .vector{fill:#1b1730;stroke:#a78bfa;stroke-width:2.2}
+      .role{fill:#0f2231;stroke:#7dd3fc;stroke-width:2}
+      .warn{fill:#21131a;stroke:#713c46;stroke-width:1.8}
+      .flow{fill:none;stroke:#8aa0b8;stroke-width:2.6;marker-end:url(#arrow)}
+      .contextFlow{fill:none;stroke:#7dd3fc;stroke-width:2.6;marker-end:url(#arrowContext)}
+      .derived{fill:none;stroke:#a78bfa;stroke-width:2.4;stroke-dasharray:8 7;marker-end:url(#arrow)}
     </style>
   </defs>
 
-  <rect width="1440" height="900" rx="12" fill="#0b0f14"/>
-  <text x="40" y="45" class="h1">Memory / context architecture</text>
-  <text x="40" y="69" class="sub">Canonical local time in SQLite · derived semantic retrieval in Qdrant</text>
+  <rect width="1200" height="560" rx="24" fill="#070910"/>
+  <circle cx="1120" cy="-80" r="320" fill="#312e81" opacity=".28"/>
+  <circle cx="100" cy="40" r="240" fill="#064e3b" opacity=".24"/>
+  <text x="48" y="54" class="section" fill="#7dd3fc">LOCAL MEMORY</text>
+  <text x="48" y="94" class="h1">SQLite remembers. Qdrant ranks.</text>
+  <text x="48" y="121" class="sub">Exact records and time stay canonical; semantic vectors are derived navigation hints.</text>
 
-  <rect x="30" y="92" width="1380" height="120" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="48" y="116" class="section" fill="#8fa2b5">LOCAL SOURCES</text>
-
-  <g transform="translate(50 138)">
-    <rect width="150" height="50" rx="7" class="source"/>
-    <text x="75" y="29" class="node">Conversation</text>
-    <rect x="170" width="150" height="50" rx="7" class="source"/>
-    <text x="245" y="21" class="node">Manual memories</text>
-    <text x="245" y="38" class="small">explicit user facts</text>
-    <rect x="340" width="150" height="50" rx="7" class="source"/>
-    <text x="415" y="29" class="node">Screenpipe</text>
-    <rect x="510" width="150" height="50" rx="7" class="source"/>
-    <text x="585" y="29" class="node">Meetings</text>
-    <rect x="680" width="170" height="50" rx="7" class="source"/>
-    <text x="765" y="21" class="node">Foreground activity</text>
-    <text x="765" y="38" class="small">explicit Win32 sample</text>
-    <rect x="870" width="220" height="50" rx="7" class="source"/>
-    <text x="980" y="21" class="node">Documents / connected sources</text>
-    <text x="980" y="38" class="small">adapter dependent</text>
-    <rect x="1110" width="220" height="50" rx="7" fill="#111920" stroke="#385064"/>
-    <text x="1220" y="21" class="node">Normalize + provenance</text>
-    <text x="1220" y="38" class="small">privacy · hash · source · time</text>
+  <g transform="translate(60 168)">
+    <rect width="230" height="86" rx="22" class="source"/>
+    <text x="115" y="36" class="node">Local sources</text>
+    <text x="115" y="61" class="small">conversation, memory, meetings, docs</text>
   </g>
-  <path d="M200 163H214" class="flow"/>
-  <path d="M370 188V205H1180V195" class="flow"/>
-  <path d="M540 188V205H1180" class="flow"/>
-  <path d="M710 188V205H1180" class="flow"/>
-  <path d="M900 188V205H1180" class="flow"/>
-  <path d="M1140 188V205H1180" class="flow"/>
+  <path d="M290 211H348" class="flow"/>
 
-  <rect x="30" y="232" width="770" height="330" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="48" y="257" class="section" fill="#8ddfbe">SQLITE · CANONICAL LOCAL STORES</text>
-  <text x="780" y="257" class="tiny" text-anchor="end">exact records · WAL · FTS5 · timestamps</text>
-
-  <g transform="translate(50 282)">
-    <rect width="220" height="64" rx="8" class="sql"/>
-    <text x="110" y="25" class="mono" text-anchor="middle">conversation</text>
-    <text x="110" y="44" class="small">session-scoped turns</text>
-    <rect x="240" width="220" height="64" rx="8" class="sql"/>
-    <text x="350" y="25" class="mono" text-anchor="middle">memories</text>
-    <text x="350" y="44" class="small">explicit facts / preferences</text>
-    <rect x="480" width="220" height="64" rx="8" class="sql"/>
-    <text x="590" y="25" class="mono" text-anchor="middle">meeting transcripts</text>
-    <text x="590" y="44" class="small">two existing transcript stores</text>
-
-    <rect y="84" width="340" height="88" rx="8" class="sql"/>
-    <text x="170" y="26" class="mono" text-anchor="middle">context_events + FTS5</text>
-    <text x="170" y="47" class="small">source · exact time · app · window · text</text>
-    <text x="170" y="68" class="small">foreground confidence · TTL · tombstone</text>
-    <rect x="360" y="84" width="340" height="88" rx="8" class="sql"/>
-    <text x="530" y="26" class="mono" text-anchor="middle">context_episodes + FTS5</text>
-    <text x="530" y="47" class="small">bounded event groups · summary · entities</text>
-    <text x="530" y="68" class="small">canonical timestamps + source_event_ids</text>
-
-    <rect y="192" width="220" height="64" rx="8" class="sql"/>
-    <text x="110" y="25" class="mono" text-anchor="middle">entities / aliases</text>
-    <text x="110" y="44" class="small">reviewed IDs + candidates</text>
-    <rect x="240" y="192" width="220" height="64" rx="8" class="sql"/>
-    <text x="350" y="25" class="mono" text-anchor="middle">commands / results</text>
-    <text x="350" y="44" class="small">plan · status · ActionResult</text>
-    <rect x="480" y="192" width="220" height="64" rx="8" class="sql"/>
-    <text x="590" y="25" class="mono" text-anchor="middle">vector_memories</text>
-    <text x="590" y="44" class="small">semantic fallback only</text>
+  <g transform="translate(366 142)">
+    <rect width="272" height="138" rx="26" class="sql"/>
+    <text x="136" y="44" class="node">SQLite</text>
+    <text x="136" y="72" class="small">canonical content</text>
+    <text x="136" y="95" class="small">timestamps + FTS5</text>
+    <text x="136" y="118" class="small">events, episodes, entities</text>
   </g>
-  <rect x="50" y="526" width="730" height="22" rx="6" fill="#10201c" stroke="#3ba47e"/>
-  <text x="415" y="541" class="small" fill="#8ddfbe">SOURCE OF TRUTH FOR TIME: events · episodes · timestamps</text>
+  <path d="M638 211H696" class="derived"/>
 
-  <rect x="822" y="232" width="588" height="330" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="840" y="257" class="section" fill="#b9a7ff">QDRANT · DERIVED SEMANTIC INDEXES</text>
-
-  <rect x="842" y="280" width="548" height="180" rx="9" class="vector"/>
-  <text x="860" y="304" class="mono">voiceloop_memory</text>
-  <text x="1370" y="304" class="tiny" text-anchor="end">weighted RRF for planner memory · selective episode vectors</text>
-  <g transform="translate(860 326)">
-    <rect width="96" height="48" rx="7" fill="#201b38" stroke="#7868c9"/>
-    <text x="48" y="21" class="node">semantic</text><text x="48" y="38" class="small">.40</text>
-    <rect x="106" width="96" height="48" rx="7" fill="#201b38" stroke="#7868c9"/>
-    <text x="154" y="21" class="node">topic</text><text x="154" y="38" class="small">.20</text>
-    <rect x="212" width="96" height="48" rx="7" fill="#201b38" stroke="#7868c9"/>
-    <text x="260" y="21" class="node">intent</text><text x="260" y="38" class="small">.15</text>
-    <rect x="318" width="96" height="48" rx="7" fill="#201b38" stroke="#7868c9"/>
-    <text x="366" y="21" class="node">decision</text><text x="366" y="38" class="small">.15</text>
-    <rect x="424" width="106" height="48" rx="7" fill="#201b38" stroke="#7868c9"/>
-    <text x="477" y="21" class="node">person_context</text><text x="477" y="38" class="small">.10</text>
-  </g>
-  <text x="860" y="403" class="small" text-anchor="start">Planner path: five query views · TimeFirst path: semantic scout + lazy reserve axes</text>
-  <text x="860" y="426" class="small" text-anchor="start">Episode vectors are a dynamic subset; empty meanings are not indexed.</text>
-  <rect x="860" y="438" width="512" height="7" rx="3.5" fill="#322b54"/>
-
-  <rect x="842" y="478" width="548" height="62" rx="8" class="capability"/>
-  <text x="860" y="500" class="mono">voiceloop_capabilities_v1</text>
-  <text x="860" y="522" class="small" text-anchor="start">semantic · intent · target_context - separate collection for Routing V2</text>
-
-  <path d="M800 396H814" class="derived"/>
-  <text x="811" y="384" class="tiny" text-anchor="end">derived</text>
-
-  <rect x="30" y="584" width="1380" height="218" rx="10" fill="#0e141b" stroke="#263543"/>
-  <text x="48" y="609" class="section" fill="#80aed2">FOUR READ PATHS - KEPT SEPARATE</text>
-
-  <g transform="translate(50 638)">
-    <rect width="300" height="126" rx="9" class="role"/>
-    <text x="18" y="25" class="section" fill="#8dc8ff">A · PLANNER CONTEXT</text>
-    <text x="150" y="52" class="node">ContextAssembler</text>
-    <text x="150" y="72" class="small">Qdrant hits + manual memory + actions</text>
-    <text x="150" y="94" class="node" fill="#8dc8ff">ContextPackV1</text>
-    <text x="150" y="113" class="small">bounded · deduplicated · untrusted</text>
-
-    <rect x="320" width="300" height="126" rx="9" class="role"/>
-    <text x="338" y="25" class="section" fill="#8dc8ff">B · USER RECALL</text>
-    <text x="470" y="52" class="node">Qdrant ’ SQLite fallback</text>
-    <text x="470" y="72" class="small">then literal memory fallback</text>
-    <text x="470" y="99" class="small">No action authority</text>
-
-    <rect x="640" width="300" height="126" rx="9" fill="#171b20" stroke="#c99c43" stroke-width="1.5" stroke-dasharray="7 5"/>
-    <text x="658" y="25" class="section" fill="#e6bd68">C · CONTEXT TIMELINE</text>
-    <text x="790" y="52" class="node">time / FTS first</text>
-    <text x="790" y="72" class="small">Screenpipe fallback ’ semantic scout</text>
-    <text x="790" y="99" class="small">Recall off by default</text>
-
-    <rect x="960" width="370" height="126" rx="9" class="capability"/>
-    <text x="978" y="25" class="section" fill="#e6bd68">D · CAPABILITY INDEX</text>
-    <text x="1145" y="52" class="node">ActionRegistry definitions</text>
-    <text x="1145" y="72" class="small">separate vectors ’ Routing V2 shadow</text>
-    <text x="1145" y="99" class="small">Never merged into personal memory</text>
+  <g transform="translate(714 142)">
+    <rect width="272" height="138" rx="26" class="vector"/>
+    <text x="136" y="44" class="node">Qdrant</text>
+    <text x="136" y="72" class="small">derived semantic index</text>
+    <text x="136" y="95" class="small">named vectors + RRF</text>
+    <text x="136" y="118" class="small">not the source of truth</text>
   </g>
 
-  <rect x="30" y="822" width="1380" height="42" rx="8" fill="#171318" stroke="#713c46"/>
-  <text x="50" y="848" class="section" fill="#f08b96">CONTEXT ` INTENT</text>
-  <text x="220" y="848" class="sub">Retrieved text cannot create an action, lower risk, replace confirmation, or claim success.</text>
-  <text x="1390" y="848" class="section" fill="#8ddfbe" text-anchor="end">QDRANT IS NOT THE SOURCE OF TRUTH FOR TIME</text>
+  <rect x="42" y="318" width="1116" height="140" rx="26" fill="#0d1421" stroke="#223047"/>
+  <text x="66" y="350" class="section" fill="#7dd3fc">READ PATHS STAY SEPARATE</text>
+  <g transform="translate(86 376)">
+    <rect width="300" height="58" rx="18" class="role"/>
+    <text x="150" y="25" class="node">Planner context</text>
+    <text x="150" y="45" class="small">bounded ContextPackV1</text>
+  </g>
+  <g transform="translate(450 376)">
+    <rect width="300" height="58" rx="18" class="role"/>
+    <text x="150" y="25" class="node">User recall</text>
+    <text x="150" y="45" class="small">Qdrant -> SQLite fallback</text>
+  </g>
+  <g transform="translate(814 376)">
+    <rect width="300" height="58" rx="18" class="role"/>
+    <text x="150" y="25" class="node">Time-first recall</text>
+    <text x="150" y="45" class="small">SQLite / FTS -> semantic scout</text>
+  </g>
 
-  <text x="40" y="888" class="footer">VoiceLoop 0.3.0 · Architecture rev 0.030 · 2026-09-20</text>
-  <text x="1400" y="888" class="footer" text-anchor="end">Canonical time: SQLite events / episodes · Semantic scout: Qdrant</text>
+  <path d="M502 280V318" class="contextFlow"/>
+  <path d="M850 280V318" class="contextFlow"/>
+
+  <g transform="translate(170 488)">
+    <rect width="860" height="44" rx="22" class="warn"/>
+    <text x="430" y="28" class="node">context != intent</text>
+  </g>
+  <text x="600" y="548" class="tiny">Retrieved text can inform an answer, but it cannot create actions, lower risk, replace confirmation, or claim success.</text>
 </svg>
