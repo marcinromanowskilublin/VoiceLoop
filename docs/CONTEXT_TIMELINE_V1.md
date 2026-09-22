@@ -42,7 +42,10 @@ workerów, nie zmienia routingu i nie omija polityki wykonania.
 | `context/entity_registry.py` | trwałe encje i kolejka kandydatów |
 | `context/vectorization.py` | selektywne wektory epizodów |
 | `context/lifecycle.py` | fail-closed retencja SQL/FTS/Qdrant |
-| `context/evaluation.py` | mierzalny harness retrievalu |
+| `context/evaluation.py` | harness retrievalu i porównanie shadow |
+| `context/documents.py` | jawny odczyt dozwolonych plików tekstowych |
+| `context/projection.py` | projekcja projektów i migracja pamięci SQL |
+| `context/review.py` | żywy ekran deiktyczny i review zobowiązań |
 
 ## Model danych
 
@@ -122,6 +125,29 @@ pytanie
 Dla pytania z jawnym czasem semantic hit bez źródłowego timestampu jest
 odrzucany. `created_at` punktu Qdrant nie udaje czasu obserwowanego zdarzenia.
 
+### Potwierdzenie kandydatów semantycznych w SQLite
+
+W ścieżce time-first Qdrant dostarcza kandydata, a SQLite dostarcza treść,
+czas i provenance epizodu. Kandydat musi wskazywać istniejący `episode_id`,
+zgodną parę `source`/`source_id` i bieżący `content_hash`. Wszystkie zdarzenia
+źródłowe muszą istnieć, nie być usunięte ani wygasłe i odpowiadać wersjom
+`source_event_hashes` zapisanym podczas indeksowania. Epizod również nie
+może być usunięty ani wygasły. Zakres czasu sprawdzamy na epizodzie SQL,
+według tej samej reguły przecinania przedziałów co przy odczycie FTS.
+
+Wynik rankingu trafia wyłącznie do `retrieval_score`. `confidence` pozostaje
+wartością kanonicznego elementu kontekstu; nie staje się prawdopodobieństwem
+trafności obliczonym z RRF. Historyczny punkt bez odwołania do epizodu albo
+wersji jego źródeł nie jest dowodem w tej ścieżce. Nowa weryfikacja wymaga
+ponownego indeksowania takich epizodów z dostępem do SQLite; nie migruje ani
+nie usuwa starych punktów automatycznie. Dotychczasowy odczyt pięciu osi poza
+time-first pozostaje bez zmian.
+
+Jeżeli włączony recall time-first zwróci pusty wynik dla wskazanego czasu,
+zachowuje pustą odpowiedź i zakres czasu. Nie przechodzi do starszego
+wyszukiwania bez filtra. Błędny, pozbawiony strefy lub leżący poza zakresem
+timestamp wyniku Screenpipe jest pomijany, zamiast zastępowania go „teraz”.
+
 ## Encje i prywatność
 
 `ContextEntityRegistry` rozdziela:
@@ -168,9 +194,15 @@ traktowany jak „punktu nie ma”.
 CONTEXT_TIMELINE_RECALL_ENABLED=false
 CONTEXT_TIMELINE_BUCKET_MINUTES=10
 CONTEXT_TIMELINE_MAX_RESULTS=500
+CONTEXT_TIMELINE_AUTO_TTL_DAYS=14
+CONTEXT_TIMELINE_WINDOWS_PROJECTION_ENABLED=false
+CONTEXT_TIMELINE_DEICTIC_SCREEN_ENABLED=false
+CONTEXT_TIMELINE_COMMITMENT_REVIEW_ENABLED=false
 ```
 
-Parametry nie włączają background ingestu ani samplera foreground.
+Parametry nie włączają background ingestu ani samplera foreground. Trzy nowe
+flagi też zostają wyłączone: projekcja projektów Windows, zrzut ekranu dla
+pytań deiktycznych oraz zapis review zobowiązań.
 
 ## Ewaluacja
 
@@ -195,13 +227,36 @@ i realne treści Screenpipe nie należą do repo.
 - brak timestampu w wektorze przy pytaniu czasowym → odrzucenie hitu;
 - nierozstrzygnięta osoba → literalne FTS, bez wymuszonego `person_id`.
 
+## Operacje
+
+Adaptery uruchamia się jawnie z CLI. Żadna z tych komend nie startuje workera
+i nie zmienia `CONTEXT_TIMELINE_RECALL_ENABLED`:
+
+```powershell
+cd listener
+.venv\Scripts\python -m voiceloop.corpus ingest-context-documents --root ..\docs
+.venv\Scripts\python -m voiceloop.corpus migrate-memories-to-timeline
+.venv\Scripts\python -m voiceloop.corpus prune-context-timeline        # dry-run
+.venv\Scripts\python -m voiceloop.corpus prune-context-timeline --apply
+.venv\Scripts\python -m voiceloop.corpus report-context-retrieval --gold GOLD.jsonl
+```
+
+Komendy działają na bazie runtime, nie na korpusie, więc nie mają
+`--data-root`; ścieżkę bazy wskazuje `--database`. Ingest dokumentów raportuje
+przyczyny pominięcia: plik z sekretem jest odrzucany w całości, bo jedno
+dopasowanie wzorca sugeruje kolejne w formach, których wzorce nie obejmują.
+`report-context-retrieval` porównuje sam FTS z pełną kaskadą na prywatnym
+zestawie gold i zawsze zwraca `recall_switch_allowed: false` — przełączenie
+pozostaje decyzją operatora.
+
 ## Testy
 
 ```powershell
 cd listener
 .venv\Scripts\python -m pytest -c pyproject.toml -q `
   ..\tests\test_context_foundation.py `
-  ..\tests\test_context_phase2.py
+  ..\tests\test_context_phase2.py `
+  ..\tests\test_context_phase3.py
 .venv\Scripts\python -m ruff check voiceloop ..\tests
 ```
 
@@ -209,12 +264,54 @@ Testy obejmują idempotencję, FTS, timeline, epizody, paginację Screenpipe,
 scoping sesji, dry-run retencji, fail-closed Qdrant, encje z review gate, oba
 magazyny spotkań, foreground, selektywne wektory, lazy reserve axis oraz metryki.
 
+## Jawne adaptery
+
+Te ścieżki istnieją w kodzie i nie startują same:
+
+- `DocumentTimelineIngestor` czyta `.md`, `.txt`, `.rst` i `.markdown` tylko
+  z podanych korzeni. Przycina katalogi generowane w trakcie przechodzenia
+  drzewa, więc nie czyta `.git`. Pomija sekrety i pliki binarne. Nie
+  wektoryzuje treści. Zdarzenie trzyma **digest i odnośnik**, nie drugą trwałą
+  kopię pliku; `load_full_text()` czyta pełną treść na żądanie i ponownie
+  sprawdza korzeń oraz rozszerzenie, więc podmieniony odnośnik nie wyprowadzi
+  odczytu poza konfigurację.
+- `project_windows_projects()` zapisuje nazwę projektu. Ścieżka zostaje poza
+  tekstem zdarzenia. Domyślny watcher Windows jej nie woła.
+- `MemoryTimelineMigrator` kopiuje istniejące `memories` idempotentnie.
+  Wspomnienia ręczne nie dostają TTL. To nie jest migracja przy starcie.
+- `question_is_deictic()` rozpoznaje „tutaj”, „to okno” i „na ekranie”. Samo
+  słowo „to” nie uruchamia zrzutu. Pozycja ekranu jest żywa, ma TTL 300 s i
+  nie trafia do Context Packu, dopóki flaga jest wyłączona — także wtedy, gdy
+  żądanie ma `include_screen=true`.
+- `commitment_review_event()` tworzy wiersz do review. Pole `executable` jest
+  fałszywe. Nie awansuje zobowiązania i nie tworzy `action_id`.
+- `compare_context_retrieval_shadow()` liczy różnicę metryk. Dodatnia delta
+  nie włącza `CONTEXT_TIMELINE_RECALL_ENABLED`.
+
+## Czas obserwacji i TTL adapterów
+
+Oś czasu opisuje, kiedy coś zaszło, a nie kiedy skaner to zobaczył. Ma to
+znaczenie, bo `content_hash` zdarzenia zawiera `started_at`, a upsert nadpisuje
+ten czas:
+
+| Adapter | `started_at` | TTL |
+|---|---|---|
+| Dokument (digest) | `st_mtime` pliku | 14 dni od skanu |
+| Projekt Windows | `first_seen` rekordu | 14 dni od obserwacji |
+| Review zobowiązania | czas wypowiedzi | 14 dni |
+| Migrowana pamięć | `created_at` wpisu | brak |
+
+Czas skanu żyje w metadanych (`observed_at`, `last_seen`). Gdyby `started_at`
+brał `now()`, każdy przebieg przesuwałby całą znaną historię na teraz.
+`CONTEXT_TIMELINE_AUTO_TTL_DAYS` domyślnie równa się horyzontowi wektorów.
+Wiersze automatyczne wygasają i podlegają `prune_expired()`; jawne pamięci
+użytkownika nie.
+
 ## Ograniczenia i dalszy rollout
 
 - Brak automatycznego ingestu i pętli foreground.
-- Brak adapterów dokumentów oraz `WindowsContextService`.
 - Brak automatycznej akceptacji encji osób.
-- Brak opublikowanego prywatnego gold setu.
+- Prywatny gold set zostaje poza repo. Publiczny harness przyjmuje rekordy
+  lokalnie i nie przełącza ruchu.
 - Recall timeline pozostaje wyłączony do czasu raportu shadow i quality gate.
-- Nie ma migracji big-bang starych `memories`; nowe tabele współistnieją z
-  pamięcią A/B/C.
+- Nowe tabele współistnieją z pamięcią A/B/C. Migracja jest wywołaniem jawnym.

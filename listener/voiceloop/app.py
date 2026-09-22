@@ -316,6 +316,11 @@ def build_services(settings: Settings) -> Services:
         telemetry=telemetry,
         knowledge_tools=knowledge_tools,
         commitment_shadow_enabled=settings.commitment_shadow_enabled,
+        deictic_screen_enabled=settings.context_timeline_deictic_screen_enabled,
+        commitment_timeline_review_enabled=(
+            settings.context_timeline_commitment_review_enabled
+        ),
+        context_timeline_auto_ttl_days=settings.context_timeline_auto_ttl_days,
     )
     assistant.configure_stt_threshold(settings.stt_min_action_confidence)
     assistant.configure_speaker_gate(

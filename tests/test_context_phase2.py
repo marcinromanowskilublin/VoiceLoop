@@ -20,6 +20,7 @@ from voiceloop.context.meeting_ingest import MeetingTimelineIngestor
 from voiceloop.context.retrieval import TimeFirstRetriever
 from voiceloop.context.schema import (
     ContextEpisodeV1,
+    ContextEventV1,
     ContextItemV1,
     ContextPackV1,
     ContextScope,
@@ -255,6 +256,9 @@ async def test_semantic_scout_uses_reserve_axis_only_after_sparse_exact_results(
                     score=0.9,
                     created_at=datetime(2026, 9, 19, 12, tzinfo=UTC),
                     metadata={
+                        "episode_id": episode.episode_id,
+                        "content_hash": episode.content_hash,
+                        "source_event_hashes": {event.event_id: event.content_hash},
                         "provenance": {
                             "time": "2026-09-19T12:00:00+00:00",
                         }
@@ -264,6 +268,20 @@ async def test_semantic_scout_uses_reserve_axis_only_after_sparse_exact_results(
 
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
+    event = ContextEventV1.from_observation(
+        source="screenpipe_meeting", source_id="source-7",
+        started_at=datetime(2026, 9, 19, 12, tzinfo=UTC),
+        text="Praca nad dokumentem.",
+    )
+    await store.upsert_context_event(event)
+    episode = ContextEpisodeV1(
+        episode_id=stable_episode_id("screenpipe_meeting", "meeting:7"),
+        source="screenpipe_meeting", source_id="meeting:7",
+        started_at=event.started_at, ended_at=event.started_at,
+        title="Dokument", summary="Wybrano porządek chronologiczny.",
+        source_event_ids=(event.event_id,),
+    )
+    await store.upsert_context_episode(episode)
     embeddings = EmbeddingsStub()
     qdrant = QdrantStub()
     retriever = TimeFirstRetriever(

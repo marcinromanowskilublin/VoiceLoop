@@ -13,6 +13,14 @@ from pathlib import Path
 from ..actions import ActionRegistry
 from ..behavior_digest import LocalBehaviorDigestClient
 from ..capability_index import CapabilityIndex, CapabilityIndexError
+from ..context.documents import DocumentAccessError, DocumentTimelineIngestor
+from ..context.evaluation import (
+    ContextRetrievalEvalRecordV1,
+    compare_context_retrieval_shadow,
+)
+from ..context.lifecycle import ContextLifecycleService
+from ..context.projection import MemoryTimelineMigrator
+from ..context.retrieval import TimeFirstRetriever
 from ..embeddings import (
     EmbeddingUnavailableError,
     OpenAICompatibleEmbeddingClient,
@@ -112,8 +120,10 @@ from .voice_metrics import (
 )
 from .voice_review import render_voice_annotation_review
 
-DEFAULT_AUDIO = Path(r"C:\Users\marci\Desktop\lmstudio-transcript-analysis\transcript.txt")
-DEFAULT_CURSOR_ROOT = Path(r"C:\Users\marci\.cursor\projects")
+DEFAULT_AUDIO = (
+    Path.home() / "Desktop" / "lmstudio-transcript-analysis" / "transcript.txt"
+)
+DEFAULT_CURSOR_ROOT = Path.home() / ".cursor" / "projects"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -406,6 +416,47 @@ def build_parser() -> argparse.ArgumentParser:
         journal_decision.add_argument("--confirm", required=True)
         journal_decision.add_argument("--data-root", type=Path)
 
+    context_documents = subparsers.add_parser(
+        "ingest-context-documents",
+        help="Wczytaj dozwolone dokumenty tekstowe do timeline'u jako digesty.",
+    )
+    context_documents.add_argument(
+        "--root",
+        type=Path,
+        action="append",
+        required=True,
+        help="Jawny korzeń. Można podać wielokrotnie.",
+    )
+    context_documents.add_argument("--database", type=Path)
+    context_documents.add_argument("--max-files", type=int, default=100)
+    context_documents.add_argument("--digest-chars", type=int, default=2000)
+
+    context_memories = subparsers.add_parser(
+        "migrate-memories-to-timeline",
+        help="Skopiuj jawne pamięci SQL do timeline'u. Idempotentnie, bez TTL.",
+    )
+    context_memories.add_argument("--database", type=Path)
+    context_memories.add_argument("--limit", type=int, default=200)
+
+    context_prune = subparsers.add_parser(
+        "prune-context-timeline",
+        help="Policz wygasłe zdarzenia i epizody. Usuwa tylko z --apply.",
+    )
+    context_prune.add_argument("--database", type=Path)
+    context_prune.add_argument(
+        "--apply",
+        action="store_true",
+        help="Wykonaj kaskadę Qdrant → tombstone → FTS zamiast dry-run.",
+    )
+
+    context_report = subparsers.add_parser(
+        "report-context-retrieval",
+        help="Porównaj sam FTS z pełną kaskadą na prywatnym zestawie gold.",
+    )
+    context_report.add_argument("--gold", type=Path, required=True)
+    context_report.add_argument("--database", type=Path)
+    context_report.add_argument("--k", type=int, default=8)
+
     local_parser = subparsers.add_parser(
         "validate-local-url",
         help="Sprawdź, czy endpoint wskazuje wyłącznie loopback.",
@@ -429,6 +480,7 @@ def main(argv: list[str] | None = None) -> int:
     except (
         CandidateDecisionError,
         CapabilityIndexError,
+        DocumentAccessError,
         EmbeddingUnavailableError,
         DeepgramFileError,
         LocalOnlyViolation,
@@ -443,7 +495,9 @@ def main(argv: list[str] | None = None) -> int:
 
 async def _run_async(args: argparse.Namespace) -> int:
     settings = Settings()
-    root = (args.data_root or settings.data_dir / "corpus").resolve()
+    # Context timeline commands work on the runtime database, not on the corpus,
+    # so they intentionally do not declare --data-root.
+    root = (getattr(args, "data_root", None) or settings.data_dir / "corpus").resolve()
     paths = CorpusPaths(root)
     if args.command == "inventory-voice-eval":
         require_loopback_url(settings.screenpipe_base_url)
@@ -1634,7 +1688,123 @@ async def _run_async(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    if args.command == "ingest-context-documents":
+        memory = await _context_memory_store(args, settings)
+        report = await DocumentTimelineIngestor(
+            memory=memory,
+            roots=[path.resolve() for path in args.root],
+            max_files=args.max_files,
+            digest_chars=args.digest_chars,
+            ttl_days=settings.context_timeline_auto_ttl_days,
+        ).ingest()
+        print(
+            json.dumps(
+                {
+                    "scanned": report.scanned,
+                    "stored_events": report.stored_events,
+                    "skipped": report.skipped,
+                    "skipped_secret": report.skipped_secret,
+                    "skipped_unreadable": report.skipped_unreadable,
+                    "ttl_days": settings.context_timeline_auto_ttl_days,
+                    "vectorized": False,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    if args.command == "migrate-memories-to-timeline":
+        memory = await _context_memory_store(args, settings)
+        report = await MemoryTimelineMigrator(memory).migrate(limit=args.limit)
+        print(
+            json.dumps(
+                {
+                    "stored_events": report.stored_events,
+                    "stored_episodes": report.stored_episodes,
+                    "skipped": report.skipped,
+                    "ttl_days": None,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    if args.command == "prune-context-timeline":
+        memory = await _context_memory_store(args, settings)
+        qdrant = None
+        if args.apply:
+            require_loopback_url(settings.qdrant_url)
+            qdrant = QdrantVectorStore(settings)
+        try:
+            report = await ContextLifecycleService(
+                memory=memory,
+                qdrant=qdrant,
+            ).prune_expired(dry_run=not args.apply)
+        finally:
+            if qdrant is not None:
+                await qdrant.close()
+        print(
+            json.dumps(
+                {
+                    "events": report.events,
+                    "episodes": report.episodes,
+                    "qdrant_deleted": report.qdrant_deleted,
+                    "dry_run": report.dry_run,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    if args.command == "report-context-retrieval":
+        gold_path = args.gold.resolve()
+        records = read_jsonl(gold_path, ContextRetrievalEvalRecordV1)
+        if not records:
+            raise ValueError(f"Brak prywatnych przykładów gold w pliku: {gold_path}")
+        memory = await _context_memory_store(args, settings)
+        embeddings = OpenAICompatibleEmbeddingClient(
+            base_url=(settings.local_embeddings_base_url or settings.lm_studio_base_url),
+            api_key=(settings.local_embeddings_api_key or settings.lm_studio_api_key),
+            model=settings.local_embeddings_model,
+            timeout_seconds=settings.local_embeddings_timeout_seconds,
+            enabled=settings.local_embeddings_enabled,
+        )
+        qdrant = QdrantVectorStore(settings)
+        fts_only = TimeFirstRetriever(memory=memory)
+        cascade = TimeFirstRetriever(
+            memory=memory,
+            embeddings=embeddings,
+            qdrant=qdrant,
+        )
+
+        async def _fts(record: ContextRetrievalEvalRecordV1, limit: int):
+            return await fts_only.retrieve(record.query, limit=limit)
+
+        async def _cascade(record: ContextRetrievalEvalRecordV1, limit: int):
+            return await cascade.retrieve(record.query, limit=limit)
+
+        try:
+            comparison = await compare_context_retrieval_shadow(
+                records=records,
+                baseline=_fts,
+                candidate=_cascade,
+                k=args.k,
+            )
+        finally:
+            await qdrant.close()
+        payload = comparison.model_dump(mode="json")
+        payload["recall_switch_allowed"] = False
+        payload["semantic_scout_available"] = qdrant.enabled and embeddings.enabled
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
     raise ValueError("Nieznana komenda.")
+
+
+async def _context_memory_store(
+    args: argparse.Namespace,
+    settings: Settings,
+) -> MemoryStore:
+    database_path = (args.database or settings.data_dir / "voiceloop.db").resolve()
+    memory = MemoryStore(database_path)
+    await memory.initialize()
+    return memory
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:

@@ -63,6 +63,10 @@ class WindowsContextService:
         roots: list[Path] | None = None,
     ) -> None:
         self.enabled = settings.windows_context_enabled
+        self.timeline_projection_enabled = (
+            settings.context_timeline_windows_projection_enabled
+        )
+        self.timeline_ttl_days = settings.context_timeline_auto_ttl_days
         self.memory = memory
         self.screenpipe = screenpipe
         self.roots = roots if roots is not None else self._configured_roots(settings)
@@ -201,6 +205,18 @@ class WindowsContextService:
             max_records=self.max_records,
             now=now,
         )
+        if self.timeline_projection_enabled:
+            try:
+                from .context.projection import project_windows_projects
+
+                await project_windows_projects(
+                    self.memory,
+                    list(self.records.values()),
+                    observed_at=now,
+                    ttl_days=self.timeline_ttl_days,
+                )
+            except Exception:
+                LOGGER.exception("Windows project timeline projection failed")
         await self._refresh_screenpipe(now)
         self._expire_session_context(now)
 

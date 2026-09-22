@@ -118,5 +118,64 @@ async def evaluate_context_retrieval(
     return scores, metrics
 
 
+class ContextShadowComparisonV1(BaseModel):
+    """Side-by-side metrics. A positive recall delta does not enable recall."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    sample_count: int = Field(ge=0)
+    k: int = Field(ge=1, le=100)
+    baseline: ContextRetrievalMetricsV1
+    candidate: ContextRetrievalMetricsV1
+    recall_delta: float
+    reciprocal_rank_delta: float
+    abstention_delta: float
+    provenance_delta: float
+    candidate_recall_not_worse: bool
+    candidate_abstention_not_worse: bool
+
+
+async def compare_context_retrieval_shadow(
+    *,
+    records: Sequence[ContextRetrievalEvalRecordV1],
+    baseline: ContextRetrieve,
+    candidate: ContextRetrieve,
+    k: int = 8,
+) -> ContextShadowComparisonV1:
+    """Compare the current retriever with the timeline pack. Does not switch traffic."""
+
+    _, baseline_metrics = await evaluate_context_retrieval(
+        records=records,
+        retrieve=baseline,
+        k=k,
+    )
+    _, candidate_metrics = await evaluate_context_retrieval(
+        records=records,
+        retrieve=candidate,
+        k=k,
+    )
+    recall_delta = candidate_metrics.recall_at_k - baseline_metrics.recall_at_k
+    abstention_delta = (
+        candidate_metrics.abstention_accuracy - baseline_metrics.abstention_accuracy
+    )
+    return ContextShadowComparisonV1(
+        sample_count=candidate_metrics.sample_count,
+        k=candidate_metrics.k,
+        baseline=baseline_metrics,
+        candidate=candidate_metrics,
+        recall_delta=recall_delta,
+        reciprocal_rank_delta=(
+            candidate_metrics.mean_reciprocal_rank - baseline_metrics.mean_reciprocal_rank
+        ),
+        abstention_delta=abstention_delta,
+        provenance_delta=(
+            candidate_metrics.provenance_coverage - baseline_metrics.provenance_coverage
+        ),
+        candidate_recall_not_worse=recall_delta >= -1e-9,
+        candidate_abstention_not_worse=abstention_delta >= -1e-9,
+    )
+
+
 def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0

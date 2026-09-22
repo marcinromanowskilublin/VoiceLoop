@@ -46,10 +46,11 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 - `SituationStateV1` — ledger in-memory + `GET /api/v1/situation`. Planer nie czyta go jako intencji. LLM nie pisze. Brak tabeli SQL `situation`.
 - `StateProposal` (`situation/proposal.py`) — model może proponować (`propose_fact` + `evidence_refs`). Lokalne `StatePolicy` + `StateReducer` decydują i wołają `append_event(actor=local_code)`. **Nie** wpięte w planer / `assistant.py`. Tylko testy / przyszły shadow.
 - Context Timeline V1: lokalne tabele zdarzeń/epizodów, FTS5, jawne adaptery
-  Screenpipe i spotkań, sampler foreground, encje z review gate, selektywne
-  wektory, TimeFirstRetriever i harness ewaluacji. Recall jest domyślnie
-  wyłączony (`CONTEXT_TIMELINE_RECALL_ENABLED=false`); brak automatycznych pętli.
-  Pełny kontrakt: [`CONTEXT_TIMELINE_V1.md`](CONTEXT_TIMELINE_V1.md).
+  Screenpipe, spotkań, dokumentów i projektów, migracja pamięci SQL, sampler
+  foreground, encje z review gate, selektywne wektory, TimeFirstRetriever,
+  review zobowiązań i porównanie shadow. Recall oraz nowe flagi projekcji,
+  ekranu deiktycznego i zapisu review są domyślnie wyłączone. Brak
+  automatycznych pętli. Kontrakt: [`CONTEXT_TIMELINE_V1.md`](CONTEXT_TIMELINE_V1.md).
 
 ### PLANOWANE (nie wpinąć w planer w tym etapie)
 
@@ -60,7 +61,9 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 - Live Routing V2 po quality gate z liczbami.
 - Automatyczny prune wektorów (`VECTOR_MEMORY_PRUNE_ENABLED=false`).
 - Background ingest/foreground/prune Context Timeline oraz produkcyjny quality
-  gate na prywatnym gold secie.
+  gate na prywatnym gold secie. Adaptery dokumentów, projektów, migracji
+  pamięci i porównania shadow są jawne: uruchamia je operator z CLI
+  (`voiceloop.corpus`), a ich flagi runtime zostają wyłączone.
 
 Kontrakty dowodu i stanu są w repo i **nie sterują** planerem:
 
@@ -312,9 +315,10 @@ projektu i nie są kontraktem runtime.
 ## Następny spokojny krok
 
 Context Timeline ma kontrakty, lokalne magazyny, adaptery jawne, selektywne
-wektory i harness ewaluacji. Następny krok to **prywatny gold set + shadow
-report**, nie automatyczne włączenie workerów. Dopiero raport jakości może
-uzasadnić `CONTEXT_TIMELINE_RECALL_ENABLED=true`.
+wektory, migrację pamięci i porównanie shadow. Następny krok to **prywatny
+gold set puszczony przez `report-context-retrieval`**, nie automatyczne
+włączenie workerów. Dopiero raport jakości może uzasadnić
+`CONTEXT_TIMELINE_RECALL_ENABLED=true`.
 
 Commitment shadow pozostaje eventem obserwacyjnym. Nie wpinamy go do
 SituationState ani executora razem z rolloutem timeline'u.

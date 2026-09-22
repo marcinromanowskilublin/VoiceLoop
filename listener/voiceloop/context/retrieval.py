@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import unicodedata
 from datetime import UTC, datetime, time, timedelta
@@ -13,8 +14,6 @@ from .schema import (
     ContextEventV1,
     ContextItemV1,
     ContextPackV1,
-    ContextScope,
-    ContextTrust,
 )
 
 if TYPE_CHECKING:
@@ -170,7 +169,7 @@ class TimeFirstRetriever:
                 max_results=max(50, safe_limit * 10),
             )
             items.extend(
-                self._screenpipe_context_items(raw_items, existing=items)
+                self._screenpipe_context_items(raw_items, existing=items, plan=plan)
             )
         if len(items) < self.min_exact_evidence:
             items.extend(
@@ -228,28 +227,14 @@ class TimeFirstRetriever:
                 hits = await self.qdrant.search(
                     query_vectors={axis: vectors[0]},
                     vector_names=(axis,),
-                    limit=max(1, limit - len(results)),
+                    # Leave room for stale/orphaned candidates rejected by SQL checks.
+                    limit=min(30, max(10, (limit - len(results)) * 3)),
                     min_score=0.0,
                 )
                 for hit in hits:
-                    if not _hit_matches_time(hit, plan):
+                    item = await self._verified_episode_item(hit, plan=plan, axis=axis)
+                    if item is None:
                         continue
-                    item = ContextItemV1(
-                        source=hit.source,
-                        source_id=hit.source_id,
-                        scope=ContextScope.EPISODIC,
-                        kind="semantic_retrieval",
-                        title=hit.title,
-                        content=hit.content,
-                        started_at=_hit_time(hit),
-                        trust=ContextTrust.DERIVED,
-                        confidence=min(max(float(hit.score), 0.0), 1.0),
-                        retrieval_score=float(hit.score),
-                        selection_reason=f"semantic_scout:{axis}",
-                        metadata=(
-                            hit.metadata if isinstance(hit.metadata, dict) else {}
-                        ),
-                    )
                     if item.content_hash in seen:
                         continue
                     seen.add(item.content_hash)
@@ -262,16 +247,61 @@ class TimeFirstRetriever:
             return []
         return results
 
+    async def _verified_episode_item(
+        self, hit, *, plan: TimeFirstQueryPlan, axis: str,
+    ) -> ContextItemV1 | None:
+        """Qdrant proposes an ID; SQL supplies current content, time and provenance.
+
+        Legacy points without a canonical episode/version are deliberately not
+        admitted to time-first recall. They remain on the legacy recall path.
+        """
+        metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
+        episode_id = metadata.get("episode_id")
+        if not isinstance(episode_id, str) or not episode_id:
+            return None
+        episode = await self.memory.get_context_episode(episode_id)
+        now = datetime.now(UTC)
+        if (
+            episode is None
+            or episode.deleted_at is not None
+            or (episode.expires_at is not None and episode.expires_at <= now)
+            or (episode.source, episode.source_id) != (hit.source, hit.source_id)
+            or metadata.get("content_hash") != episode.content_hash
+            or not _range_matches(episode.started_at, episode.ended_at, plan)
+        ):
+            return None
+        source_hashes = metadata.get("source_event_hashes")
+        if not isinstance(source_hashes, dict):
+            return None
+        for event_id in episode.source_event_ids:
+            event = await self.memory.get_context_event(event_id)
+            if (
+                event is None
+                or event.deleted_at is not None
+                or (event.expires_at is not None and event.expires_at <= now)
+                or source_hashes.get(event_id) != event.content_hash
+            ):
+                return None
+        score = float(hit.score)
+        if not math.isfinite(score):
+            return None
+        item = episode.as_context_item(selection_reason=f"semantic_scout:{axis}")
+        # Preserve the canonical item's confidence; ranking is not probability.
+        return item.model_copy(update={"retrieval_score": score})
+
     @staticmethod
     def _screenpipe_context_items(
         raw_items,
         *,
         existing: list[ContextItemV1],
+        plan: TimeFirstQueryPlan,
     ) -> list[ContextItemV1]:
         seen = {item.content_hash for item in existing}
         results: list[ContextItemV1] = []
         for raw in raw_items:
             timestamp = _parse_timestamp(raw.timestamp)
+            if timestamp is None or not _range_matches(timestamp, timestamp, plan):
+                continue
             source_raw = "\n".join(
                 (raw.timestamp, raw.app_name, raw.window_name, raw.text)
             )
@@ -308,13 +338,13 @@ def _search_text(value: str) -> str:
     return " ".join(tokens[:12])
 
 
-def _parse_timestamp(value: str) -> datetime:
+def _parse_timestamp(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.now(UTC)
+    except (ValueError, AttributeError):
+        return None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return parsed.replace(tzinfo=UTC)
+        return None
     return parsed.astimezone(UTC)
 
 
@@ -333,38 +363,8 @@ def _reserve_axes_for(query: str) -> tuple[str, ...]:
     return tuple(axes)
 
 
-def _hit_source_time(hit) -> datetime | None:
-    metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
-    provenance = metadata.get("provenance")
-    provenance = provenance if isinstance(provenance, dict) else {}
-    raw = (
-        provenance.get("time")
-        or metadata.get("time")
-        or metadata.get("timestamp")
+def _range_matches(start: datetime, end: datetime, plan: TimeFirstQueryPlan) -> bool:
+    """Use the same interval-overlap semantics as SQL timeline retrieval."""
+    return (plan.start is None or end >= plan.start) and (
+        plan.end is None or start <= plan.end
     )
-    if raw is None or not str(raw).strip():
-        return None
-    return _parse_timestamp(str(raw))
-
-
-def _hit_time(hit) -> datetime:
-    source_time = _hit_source_time(hit)
-    if source_time is not None:
-        return source_time
-    created_at = getattr(hit, "created_at", None)
-    if isinstance(created_at, datetime):
-        if created_at.tzinfo is None or created_at.utcoffset() is None:
-            return created_at.replace(tzinfo=UTC)
-        return created_at.astimezone(UTC)
-    return datetime.now(UTC)
-
-
-def _hit_matches_time(hit, plan: TimeFirstQueryPlan) -> bool:
-    if plan.start is None and plan.end is None:
-        return True
-    source_time = _hit_source_time(hit)
-    if source_time is None:
-        return False
-    if plan.start is not None and source_time < plan.start:
-        return False
-    return plan.end is None or source_time <= plan.end

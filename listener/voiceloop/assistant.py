@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .capability_index import CapabilityIndex, CapabilityIndexError
 from .context import ContextAssembler
+from .context.review import live_screen_item, question_is_deictic
 from .conversation_telemetry import ConversationTelemetry
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
 from .events import EventBus
@@ -134,6 +135,9 @@ class AssistantService:
         telemetry: ConversationTelemetry | None = None,
         knowledge_tools: KnowledgeToolOrchestrator | None = None,
         commitment_shadow_enabled: bool = True,
+        deictic_screen_enabled: bool = False,
+        commitment_timeline_review_enabled: bool = False,
+        context_timeline_auto_ttl_days: int = 14,
     ) -> None:
         self.memory = memory
         self.events = events
@@ -151,6 +155,9 @@ class AssistantService:
         self.telemetry = telemetry
         self.knowledge_tools = knowledge_tools
         self.commitment_shadow_enabled = commitment_shadow_enabled
+        self.deictic_screen_enabled = deictic_screen_enabled
+        self.commitment_timeline_review_enabled = commitment_timeline_review_enabled
+        self.context_timeline_auto_ttl_days = context_timeline_auto_ttl_days
         self.context_assembler = ContextAssembler()
         self._latest_tool_observations: list[dict[str, object]] = []
         self.action_definitions = action_definitions
@@ -272,6 +279,17 @@ class AssistantService:
                     ],
                 },
             )
+            if self.commitment_timeline_review_enabled and result.items:
+                from .context.review import commitment_review_event
+
+                for item in result.items:
+                    event = commitment_review_event(
+                        item,
+                        request_id=request.request_id,
+                        ttl_days=self.context_timeline_auto_ttl_days,
+                    )
+                    if event is not None:
+                        await self.memory.upsert_context_event(event)
         except Exception:
             LOGGER.exception("Commitment shadow failed")
 
@@ -684,9 +702,10 @@ class AssistantService:
                 session_id=request.interaction_session_id,
             )
         )
+        deictic_screen = self.deictic_screen_enabled and question_is_deictic(text)
         screen_coro = (
             self.screen.capture(request.request_id)
-            if request.include_screen
+            if (request.include_screen or deictic_screen)
             else asyncio.sleep(0, result=None)
         )
         knowledge_coro = (
@@ -755,6 +774,11 @@ class AssistantService:
             manual_contexts = [
                 item.content for item in reversed(memory_items[:memory_limit])
             ]
+        live_items = []
+        if deictic_screen and screen_snapshot is not None:
+            live_item = live_screen_item(screen_snapshot)
+            if live_item is not None:
+                live_items.append(live_item)
         context_pack = self.context_assembler.assemble(
             question=text,
             session_id=request.interaction_session_id,
@@ -762,6 +786,7 @@ class AssistantService:
             manual_contexts=manual_contexts,
             action_summaries=self._recent_action_summaries,
             notices=context_notices,
+            live_items=live_items,
         )
         turn_context = TurnContext(
             question=text,

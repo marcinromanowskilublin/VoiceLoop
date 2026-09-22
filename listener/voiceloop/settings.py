@@ -175,6 +175,10 @@ class Settings(BaseSettings):
     context_timeline_recall_enabled: bool = False
     context_timeline_bucket_minutes: int = 10
     context_timeline_max_results: int = 500
+    context_timeline_auto_ttl_days: int = 14
+    context_timeline_windows_projection_enabled: bool = False
+    context_timeline_deictic_screen_enabled: bool = False
+    context_timeline_commitment_review_enabled: bool = False
     windows_context_enabled: bool = True
     windows_context_roots: str = ""
     windows_context_reconcile_seconds: int = 120

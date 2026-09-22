@@ -2940,29 +2940,30 @@ class ActionRegistry:
                     embeddings=self.embeddings,
                     qdrant=self.qdrant,
                 ).retrieve(query, limit=10)
-            if timeline_pack.items:
-                timeline_items = [
-                    item.model_dump(mode="json") for item in timeline_pack.items
-                ]
-                return (
-                    f"Znaleziono {len(timeline_items)} wpisów na osi czasu.",
-                    {
-                        "items": timeline_items,
-                        "retrieval": "timeline_v1",
-                        "time_filter": {
-                            "start": (
-                                timeline_plan.start.isoformat()
-                                if timeline_plan.start
-                                else None
-                            ),
-                            "end": (
-                                timeline_plan.end.isoformat()
-                                if timeline_plan.end
-                                else None
-                            ),
-                        },
+            # An empty time-bounded answer must not fall through to an unbounded
+            # vector/lexical lookup that could return evidence from another day.
+            timeline_items = [
+                item.model_dump(mode="json") for item in timeline_pack.items
+            ]
+            return (
+                f"Znaleziono {len(timeline_items)} wpisów na osi czasu.",
+                {
+                    "items": timeline_items,
+                    "retrieval": "timeline_v1",
+                    "time_filter": {
+                        "start": (
+                            timeline_plan.start.isoformat()
+                            if timeline_plan.start
+                            else None
+                        ),
+                        "end": (
+                            timeline_plan.end.isoformat()
+                            if timeline_plan.end
+                            else None
+                        ),
                     },
-                )
+                },
+            )
         vector_items: list[dict[str, Any]] = []
         if (
             self.embeddings is not None

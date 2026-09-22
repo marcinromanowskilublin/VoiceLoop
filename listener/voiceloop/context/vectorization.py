@@ -70,6 +70,12 @@ class ContextEpisodeVectorizer:
         )
         if len(vectors) != len(vector_names):
             raise RuntimeError("embedding count mismatch for context episode")
+        source_event_hashes = {}
+        if self.memory is not None:
+            for event_id in episode.source_event_ids:
+                event = await self.memory.get_context_event(event_id)
+                if event is not None:
+                    source_event_hashes[event_id] = event.content_hash
         await self.qdrant.upsert_memory(
             source=episode.source,
             source_id=episode.source_id,
@@ -79,6 +85,7 @@ class ContextEpisodeVectorizer:
             metadata={
                 **episode.metadata,
                 "episode_id": episode.episode_id,
+                "source_event_hashes": source_event_hashes,
                 "started_at": episode.started_at.isoformat(),
                 "ended_at": episode.ended_at.isoformat(),
                 "time": episode.started_at.isoformat(),

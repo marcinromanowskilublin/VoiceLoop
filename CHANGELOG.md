@@ -15,6 +15,16 @@ All notable public changes to VoiceLoop are documented here.
   approval gates.
 - Selective episode vectors, time-first retrieval, semantic scout, lazy reserve
   axes and retrieval evaluation metrics.
+- Explicit document ingest, Windows project projection, SQL memory migration,
+  deictic live-screen items, commitment review rows and shadow retrieval
+  comparison. All of these stay opt-in and off by default.
+- Automatic timeline rows expire on the same horizon as vectors, keep the
+  observed event time rather than the scan time, and leave explicit user
+  memories without a TTL.
+- Document events store a digest plus a reference and re-validate the
+  configured roots when the full text is read on demand.
+- Local CLI commands for document ingest, memory migration, timeline pruning
+  and the private shadow retrieval report.
 - Focus-bound active Notepad read/write actions with explicit replacement
   confirmation and read-back verification.
 
