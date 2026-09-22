@@ -86,7 +86,11 @@ Canonical details:
 
 ## Current status
 
-### Active
+The categories below describe implementation and default settings. They do not
+certify that a particular installation has its microphone, models or services
+running; local configuration can override the defaults.
+
+### Implemented core path
 
 - FastAPI core, local panel and token-protected private endpoints.
 - Deterministic STOP, Router V1, typed model proposals and one executor queue.
@@ -99,6 +103,11 @@ Canonical details:
 - Notepad voice lane with focus binding, confirmation and read-back
   verification.
 - Context Timeline recall (`CONTEXT_TIMELINE_RECALL_ENABLED=false` by default).
+- Explicit document ingest and SQL-memory migration into the timeline, plus
+  retention and retrieval-comparison commands.
+- Windows project projection, live-screen context for questions such as
+  “na tym ekranie”, and commitment review rows. Their runtime flags default to
+  `false`; review rows do not accept commitments or authorize actions.
 - Screenpipe vector memory, Qdrant and external voice/model providers.
 
 ### Shadow or experimental
@@ -108,6 +117,9 @@ Canonical details:
 - Situation State proposals in the production planning path.
 - Automatic Context Timeline ingest, foreground polling and quality-gated
   rollout.
+- A larger set of specialized memory axes with explicit navigation and stopping
+  rules. This is a [design direction](docs/VECTOR_NAVIGATION_DESIGN.md), not the
+  current retrieval engine.
 
 ## Why this is not just “an LLM with tools”
 
@@ -166,15 +178,56 @@ Memory supports five named spaces: `semantic`, `topic`, `intent`, `decision`
 and `person_context`. The separate capability index uses `semantic`, `intent`
 and `target_context`.
 
+Each memory axis embeds a separate description of the same record. Empty
+aspects are omitted. The model and vector dimension are configuration-dependent;
+these are not five separately trained models or five memory collections.
+
+| Read path | Current behavior |
+|---|---|
+| Planner memory | Five query views, weighted reciprocal-rank fusion (RRF), then bounded Context Pack assembly. |
+| Default user recall | The same five memory axes; SQLite semantic fallback, then literal explicit-memory lookup when needed. |
+| Opt-in time-first recall | A recognized time range, SQLite/FTS, optional historical Screenpipe, then semantic candidates checked against canonical SQLite episodes and source versions. |
+| Capability matching | A separate three-axis index over registered actions; retrieval does not authorize execution. |
+
+Time-first recall tries `semantic` first, then query-relevant reserve axes if
+it still lacks enough accepted items. The stopping rule currently depends on
+item counts; it does not yet implement question importance or calibrated
+evidence sufficiency. Planner memory still uses its existing five-axis path.
+
+### A semantic match needs a current source
+
+For time-first semantic recall, Qdrant supplies a candidate ID and ranking.
+SQLite supplies the content and time. A candidate is rejected if its episode
+is missing, stale, deleted, expired or outside the requested interval, or if
+any referenced source event is missing, changed, deleted or expired.
+
+Ranking stays in `retrieval_score`; it is not copied into `confidence`.
+An empty result for a recognized time range stays empty instead of falling
+back to a search across other dates. Invalid, timezone-free or out-of-range
+Screenpipe timestamps are discarded.
+
+Legacy points without canonical episode references and source-version hashes
+are not accepted by this time-first semantic path. Episode indexing is an
+explicit API operation with SQLite access, not an automatic startup migration.
+These controls do not replace the planner's existing retrieval path.
+
 ### Retrieval is measured, not believed
 
-If Qdrant is unavailable, user recall may fall back to local SQLite cosine on
-`semantic`; Screenpipe ingestion fails closed instead of treating an unavailable
-store as “no duplicate”. Threshold Guard classifies dead, unreachable,
-over-broad and drifted gates instead of assuming search works.
+If Qdrant is unavailable, the default recall and planner paths may fall back
+to local SQLite cosine on `semantic`. Time-first recall preserves its time
+boundary and can return no evidence. Screenpipe ingestion fails closed instead
+of treating an unavailable store as “no duplicate”. Threshold Guard classifies
+dead, unreachable, over-broad and drifted gates instead of assuming search works.
 
 Checked in `tests/test_qdrant_memory.py`, `tests/test_threshold_guard.py`,
-`tests/test_context_foundation.py` and `tests/test_context_phase2.py`.
+`tests/test_context_foundation.py`, `tests/test_context_phase2.py`,
+`tests/test_context_phase3.py` and `tests/test_context_retrieval_integrity.py`.
+
+The local `voiceloop.corpus` CLI provides `ingest-context-documents`,
+`migrate-memories-to-timeline`, `prune-context-timeline` (dry-run unless
+`--apply`) and `report-context-retrieval`. These are explicit operator commands,
+not background jobs. See the [operation contracts](docs/CONTEXT_TIMELINE_V1.md)
+for their write effects and rollout limits.
 
 Full contracts:
 
@@ -239,6 +292,7 @@ Checked in invariant `INV-12`, `tests/test_executor.py` and
 - [Current architecture](docs/ARCHITECTURE_CURRENT.md)
 - [Architecture invariants](docs/ARCHITECTURE_INVARIANTS.md)
 - [Context Timeline V1](docs/CONTEXT_TIMELINE_V1.md)
+- [Memory-axis navigation design — not implemented](docs/VECTOR_NAVIGATION_DESIGN.md)
 - [Safe user corpus and evaluation](docs/SAFE_USER_CORPUS.md)
 - [Threshold Guard and runtime gates](docs/THRESHOLD_GUARD.md)
 - [Documentation index](docs/README.md)

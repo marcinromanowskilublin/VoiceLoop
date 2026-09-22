@@ -2,6 +2,43 @@
 
 All notable public changes to VoiceLoop are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Explicit document ingest, Windows project projection, SQL memory migration,
+  deictic live-screen items, commitment review rows and shadow retrieval
+  comparison. Runtime integrations remain opt-in and off by default.
+- Timeline adapter retention keeps explicit user memories without a TTL;
+  document and project records preserve source timestamps rather than scan time.
+- Document events store a digest plus a reference and re-validate configured
+  roots when the full text is read on demand.
+- Local CLI commands for document ingest, memory migration, timeline pruning
+  and the private retrieval comparison report.
+
+### Fixed
+
+- Time-first recall keeps an empty answer within its requested time range
+  instead of falling through to unbounded legacy recall.
+- Semantic timeline candidates are checked against canonical SQLite episodes
+  and source-event versions, including identity, deletion, expiry and time.
+  Returned content comes from SQL; ranking no longer becomes `confidence`.
+- Invalid, timezone-free and out-of-range Screenpipe timestamps are discarded.
+
+### Changed
+
+- Explicit episode indexing records source-event hashes when SQLite is supplied.
+  Legacy points without canonical references and source versions are excluded
+  from time-first semantic recall; no automatic migration is performed.
+- README and architecture docs distinguish planner/default recall from opt-in
+  time-first retrieval, document adapter write effects and indexing limits,
+  and record the larger memory-axis navigation design as future work.
+
+### Verification
+
+- Code checkpoint `bf26abe`: local full suite `916 passed, 1 skipped`; Ruff passed.
+  This does not establish live audio, provider availability or private recall quality.
+
 ## [0.3.0] - 2026-09-20
 
 ### Added
@@ -15,16 +52,6 @@ All notable public changes to VoiceLoop are documented here.
   approval gates.
 - Selective episode vectors, time-first retrieval, semantic scout, lazy reserve
   axes and retrieval evaluation metrics.
-- Explicit document ingest, Windows project projection, SQL memory migration,
-  deictic live-screen items, commitment review rows and shadow retrieval
-  comparison. All of these stay opt-in and off by default.
-- Automatic timeline rows expire on the same horizon as vectors, keep the
-  observed event time rather than the scan time, and leave explicit user
-  memories without a TTL.
-- Document events store a digest plus a reference and re-validate the
-  configured roots when the full text is read on demand.
-- Local CLI commands for document ingest, memory migration, timeline pruning
-  and the private shadow retrieval report.
 - Focus-bound active Notepad read/write actions with explicit replacement
   confirmation and read-back verification.
 

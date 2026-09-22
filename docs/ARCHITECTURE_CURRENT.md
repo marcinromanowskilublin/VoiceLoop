@@ -1,10 +1,14 @@
 # VoiceLoop — aktualny baseline architektury
 
 **Wersja:** 0.3.0
-**Baseline.** Stan kodu z 20 września 2026.
+**Baseline.** Stan kodu z 22 września 2026, po `bf26abe`.
 **Źródło prawdy:** `listener/voiceloop/`. Starsze opisy ustępują kodowi.  
 **Ten plik nie zmienia zachowania produkcyjnej pętli.** Planer nadal nie
 wykonuje i nie czyta pamięci, timeline'u ani stanu jako źródła intencji.
+
+Opis dotyczy kodu i domyślnych ustawień, nie bieżącego stanu lokalnych usług.
+Prywatny `.env` może zmienić flagi i nazwy kolekcji. Wyniki testów nie
+potwierdzają działania mikrofonu, modelu ani jakości prywatnych wspomnień.
 
 Rdzeń zostaje:
 
@@ -26,8 +30,10 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 - Allowlista: 44 `ActionSpec` w `listener/voiceloop/actions.py`. 0 akcji `high`.
   9 `medium`, z czego 8 wymaga potwierdzenia.
 - `windows_shell.py` = UIA pulpitu i Eksploratora. To nie jest spawn `cmd` / PowerShell dla LLM.
-- Pamięć jest hybrydą SQL + Qdrant w trzech rolach (A/B/C poniżej). To nie jest BM25 i nie jest „brakiem hybrydy”.
-- Capabilities żyją w osobnej kolekcji Qdrant `voiceloop_capabilities_v1`. Nie merge z `voiceloop_memory`.
+- Pamięć planera i domyślny recall łączą role SQL i Qdrant opisane jako A/B/C
+  poniżej. Osobna ścieżka Context Timeline korzysta z FTS5/BM25 i czasu.
+- Capabilities żyją w osobnej kolekcji Qdrant; domyślna nazwa to
+  `voiceloop_capabilities_v1`, konfigurowana przez `QDRANT_CAPABILITY_COLLECTION`.
 - Threshold Guard mierzy progi. Nie zapisuje punktów i nie zastępuje retrievalu.
 - `TranscriptEnvelopeV1` jest kontraktem STT. Routing V2 jest w kodzie, ale **nie steruje** produkcją przy domyślnych flagach.
 
@@ -35,8 +41,9 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 
 - Routing V2: `routing_v2_enabled=true`, `shadow_mode=true`, `routing_v2_execute=false`. Liczy się obok V1. Live wymaga quality gate + zgodnego fingerprintu + (opcjonalnie) canary.
 - Commitment Layer: detector + scoring + schema. `assistant.py` uruchamia go
-  wyłącznie jako `commitment.shadow`; wynik trafia do eventu, nie do planu,
-  executora ani trwałego stanu.
+  jako `commitment.shadow`. Opcjonalny `CONTEXT_TIMELINE_COMMITMENT_REVIEW_ENABLED`
+  zapisuje także wiersz do review w SQLite, z `review_required=true` i
+  `executable=false`. Nie jest to akceptacja zobowiązania ani wejście executora.
 - `EvidenceItem` w `commitments/schema.py` (`rule` / `vector` / `temporal` / `resolver`) — to **obecny** typ commitmentów. Detector emituje wyłącznie `kind="rule"`. To **nie** jest przyszły `EvidenceItemV1` sytuacji.
 - n8n: `n8n_enabled=false`. Webhook dokładnych fraz, bez Execute Command. Pad n8n nie wali asystenta.
 - Hume EVI: szkielet, domyślnie off.
@@ -62,8 +69,12 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 - Automatyczny prune wektorów (`VECTOR_MEMORY_PRUNE_ENABLED=false`).
 - Background ingest/foreground/prune Context Timeline oraz produkcyjny quality
   gate na prywatnym gold secie. Adaptery dokumentów, projektów, migracji
-  pamięci i porównania shadow są jawne: uruchamia je operator z CLI
-  (`voiceloop.corpus`), a ich flagi runtime zostają wyłączone.
+  pamięci i porównania shadow są jawne. Dokumenty, migracja i porównanie mają
+  komendy CLI; projekcję projektów udostępnia API i osobna flaga usługi Windows.
+- Większy zestaw wyspecjalizowanych osi pamięci oraz jawne reguły nawigacji,
+  budżetu i zatrzymania zależne od klasy pytania. Liczba/nazwy osi i kryteria
+  wystarczających dowodów pozostają do uzgodnienia:
+  [`VECTOR_NAVIGATION_DESIGN.md`](VECTOR_NAVIGATION_DESIGN.md).
 
 Kontrakty dowodu i stanu są w repo i **nie sterują** planerem:
 
@@ -117,7 +128,7 @@ Nie proponować: Pinecone, chmurowych embeddingów, multi-agent, shella dla LLM,
      ActionSpec.handler → ActionResult
      Windows / UIA / UI.Vision / TTS / remember|recall
 
-  Commitment Layer ──► tylko testy tekstu, poza tą strzałką
+  Commitment Layer ──► shadow event / opcjonalny wiersz review, poza wykonaniem
   Capabilities Qdrant ──► V2 / „co potrafisz”, nie merge z pamięcią
 ```
 
@@ -162,20 +173,29 @@ V2: segmenter → `CapabilityIndex.search_subtasks(..., min_score=-1.0)` (prefil
 
 Handoff §2 z 11.08 ustawia n8n jako pierwszą produkcyjną ścieżkę i milczy o V2. **Nieaktualne.** Notion z 30.08 jest bliżej kodu: V2 shadow, n8n off.
 
-### MEMORY — hybryda A/B/C, nie BM25
+### MEMORY — ścieżki A/B/C oraz osobna oś czasu z FTS5
 
 **Pliki:** `memory.py`, `qdrant_memory.py`, `memory_vectorization.py`, `manual_memory.py`, `assistant.py` (`_vector_memories_for_request`, `_create_plan`), `actions.py` (`remember` / `recall`), `capability_index.py`.
 
-Dwie kolekcje Qdrant, **osobno**:
+Dwa zastosowania kolekcji Qdrant, z konfigurowalnymi nazwami. Wersje lub
+kolekcje shadow mogą współistnieć; tabela pokazuje ustawienia domyślne:
 
 | Kolekcja | Osie | Po co |
 |---|---|---|
 | `voiceloop_memory` | `semantic` 0.40, `topic` 0.20, `intent` 0.15, `decision` 0.15, `person_context` 0.10 | kontekst planera i recall wektorowy |
 | `voiceloop_capabilities_v1` | `semantic`, `intent`, `target_context` | katalog „co potrafisz” / V2 |
 
-RRF pamięci: `k=60`, `VECTOR_MEMORY_MIN_SCORE=0.0` (celowo — fusion jest na rangach). Schema dokumentów: `memory-documents-v2`. Embeddingi: lokalny Nomic 768d przez LM Studio. Handoff §10 i Notion obowiązują dla wektorów; nie zastępować ich promptem z §2.
+RRF pamięci: `k=60`, `VECTOR_MEMORY_MIN_SCORE=0.0`; ranking łączy pozycje
+wyników z poszczególnych osi, nie uśrednia wektorów. Jawne markery pytania
+mogą podwoić wagę pasującej osi przed normalizacją. Puste aspekty dokumentu
+są pomijane. Schema dokumentów: `memory-documents-v2`.
 
-SQL (`data/voiceloop.db`, WAL) jest **partnerem** Qdranta, nie zamiennikiem BM25:
+Klient OpenAI-compatible wysyła osobne teksty z prefiksami `search_document:`
+i `search_query:`. Model jest konfigurowalny lub rozpoznawany z `/models`;
+wymiar pochodzi z odpowiedzi embeddingu i musi pasować do kolekcji. Nomic
+768D jest możliwą konfiguracją lokalną, nie stałym kontraktem całego projektu.
+
+SQL (`data/voiceloop.db`, WAL) ma następujące role:
 
 **A — Context Pack do planera.** `AssistantService._create_plan` zbiera
 równolegle Qdrant/fallback B, jawne pamięci, ostatnie akcje i komunikaty runtime.
@@ -191,11 +211,23 @@ cięcie końca listy.
 Domyślny recall nadal używa Qdrant → B → podłańcuch tekstowy. Przy jawnym
 `CONTEXT_TIMELINE_RECALL_ENABLED=true` i pytaniu z zakresem czasu najpierw
 uruchamia się TimeFirstRetriever: FTS timeline'u → Screenpipe → semantic scout.
+Pusty wynik tej ścieżki zachowuje filtr czasu i nie przechodzi do starszego
+recall bez ograniczenia daty.
 
 **D — Context Timeline V1 (opt-in).** `context_events` i `context_episodes` są
-kanonicznym, czasowym partnerem pamięci A/B/C. FTS służy do dokładnych nazw i
-okien; Qdrant przechowuje wyłącznie znaczenie epizodów. Żadna z tych tabel nie
-jest tabelą `situation` i nie steruje executorem.
+kanonicznym magazynem zdarzeń i epizodów. FTS5 używa BM25 oraz ograniczeń
+czasu. Gdy dowodów jest mało, scout próbuje `semantic`, a następnie wybrane
+pytaniem osie rezerwowe. Kandydat Qdrant musi mieć aktualny epizod SQL,
+zgodną tożsamość i hash, żywe źródła ze zgodnymi wersjami oraz pasujący zakres
+czasu. Treść i czas pochodzą z SQL; ranking zostaje w `retrieval_score`,
+nie w `confidence`.
+
+Kolekcja pamięci nadal może zawierać starsze typy wpisów. Scout odpytuje tę
+samą kolekcję, ale pomija punkty bez kanonicznego epizodu i hashy źródeł.
+`ContextEpisodeVectorizer` jest jawnym API; nie ma automatycznego wywołania
+przy starcie. Dotychczasowy planer nadal odpytuje pięć osi. Liczba trafień
+nadal steruje zatrzymaniem scouta; nie wdrożono jeszcze polityki rangi pytań.
+Żadna tabela kontekstu nie steruje executorem.
 
 Capabilities **nie** wchodzą do A/B/C. Osobna kolekcja, osobny RRF (normalizacja do stałego zestawu osi capability — inny wariant niż pamięć; nie scalać helperów).
 
@@ -270,7 +302,8 @@ Właściciele: handler akcji zwraca `(message, data)` → `ActionResult`. Web/kn
 
 Nie wolno karmić outputu narzędzia z powrotem jako executable intent. Threshold Guard i Vectorscope są read-only wobec Qdrant.
 
-`CommitmentItem` **nie** jest obserwacją runtime. Żyje tylko w module eksperymentalnym.
+`CommitmentItem` powstaje w eksperymentalnej analizie shadow. Może dać wiersz
+do review przy jawnej fladze; nie jest potwierdzonym zobowiązaniem użytkownika.
 
 ---
 
@@ -320,5 +353,6 @@ gold set puszczony przez `report-context-retrieval`**, nie automatyczne
 włączenie workerów. Dopiero raport jakości może uzasadnić
 `CONTEXT_TIMELINE_RECALL_ENABLED=true`.
 
-Commitment shadow pozostaje eventem obserwacyjnym. Nie wpinamy go do
-SituationState ani executora razem z rolloutem timeline'u.
+Commitment shadow i opcjonalny wiersz review pozostają obserwacyjne. Nie
+włączają SituationState ani executora. Rozszerzenie osi wymaga zatwierdzonego
+słownika, przykładów i reguł nawigacji opisanych w dokumencie projektowym.

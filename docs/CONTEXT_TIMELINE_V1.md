@@ -1,6 +1,8 @@
 # Context Timeline V1
 
 **VoiceLoop:** 0.3.0
+**Stan kodu:** 22 września 2026, po `bf26abe`. Statusy opisują implementację,
+nie potwierdzenie działania lokalnych usług lub jakości prywatnych danych.
 
 Context Timeline jest lokalną, niewykonywalną warstwą dowodową VoiceLoop.
 Czas jest osią główną; aplikacje, okna, osoby i projekty są metadanymi, a
@@ -18,14 +20,20 @@ utworzyć `action_id`, zastąpić zgody użytkownika ani potwierdzić wykonania 
 | Ingest Screenpipe i spotkań | działa | brak pętli background |
 | Foreground Win32 | działa jako pojedyncza próbka | brak pętli background |
 | Rejestr encji i review kandydatów | działa | awans wyłącznie jawny |
-| Wektory epizodów | działa | wywołanie jawne |
-| Semantic scout i osie rezerwowe | działa | tylko lokalne backendy |
+| Wektory epizodów | zaimplementowane API | brak automatycznego wywołania; weryfikowalne źródła wymagają SQLite |
+| Semantic scout i osie rezerwowe | zaimplementowane, weryfikuje epizod i źródła SQL | tylko lokalne backendy |
+| Dokumenty tekstowe i migracja jawnych pamięci | jawne API/CLI | brak automatycznego startu |
+| Projekcja projektów Windows | API oraz integracja usługi | osobna flaga `false` |
+| Kontekst bieżącego ekranu dla pytań deiktycznych | integracja planera | osobna flaga `false` |
+| Wiersze przeglądu zobowiązań | integracja shadow | osobna flaga `false`, bez akceptacji zobowiązania |
+| Porównanie FTS i kaskady | API/CLI | nie przełącza recall |
 | Recall korzystający z timeline'u | eksperyment | `false` |
 | Automatyczny ingest/prune/foreground | planowane | wyłączone |
 | Produkcyjny quality gate | planowane | brak prywatnego gold setu w repo |
 
 Flaga `CONTEXT_TIMELINE_RECALL_ENABLED=false` pozostaje domyślna. Po włączeniu
-zmienia wyłącznie akcję `recall` zawierającą jawny zakres czasu. Nie uruchamia
+zmienia wyłącznie akcję `recall` z zakresem rozpoznanym przez parser czasu.
+Nie obejmuje dowolnej daty kalendarzowej ani każdej polskiej frazy czasowej. Nie uruchamia
 workerów, nie zmienia routingu i nie omija polityki wykonania.
 
 ## Moduły
@@ -109,6 +117,14 @@ Nie wektoryzujemy klatek OCR, nazw programów, HWND ani surowych ścieżek.
 Domyślnie epizod dostaje `semantic`. `decision`, `intent`, `person_context` i
 `topic` powstają wyłącznie wtedy, gdy istnieje odpowiadająca im jawna treść.
 
+Ten schemat opisuje składane, jawnie wywoływane adaptery, nie jeden uruchomiony
+pipeline. `ContextEpisodeVectorizer.index_episode()` nie jest wywoływany
+automatycznie przez aplikację ani przez komendy ingestu dokumentów/migracji.
+Przy przekazanym `MemoryStore` zapisuje hashe odczytanych zdarzeń w
+`source_event_hashes`; brakujące źródło spowoduje późniejsze odrzucenie
+kandydata przez scout. Nie utworzono kolejki indeksowania ani migracji starych
+wektorów przy starcie. Starszy worker pamięci Screenpipe jest osobną ścieżką.
+
 ## Przepływ odczytu
 
 ```text
@@ -116,14 +132,18 @@ pytanie
   -> parser czasu (dziś / wczoraj / przedwczoraj / ostatnie N godzin lub dni)
   -> FTS5 epizodów i zdarzeń w zakresie
   -> historyczny Screenpipe, jeżeli lokalny timeline jest zbyt ubogi
-  -> semantic scout, jeżeli nadal brakuje dowodu
-  -> jedna właściwa oś rezerwowa, gdy pytanie jej wymaga
+  -> semantic scout, jeżeli jest mniej niż min_exact_evidence pozycji (domyślnie 2)
+  -> kandydaci Qdrant -> potwierdzenie epizodu i wersji źródeł w SQL
+  -> kolejne osie rezerwowe wskazane pytaniem, jeśli nadal brakuje przyjętych pozycji
   -> ContextPackV1
   -> odpowiedź z provenance albo abstencja
 ```
 
-Dla pytania z jawnym czasem semantic hit bez źródłowego timestampu jest
-odrzucany. `created_at` punktu Qdrant nie udaje czasu obserwowanego zdarzenia.
+Czas wyniku semantycznego pochodzi z kanonicznego epizodu SQLite.
+`created_at` punktu Qdrant ani czas zadeklarowany przez jego payload nie
+zastępują czasu źródłowego. Osie są odpytywane kolejno; nie ma gwarancji,
+że użyta będzie dokładnie jedna oś rezerwowa. Reguła zatrzymania według
+liczby pozycji nie jest oceną kompletności dowodów ani polityką rangi pytania.
 
 ### Potwierdzenie kandydatów semantycznych w SQLite
 
@@ -224,7 +244,12 @@ i realne treści Screenpipe nie należą do repo.
 - błąd embeddingu/Qdranta przy odczycie → brak semantic scout, bez wyjątku do
   wykonania akcji;
 - błąd Qdranta przy usuwaniu → brak lokalnego tombstone;
-- brak timestampu w wektorze przy pytaniu czasowym → odrzucenie hitu;
+- brak epizodu SQL, inna tożsamość/hash, usunięcie lub wygaśnięcie → odrzucenie
+  kandydata semantycznego;
+- brak/zmiana/usunięcie/wygaśnięcie źródłowego zdarzenia → odrzucenie kandydata;
+- przedział epizodu SQL poza pytaniem → odrzucenie kandydata;
+- pusty recall time-first → pusta odpowiedź z zachowanym filtrem czasu;
+- błędny lub pozbawiony strefy czasowej timestamp Screenpipe → pominięcie;
 - nierozstrzygnięta osoba → literalne FTS, bez wymuszonego `person_id`.
 
 ## Operacje
@@ -245,9 +270,23 @@ Komendy działają na bazie runtime, nie na korpusie, więc nie mają
 `--data-root`; ścieżkę bazy wskazuje `--database`. Ingest dokumentów raportuje
 przyczyny pominięcia: plik z sekretem jest odrzucany w całości, bo jedno
 dopasowanie wzorca sugeruje kolejne w formach, których wzorce nie obejmują.
-`report-context-retrieval` porównuje sam FTS z pełną kaskadą na prywatnym
-zestawie gold i zawsze zwraca `recall_switch_allowed: false` — przełączenie
-pozostaje decyzją operatora.
+`report-context-retrieval` porównuje lokalny FTS z FTS + embeddingami/Qdrant
+na prywatnym zestawie gold. Ta komenda nie podłącza klienta Screenpipe,
+więc nie mierzy jego historycznego fallbacku. Zawsze zwraca
+`recall_switch_allowed: false` — przełączenie pozostaje decyzją operatora.
+Pole `semantic_scout_available` raportuje włączone komponenty, nie wynik
+testu ich zdrowia ani wykonania embeddingu.
+
+| Komenda | Skutek |
+|---|---|
+| `ingest-context-documents` | czyta wskazane korzenie i zapisuje zdarzenia SQL/FTS; bez wektoryzacji |
+| `migrate-memories-to-timeline` | kopiuje jawne pamięci do zdarzeń/epizodów SQL; bez usuwania oryginałów i bez wektoryzacji |
+| `prune-context-timeline` | domyślnie liczy wygasłe wpisy; `--apply` wykonuje retencję Qdrant/SQL/FTS |
+| `report-context-retrieval` | czyta wskazany gold set, odpytuje retrieval i wypisuje JSON; nie zmienia flag ani nie indeksuje |
+
+Wszystkie komendy inicjalizują schemat wskazanej bazy. Także raport lub
+dry-run może więc utworzyć brakujące tabele; nie należy traktować ich jako
+diagnostyki bez jakichkolwiek zapisów do schematu.
 
 ## Testy
 
@@ -256,17 +295,27 @@ cd listener
 .venv\Scripts\python -m pytest -c pyproject.toml -q `
   ..\tests\test_context_foundation.py `
   ..\tests\test_context_phase2.py `
-  ..\tests\test_context_phase3.py
+  ..\tests\test_context_phase3.py `
+  ..\tests\test_context_retrieval_integrity.py
 .venv\Scripts\python -m ruff check voiceloop ..\tests
 ```
 
 Testy obejmują idempotencję, FTS, timeline, epizody, paginację Screenpipe,
 scoping sesji, dry-run retencji, fail-closed Qdrant, encje z review gate, oba
 magazyny spotkań, foreground, selektywne wektory, lazy reserve axis oraz metryki.
+Testy integralności obejmują także stare/brakujące źródła, tożsamość i wersje
+epizodów, usunięcia, TTL, przedziały czasu, rozdzielenie rankingu od confidence
+oraz brak przejścia do wyszukiwania bez czasu po pustym wyniku.
+
+Punkt kontrolny kodu `bf26abe`: lokalny pełny zestaw **916 passed, 1 skipped**,
+Ruff poprawny. To wynik testów kodu, nie test mikrofonu, pełnego stosu usług
+czy prywatnej jakości pamięci.
 
 ## Jawne adaptery
 
-Te ścieżki istnieją w kodzie i nie startują same:
+Adaptery dokumentów i migracji mają wywołania jawne. Projekcja projektów,
+ekran i review mogą być wywoływane przez istniejący runtime po włączeniu
+odpowiednich flag; wszystkie te flagi domyślnie są wyłączone:
 
 - `DocumentTimelineIngestor` czyta `.md`, `.txt`, `.rst` i `.markdown` tylko
   z podanych korzeni. Przycina katalogi generowane w trakcie przechodzenia
@@ -298,7 +347,7 @@ ten czas:
 |---|---|---|
 | Dokument (digest) | `st_mtime` pliku | 14 dni od skanu |
 | Projekt Windows | `first_seen` rekordu | 14 dni od obserwacji |
-| Review zobowiązania | czas wypowiedzi | 14 dni |
+| Review zobowiązania | przekazany czas obserwacji lub czas utworzenia wpisu review | 14 dni |
 | Migrowana pamięć | `created_at` wpisu | brak |
 
 Czas skanu żyje w metadanych (`observed_at`, `last_seen`). Gdyby `started_at`
@@ -315,3 +364,8 @@ użytkownika nie.
   lokalnie i nie przełącza ruchu.
 - Recall timeline pozostaje wyłączony do czasu raportu shadow i quality gate.
 - Nowe tabele współistnieją z pamięcią A/B/C. Migracja jest wywołaniem jawnym.
+- Weryfikacja wersji źródeł dotyczy kandydatów semantycznych; nie zmienia
+  reguł zapisu epizodów ani nie zastępuje oceny prawdziwości ich podsumowań.
+- Planer i recall nadal mają osobne wejścia. Większa mapa osi, kolejka
+  indeksowania i reguły dowodowe zależne od rangi pytania są opisanym kierunkiem,
+  nie ukończoną implementacją: [projekt nawigacji](VECTOR_NAVIGATION_DESIGN.md).

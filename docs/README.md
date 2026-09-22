@@ -17,7 +17,11 @@ like current runtime behavior.
 ## Context, memory and evaluation
 
 - [Context Timeline V1](CONTEXT_TIMELINE_V1.md) — time-first local context,
-  canonical stores, semantic scout and rollout limits.
+  explicit adapters, SQL-verified semantic candidates, CLI operations and
+  rollout limits. Includes legacy-index compatibility requirements.
+- [Memory-axis navigation design](VECTOR_NAVIGATION_DESIGN.md) — agreed direction
+  for a larger set of specialized axes, evidence requirements and stopping
+  rules; separates future design from current code and human labeling duties.
 - [Threshold Guard](THRESHOLD_GUARD.md) — measured vector thresholds and
   fail-closed behavior.
 - [Safe user corpus](SAFE_USER_CORPUS.md) — local corpus, privacy gates,
