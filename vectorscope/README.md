@@ -13,7 +13,7 @@ Zapisu nie wykonuje — pamięć zapisuje asystent, panel ją obserwuje.
 ## Uruchomienie
 
 ```powershell
-cd C:\Users\marci\VoiceLoop
+# z katalogu głównego repozytorium VoiceLoop
 .\listener\.venv\Scripts\python.exe -m vectorscope.app
 ```
 

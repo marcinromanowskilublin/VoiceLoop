@@ -34,6 +34,10 @@ ACTIVITY_BUCKET_MINUTES = 10
 # a dokumenty faktycznie różne mają p99 = 0.874. Stąd 0.97: osiągalne dla
 # duplikatu, z zapasem nad rozkładem treści nowych.
 ACTIVITY_DUPLICATE_MIN_SCORE = 0.97
+# Historia pokrewna nie ma progu: wynik i tak niesie rzeczywisty cosinus w treści,
+# a model sam ocenia, czy fragment jest przydatny. Stała istnieje, żeby panel
+# Vectorscope pokazywał wartość używaną w kodzie, a nie własną kopię.
+RELATED_HISTORY_MIN_SCORE = 0.0
 OCR_NOISE_LINES = {
     "add this tab to bookmarks",
     "close",
@@ -334,7 +338,7 @@ class ScreenpipeVectorMemoryWorker:
             hits = await self.qdrant.search(
                 query_vectors[0],
                 limit=6,
-                min_score=0.0,
+                min_score=RELATED_HISTORY_MIN_SCORE,
                 vector_names=("semantic",),
             )
         except (EmbeddingUnavailableError, QdrantMemoryError, AttributeError):

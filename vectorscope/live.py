@@ -25,6 +25,7 @@ import random
 from typing import Any
 
 import numpy as np
+
 from voiceloop.embeddings import EmbeddingUnavailableError
 from voiceloop.memory_vectorization import (
     MEMORY_VECTOR_NAMES,

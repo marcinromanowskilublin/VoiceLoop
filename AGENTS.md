@@ -36,7 +36,7 @@ the snapshot.)
 ### Lint / test (run from `listener/`, with the venv + PulseAudio)
 ```bash
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
-./.venv/bin/python -m ruff check voiceloop ../tests \
+./.venv/bin/python -m ruff check voiceloop ../tests ../vectorscope \
   ../scripts/voice_capture_server.py \
   ../scripts/holding-commands/server.py \
   ../scripts/calibration-phrases/server.py

@@ -24,9 +24,23 @@ All notable public changes to VoiceLoop are documented here.
   and source-event versions, including identity, deletion, expiry and time.
   Returned content comes from SQL; ranking no longer becomes `confidence`.
 - Invalid, timezone-free and out-of-range Screenpipe timestamps are discarded.
+- Vectorscope reads the related-history threshold from
+  `screenpipe_memory.RELATED_HISTORY_MIN_SCORE` instead of a stale local copy
+  (`0.30`); the code path has used no threshold (`0.0`) for some time.
+- Best-effort paths that previously swallowed exceptions silently (UIA text
+  probe, Screenpipe refresh, web-source state, routing calibration recorder)
+  now log at debug level.
 
 ### Changed
 
+- CI and the documented verification commands lint `vectorscope/` as well.
+- `.gitattributes` pins LF in the index and CRLF for Windows scripts;
+  `logs/.gitkeep` and `data/.gitkeep` are tracked so a fresh clone has the
+  runtime directories. The unused `listener/requirements.txt` is removed;
+  `requirements.in` + `requirements.lock` remain canonical.
+- `docs/README.md` describes the optional integration directories and links the
+  archive index; README marks `listener/.env` as optional and documents
+  `start-all.ps1 -NoVoiceAttack`.
 - Explicit episode indexing records source-event hashes when SQLite is supplied.
   Legacy points without canonical references and source versions are excluded
   from time-first semantic recall; no automatic migration is performed.

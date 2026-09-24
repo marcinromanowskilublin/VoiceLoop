@@ -1,0 +1,19 @@
+# Repo jest Windows-first, ale CI i Cloud VM czytają te same pliki.
+# W indeksie wszystko trzymamy jako LF; końcówki w katalogu roboczym
+# wynikają z core.autocrlf, poza skryptami Windows, które zawsze mają CRLF.
+* text=auto
+
+# Skrypty wykonywane przez cmd.exe / WSH / PowerShell.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+*.ps1 text eol=crlf
+
+# Tekst, który ma zostać tekstem także dla narzędzi diff.
+*.svg text
+*.vap text
+
+# Binaria.
+*.png binary
+*.jpg binary
+*.ico binary

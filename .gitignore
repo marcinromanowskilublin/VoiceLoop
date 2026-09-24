@@ -24,6 +24,8 @@ scripts/staging-voice-eval/
 .codex_tmp/
 .codex-tmp/
 artifacts/
+output/
+tmp/
 
 # Local reading notes. Keep the empty drop folders; do not publish contents.
 sources/articles/**

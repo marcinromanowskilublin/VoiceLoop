@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from voiceloop.embeddings import OpenAICompatibleEmbeddingClient
-from voiceloop.screenpipe_memory import ACTIVITY_DUPLICATE_MIN_SCORE
+from voiceloop.screenpipe_memory import ACTIVITY_DUPLICATE_MIN_SCORE, RELATED_HISTORY_MIN_SCORE
 from voiceloop.settings import Settings, get_settings
 
 VECTORSCOPE_HOST = "127.0.0.1"
@@ -29,9 +29,6 @@ PREFIXES = (PREFIX_DOCUMENT, PREFIX_QUERY, PREFIX_NONE)
 # więc panel musi ostrzegać, zamiast udawać, że policzył cały tekst.
 EMBEDDING_CONTEXT_TOKENS = 512
 CHARS_PER_TOKEN_ESTIMATE = 3.2
-
-# Literał z voiceloop/screenpipe_memory.py:311 (wyszukiwanie historii pokrewnej).
-SCREENPIPE_RELATED_HISTORY_MIN_SCORE = 0.30
 
 
 @dataclass(frozen=True)
@@ -112,9 +109,9 @@ def collect_thresholds(settings: Settings) -> list[Threshold]:
         ),
         Threshold(
             key="screenpipe_related_history_min_score",
-            value=SCREENPIPE_RELATED_HISTORY_MIN_SCORE,
+            value=float(RELATED_HISTORY_MIN_SCORE),
             label="Screenpipe — historia pokrewna",
-            origin="screenpipe_memory.py:311",
+            origin="screenpipe_memory.py",
         ),
     ]
 

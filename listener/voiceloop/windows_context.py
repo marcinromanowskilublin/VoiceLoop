@@ -247,6 +247,7 @@ class WindowsContextService:
         try:
             elements = await self.screenpipe.recent_elements(limit=50)
         except Exception:
+            LOGGER.debug("Screenpipe recent_elements refresh failed", exc_info=True)
             return
         for element in elements:
             self.screenpipe_elements.append(

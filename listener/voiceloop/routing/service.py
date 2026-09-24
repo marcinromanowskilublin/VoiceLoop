@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,8 @@ from .resolver import (
     resolve_subtasks,
 )
 from .segmenter import segment_command
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -542,6 +545,7 @@ class RoutingV2Service:
             self.calibration_recorder.record(observations)
         except Exception:
             # Recorder działa best-effort i nie może wpływać na routing.
+            LOGGER.debug("Routing calibration recorder failed", exc_info=True)
             return
 
     def _record_challenge_observation(
@@ -560,6 +564,8 @@ class RoutingV2Service:
             )
             self.calibration_recorder.record((observation,))
         except Exception:
+            # Best-effort jak wyżej: obserwacja challenge nie może przerwać routingu.
+            LOGGER.debug("Routing challenge observation recorder failed", exc_info=True)
             return
 
     def _infer_calibration(

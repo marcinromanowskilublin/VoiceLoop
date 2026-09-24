@@ -2448,7 +2448,7 @@ class ActionRegistry:
                 for text in wrapper.texts():
                     collect_text(text)
             except Exception:
-                pass
+                LOGGER.debug("UIA texts() failed for element under cursor", exc_info=True)
 
         parent = wrapper
         for _ in range(3):
@@ -2707,7 +2707,7 @@ class ActionRegistry:
             raise RuntimeError("Nie mam zapamiętanej wcześniejszej pozycji kursora.")
         set_cursor_position(previous)
         self._last_cursor_position = None
-        return "Przywróciłem poprzednią pozycję kursora.", {"x": previous[0], "y": previous[1]}
+        return "Przywrócono poprzednią pozycję kursora.", {"x": previous[0], "y": previous[1]}
 
     async def _snap_window_layout(self, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         return await asyncio.to_thread(self._snap_window_layout_sync, args)
@@ -3190,6 +3190,7 @@ class ActionRegistry:
             )
         except Exception:
             # Nie przerywamy wyszukiwania, gdy pamięć stanu jest chwilowo niedostępna.
+            LOGGER.debug("Could not persist last web sources state", exc_info=True)
             return
 
     async def _load_last_web_sources(self) -> dict[str, Any]:

@@ -1110,7 +1110,7 @@ def validate_calibration_artifact_for_evaluation(
     if artifact.schema_version != 1:
         raise ValueError("Nieobslugiwany schema_version artefaktu kalibracji.")
     if artifact.recompute_fingerprint() != artifact.artifact_fingerprint:
-        raise ValueError("Niezgodny artifact_fingerprint (mozliwe naruszenie integralnosci).")
+        raise ValueError("Niezgodny artifact_fingerprint (możliwe naruszenie integralności).")
     representative_rows = [
         row for row in observations if row.set_role is RoutingCalibrationSetRole.REPRESENTATIVE
     ]
@@ -1150,7 +1150,7 @@ def validate_calibration_artifact_for_evaluation(
                     raise ValueError("Eval zawiera rekordy z czasem <= train_cutoff.")
                 component_id = component_map.get(_row_identity(row))
                 if component_id in train_ids and row.observed_at > artifact.train_cutoff:
-                    raise ValueError("Naruszenie porzadku temporalnego train_cutoff.")
+                    raise ValueError("Naruszenie porządku temporalnego train_cutoff.")
     if artifact.training_window_end is None:
         return False
     return all(row.observed_at > artifact.training_window_end for row in representative_rows)
