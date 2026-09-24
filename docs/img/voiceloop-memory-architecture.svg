@@ -3,33 +3,33 @@
   <desc id="desc">SQLite stores canonical records, text and time. Qdrant stores derived semantic indexes for ranking. Planner context, user recall and timeline recall stay separate, and retrieved context cannot create executable intent.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#8aa0b8"/>
+      <path d="M0 0L10 5L0 10Z" fill="#91a69b"/>
     </marker>
     <marker id="arrowContext" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#7dd3fc"/>
+      <path d="M0 0L10 5L0 10Z" fill="#4d876f"/>
     </marker>
     <style>
-      .h1{font:800 34px "Segoe UI",Arial,sans-serif;fill:#f6f8fb}
-      .sub{font:15px "Segoe UI",Arial,sans-serif;fill:#a9b7c8}
+      .h1{font:800 34px "Segoe UI",Arial,sans-serif;fill:#17231f}
+      .sub{font:15px "Segoe UI",Arial,sans-serif;fill:#66756e}
       .section{font:800 12px "Segoe UI",Arial,sans-serif;letter-spacing:1.4px}
-      .node{font:700 17px "Segoe UI",Arial,sans-serif;fill:#f3f7fb;text-anchor:middle}
-      .small{font:13px "Segoe UI",Arial,sans-serif;fill:#a9b7c8;text-anchor:middle}
-      .tiny{font:12px "Segoe UI",Arial,sans-serif;fill:#9fb0c4;text-anchor:middle}
-      .source{fill:#121a27;stroke:#506278;stroke-width:1.8}
-      .sql{fill:#10251d;stroke:#52d89a;stroke-width:2.2}
-      .vector{fill:#1b1730;stroke:#a78bfa;stroke-width:2.2}
-      .role{fill:#0f2231;stroke:#7dd3fc;stroke-width:2}
-      .warn{fill:#21131a;stroke:#713c46;stroke-width:1.8}
-      .flow{fill:none;stroke:#8aa0b8;stroke-width:2.6;marker-end:url(#arrow)}
-      .contextFlow{fill:none;stroke:#7dd3fc;stroke-width:2.6;marker-end:url(#arrowContext)}
-      .derived{fill:none;stroke:#a78bfa;stroke-width:2.4;stroke-dasharray:8 7;marker-end:url(#arrow)}
+      .node{font:700 17px "Segoe UI",Arial,sans-serif;fill:#17231f;text-anchor:middle}
+      .small{font:13px "Segoe UI",Arial,sans-serif;fill:#66756e;text-anchor:middle}
+      .tiny{font:12px "Segoe UI",Arial,sans-serif;fill:#718078;text-anchor:middle}
+      .source{fill:#ffffff;stroke:#ced8d2;stroke-width:1.8}
+      .sql{fill:#e7f2ec;stroke:#2f6b55;stroke-width:2.2}
+      .vector{fill:#efedff;stroke:#7268c9;stroke-width:2.2}
+      .role{fill:#eef6f1;stroke:#4d876f;stroke-width:2}
+      .warn{fill:#fff0f2;stroke:#b44f62;stroke-width:1.8}
+      .flow{fill:none;stroke:#91a69b;stroke-width:2.6;marker-end:url(#arrow)}
+      .contextFlow{fill:none;stroke:#4d876f;stroke-width:2.6;marker-end:url(#arrowContext)}
+      .derived{fill:none;stroke:#7268c9;stroke-width:2.4;stroke-dasharray:8 7;marker-end:url(#arrow)}
     </style>
   </defs>
 
-  <rect width="1200" height="560" rx="24" fill="#070910"/>
-  <circle cx="1120" cy="-80" r="320" fill="#312e81" opacity=".28"/>
-  <circle cx="100" cy="40" r="240" fill="#064e3b" opacity=".24"/>
-  <text x="48" y="54" class="section" fill="#7dd3fc">LOCAL MEMORY</text>
+  <rect width="1200" height="560" rx="24" fill="#f7f8f3"/>
+  <circle cx="1120" cy="-80" r="320" fill="#efedff" opacity=".85"/>
+  <circle cx="100" cy="40" r="240" fill="#eef6f1" opacity=".95"/>
+  <text x="48" y="54" class="section" fill="#4d876f">LOCAL MEMORY</text>
   <text x="48" y="94" class="h1">SQLite remembers. Qdrant ranks.</text>
   <text x="48" y="121" class="sub">Exact records and time stay canonical; semantic vectors are derived navigation hints.</text>
 
@@ -57,8 +57,8 @@
     <text x="136" y="118" class="small">not the source of truth</text>
   </g>
 
-  <rect x="42" y="318" width="1116" height="140" rx="26" fill="#0d1421" stroke="#223047"/>
-  <text x="66" y="350" class="section" fill="#7dd3fc">READ PATHS STAY SEPARATE</text>
+  <rect x="42" y="318" width="1116" height="140" rx="26" fill="#ffffff" stroke="#dce4de"/>
+  <text x="66" y="350" class="section" fill="#4d876f">READ PATHS STAY SEPARATE</text>
   <g transform="translate(86 376)">
     <rect width="300" height="58" rx="18" class="role"/>
     <text x="150" y="25" class="node">Planner context</text>

@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VoiceLoop</title>
+  <meta name="theme-color" content="#f4f6f1">
+  <meta name="description" content="VoiceLoop turns scattered work signals into a bounded, source-aware context workspace.">
+  <title>VoiceLoop | Context Workspace</title>
   <style>
     :root {
       color-scheme: dark;
@@ -240,47 +242,167 @@
       .message.assistant, .message.output { margin-right: 0; }
     }
   </style>
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <div class="layout">
+  <div class="app-shell">
+    <nav class="topnav" aria-label="Product">
+      <a class="brand" href="/" aria-label="VoiceLoop context workspace">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-copy">
+          <strong>VoiceLoop</strong>
+          <span>Context workspace</span>
+        </span>
+      </a>
+      <div class="topnav-meta">
+        <span class="nav-pill">Partner rollout</span>
+        <span id="model-badge">local context layer</span>
+      </div>
+    </nav>
+
     <header class="hero">
-      <div>
-        <div class="eyebrow">Local-first command loop</div>
-        <h1>VoiceLoop</h1>
+      <div class="hero-copy-block">
+        <div class="eyebrow">Windows-first · software-agnostic</div>
+        <h1>Less noise.<br><span>More usable context.</span></h1>
         <p class="hero-copy">
-          A private Windows assistant for Polish voice, local memory and safe task execution.
-          The model proposes; local code decides.
+          Work is scattered across windows, meetings, documents and decisions.
+          VoiceLoop turns those signals into one bounded, source-aware view of
+          what matters now.
         </p>
-        <span id="model-badge">local panel</span>
+        <div class="hero-notes" aria-label="Product principles">
+          <span class="hero-note">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.8"/><path d="m9 12 2 2 4-5" stroke="currentColor" stroke-width="1.8"/></svg>
+            Local-first by default
+          </span>
+          <span class="hero-note">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 21h8M12 18v3" stroke="currentColor" stroke-width="1.8"/></svg>
+            Works across existing software
+          </span>
+        </div>
+        <div class="actions" aria-label="Workspace controls">
+          <button id="conversation">Start session</button>
+          <button id="meeting" class="primary">Capture meeting</button>
+          <button id="listen">Enable live capture</button>
+          <button id="refresh">Refresh</button>
+          <button id="stop" class="danger">STOP</button>
+        </div>
       </div>
-      <div class="actions">
-        <button id="conversation">Start conversation</button>
-        <button id="meeting" class="primary">Start recording</button>
-        <button id="listen">Enable Deepgram</button>
-        <button id="refresh">Refresh</button>
-        <button id="stop" class="danger">STOP</button>
-      </div>
+
+      <section class="context-visual" aria-label="Illustrative VoiceLoop context map">
+        <div class="visual-topbar">
+          <span>Illustrative context map</span>
+          <span class="visual-status">Context layer active</span>
+        </div>
+        <div class="context-map">
+          <div class="signal-stack">
+            <p class="map-kicker">Signals</p>
+            <div class="signal-card">
+              <span class="signal-icon">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 8h18" stroke="currentColor" stroke-width="1.8"/></svg>
+              </span>
+              Active windows
+            </div>
+            <div class="signal-card">
+              <span class="signal-icon">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 14a4 4 0 0 0 4-4V7a4 4 0 1 0-8 0v3a4 4 0 0 0 4 4Z" stroke="currentColor" stroke-width="1.8"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4" stroke="currentColor" stroke-width="1.8"/></svg>
+              </span>
+              Meetings
+            </div>
+            <div class="signal-card">
+              <span class="signal-icon">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 3h8l4 4v14H6V3Z" stroke="currentColor" stroke-width="1.8"/><path d="M14 3v5h5M9 13h6M9 17h5" stroke="currentColor" stroke-width="1.8"/></svg>
+              </span>
+              Documents
+            </div>
+            <div class="signal-card">
+              <span class="signal-icon">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5h14v11H9l-4 4V5Z" stroke="currentColor" stroke-width="1.8"/><path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.8"/></svg>
+              </span>
+              Messages
+            </div>
+          </div>
+
+          <div class="context-core">
+            <span class="core-label">VoiceLoop context layer</span>
+            <h3>One view of the current situation</h3>
+            <p>Relevant signals are linked by time, source, people, decisions and intent.</p>
+            <div class="context-nodes" aria-hidden="true">
+              <svg viewBox="0 0 240 118" preserveAspectRatio="none">
+                <path d="M33 21 121 58 202 28M121 58 63 99M121 58 201 96" fill="none" stroke="#9dbbac" stroke-width="1.2" stroke-dasharray="4 5"/>
+                <circle cx="121" cy="58" r="7" fill="#cbe675" stroke="#2f6b55" stroke-width="2"/>
+              </svg>
+              <span class="node one">Current focus</span>
+              <span class="node two">Evidence</span>
+              <span class="node three">Decision</span>
+              <span class="node four">Next step</span>
+            </div>
+          </div>
+
+          <div class="outcome-stack">
+            <p class="map-kicker">Working view</p>
+            <div class="outcome-card">
+              <strong>Now</strong>
+              <span>The current thread and why it matters.</span>
+            </div>
+            <div class="outcome-card accent">
+              <strong>Decision</strong>
+              <span>What changed, with evidence attached.</span>
+            </div>
+            <div class="outcome-card warm">
+              <strong>Next</strong>
+              <span>A clear action with local control.</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </header>
 
-    <section id="health" class="health"></section>
+    <section class="principles" aria-label="How context is shaped">
+      <article class="principle">
+        <span class="principle-index">01</span>
+        <div>
+          <strong>Collect without another inbox</strong>
+          <p>Signals stay connected to the software and workflow that created them.</p>
+        </div>
+      </article>
+      <article class="principle">
+        <span class="principle-index">02</span>
+        <div>
+          <strong>Reduce before showing</strong>
+          <p>Only bounded, relevant and source-aware context reaches the working view.</p>
+        </div>
+      </article>
+      <article class="principle">
+        <span class="principle-index">03</span>
+        <div>
+          <strong>Act with a visible boundary</strong>
+          <p>Models can propose; local policy, confirmation and execution stay in control.</p>
+        </div>
+      </article>
+    </section>
 
-    <main>
+    <details class="system-panel">
+      <summary>System status and connected services</summary>
+      <section id="health" aria-label="Component health"></section>
+    </details>
+
+    <main class="workspace-grid">
       <section class="card conversation">
         <div class="conversation-head">
           <div>
-            <p class="section-label">Live workspace</p>
-            <h2>Conversation and commands</h2>
+            <p class="section-label">Current thread</p>
+            <h2>Work in context</h2>
           </div>
-          <span class="muted">Protected loopback panel</span>
+          <span class="surface-note">Private loopback workspace · sources remain visible</span>
         </div>
         <div id="meeting-bar" class="meeting-bar">
-          <span><span class="recording-dot">●</span> <b id="meeting-status">No active recording</b></span>
-          <span id="meeting-detail">Assistant available</span>
+          <span><span class="recording-dot">●</span> <b id="meeting-status">No active capture</b></span>
+          <span id="meeting-detail">Workspace ready</span>
         </div>
-        <div id="messages"></div>
-        <div id="interim"></div>
+        <div id="messages" aria-live="polite"></div>
+        <div id="interim" aria-live="polite"></div>
         <div class="composer">
-          <textarea id="prompt" placeholder="Type or say what I should do…"></textarea>
+          <textarea id="prompt" aria-label="Add to current context" placeholder="Ask about the current situation, capture a decision, or plan the next step…"></textarea>
           <div class="composer-row">
             <div class="toggles">
               <label><input id="screen" type="checkbox"> include active window</label>
@@ -289,38 +411,75 @@
                 <span id="cloud-label">allow cloud fallback</span>
               </label>
             </div>
-            <button id="send" class="primary">Send</button>
+            <button id="send" class="primary">Add to thread</button>
           </div>
         </div>
       </section>
 
-      <aside class="side">
-        <section class="card">
-          <h2>Capabilities</h2>
-          <div id="capabilities"><span class="empty">Loading catalog…</span></div>
+      <aside class="context-rail">
+        <section class="card context-overview">
+          <div class="context-overview-copy">
+            <p class="section-label">Context stack</p>
+            <h2>From scattered signals to a shared working view.</h2>
+            <p>Each item keeps its source. Irrelevant context stays outside the active thread.</p>
+          </div>
+          <div class="context-meter" aria-label="Context principles">
+            <div><strong>Local</strong><span>default</span></div>
+            <div><strong>Bounded</strong><span>selection</span></div>
+            <div><strong>Linked</strong><span>evidence</span></div>
+          </div>
         </section>
-        <section class="card">
-          <h2>Recent tasks</h2>
-          <div id="tasks"><span class="empty">No tasks yet.</span></div>
+
+        <section class="card side-card">
+          <div class="side-card-head">
+            <h2>Next actions</h2>
+            <span class="side-card-index">01</span>
+          </div>
+          <div id="tasks"><span class="empty">No actions yet.</span></div>
         </section>
-        <section class="card">
-          <h2>Answer sources</h2>
-          <div id="answer-sources"><span class="empty">No sources.</span></div>
+
+        <section class="card side-card">
+          <div class="side-card-head">
+            <h2>Evidence</h2>
+            <span class="side-card-index">02</span>
+          </div>
+          <div id="answer-sources"><span class="empty">No linked sources.</span></div>
         </section>
-        <section class="card">
-          <h2>Local memory</h2>
+
+        <section class="card side-card">
+          <div class="side-card-head">
+            <h2>Context anchors</h2>
+            <span class="side-card-index">03</span>
+          </div>
           <div class="memory-form">
-            <input id="memoryText" placeholder="A fact or preference">
-            <button id="remember">Remember</button>
+            <input id="memoryText" aria-label="New context anchor" placeholder="Add a stable fact or preference">
+            <button id="remember">Add</button>
           </div>
           <div id="memories"></div>
         </section>
-        <section class="card">
-          <h2>Last turn</h2>
-          <div id="turn-trace"><span class="empty">No measurements yet.</span></div>
-        </section>
       </aside>
     </main>
+
+    <section class="operator-grid" aria-label="Operator details">
+      <section class="card operator-card">
+        <p class="section-label">Connected layer</p>
+        <h2>Available actions</h2>
+        <div id="capabilities"><span class="empty">Loading action catalog…</span></div>
+      </section>
+      <section class="card operator-card">
+        <p class="section-label">Observability</p>
+        <h2>Last context turn</h2>
+        <div id="turn-trace"><span class="empty">No measurements yet.</span></div>
+      </section>
+    </section>
+
+    <footer class="product-footer">
+      <div>
+        <strong>Moving from prototype to an operational context UI.</strong>
+        <p>VoiceLoop is currently being rolled out with a partner as the context interface for an existing workflow.</p>
+      </div>
+      <span class="footer-platform">Windows-first · any software</span>
+    </footer>
   </div>
 
   <script>
@@ -382,7 +541,7 @@
       return /[.!?…]["')\]]?\s*$/.test((text || "").trim());
     }
 
-    // Continuation heuristics stay Polish: the transcripts themselves are Polish speech.
+    // Keep short continuation fragments attached to the preceding transcript segment.
     function beginsAsContinuation(text) {
       const cleaned = (text || "").trim();
       if (!cleaned) return false;
@@ -542,18 +701,18 @@
       const bar = $("meeting-bar");
       bar.classList.toggle("active", active);
       $("meeting-status").textContent = active
-        ? "Recording in progress"
+        ? "Capture in progress"
         : status === "finalizing"
-        ? "Finalizing transcript"
+        ? "Finalizing context"
         : status === "completed"
-        ? "Recording finished"
-        : "No active recording";
+        ? "Capture complete"
+        : "No active capture";
       $("meeting-detail").textContent = active
-        ? "Assistant muted · input/output recorded separately"
+        ? "Action layer paused · channels captured separately"
         : status === "finalizing"
-        ? "Deepgram is finalizing output channels"
-        : "Assistant available";
-      $("meeting").textContent = active ? "Stop recording" : "Start recording";
+        ? "Finalizing captured channels"
+        : "Workspace ready";
+      $("meeting").textContent = active ? "Stop capture" : "Capture meeting";
       $("meeting").classList.toggle("danger", active);
       $("meeting").classList.toggle("primary", !active);
       $("conversation").disabled = active;
@@ -565,7 +724,7 @@
         const data = await api("/api/v1/health");
         const deepgram = data.components.deepgram || {};
         state.listening = deepgram.status === "ok";
-        $("listen").textContent = state.listening ? "Disable Deepgram" : "Enable Deepgram";
+        $("listen").textContent = state.listening ? "Disable live capture" : "Enable live capture";
         $("health").replaceChildren(...Object.entries(data.components).map(([name, item]) => {
           const card = document.createElement("div");
           card.className = "health-card";
@@ -589,7 +748,7 @@
       if (!tasks.length) {
         const empty = document.createElement("span");
         empty.className = "empty";
-        empty.textContent = "No tasks yet.";
+        empty.textContent = "No actions yet.";
         root.appendChild(empty);
         return;
       }
@@ -671,7 +830,7 @@
       const root = $("answer-sources");
       const safeSources = (sources || []).filter(item => item && item.url).slice(0, 3);
       if (!safeSources.length) {
-        root.innerHTML = '<span class="empty">No sources.</span>';
+        root.innerHTML = '<span class="empty">No linked sources.</span>';
         return;
       }
       root.replaceChildren(...safeSources.map(item => {
@@ -748,7 +907,7 @@
           text.textContent = item.content;
           const remove = document.createElement("button");
           remove.textContent = "×";
-          remove.title = "Forget";
+          remove.title = "Remove anchor";
           remove.onclick = async () => {
             await api(`/api/v1/memories/${item.id}`, { method: "DELETE" });
             await loadMemories();
@@ -793,9 +952,9 @@
     async function startConversation() {
       try {
         await api("/api/v1/conversation/start", { method: "POST" });
-        addMessage("system", "Starting conversation: one greeting, then Deepgram one-shot.");
+        addMessage("system", "Starting a focused session with one-shot live capture.");
       } catch (error) {
-        addMessage("system", "Conversation: " + error.message);
+        addMessage("system", "Session: " + error.message);
       }
     }
 
@@ -817,9 +976,9 @@
         if (state.meetingActive) {
           const meeting = await api("/api/v1/meetings/stop", { method: "POST" });
           state.listening = false;
-          $("listen").textContent = "Enable Deepgram";
+          $("listen").textContent = "Enable live capture";
           updateMeetingUi(meeting);
-          addMessage("system", "Recording finished. Output channels are being finalized and stored locally.");
+          addMessage("system", "Capture complete. Channels are being finalized and stored locally.");
         } else {
           state.transcriptKeys.clear();
           state.transcriptGroups = [];
@@ -828,8 +987,8 @@
           const meeting = await api("/api/v1/meetings/start", { method: "POST" });
           updateMeetingUi(meeting);
           state.listening = true;
-          $("listen").textContent = "Disable Deepgram";
-          addMessage("system", "Assistant muted. Deepgram is running; input/output are recorded separately.");
+          $("listen").textContent = "Disable live capture";
+          addMessage("system", "Action layer paused. Input and output are captured separately.");
         }
       } catch (error) {
         addMessage("system", "Recording: " + error.message);
@@ -843,7 +1002,7 @@
       try {
         await api(`/api/v1/listening/${endpoint}`, { method: "POST" });
         state.listening = !state.listening;
-        $("listen").textContent = state.listening ? "Disable Deepgram" : "Enable Deepgram";
+        $("listen").textContent = state.listening ? "Disable live capture" : "Enable live capture";
       } catch (error) {
         addMessage("system", "Deepgram: " + error.message);
       }
@@ -852,8 +1011,8 @@
     async function stopAll() {
       await api("/api/v1/stop", { method: "POST" });
       state.listening = false;
-      $("listen").textContent = "Enable Deepgram";
-      addMessage("system", "Listening stopped.");
+      $("listen").textContent = "Enable live capture";
+      addMessage("system", "Live capture stopped.");
       await loadMeeting();
       await loadTasks();
     }
@@ -882,16 +1041,16 @@
       }
       if (type === "conversation.transcribe_only" && payload.enabled) {
         if (!state.meetingActive) {
-          addMessage("system", "Assistant is silent. Live transcription and recording remain active.");
+          addMessage("system", "Action layer paused. Live transcription and capture remain active.");
         }
       }
       if (type === "listening.connected") {
         state.listening = true;
-        $("listen").textContent = "Disable Deepgram";
+        $("listen").textContent = "Disable live capture";
       }
       if (type === "listening.stopped") {
         state.listening = false;
-        $("listen").textContent = "Enable Deepgram";
+        $("listen").textContent = "Enable live capture";
       }
       if (type === "conversation.trace") {
         renderTrace(payload);
@@ -969,10 +1128,10 @@
       const badge = $("model-badge");
       if (badge) {
         badge.textContent = geminiPrimary
-          ? "Gemini · Qwen fallback · Deepgram · VA"
+          ? "Gemini · Qwen fallback · local context"
           : cloudPrimary
-          ? "Venice · Qwen · Deepgram · VA"
-          : "Qwen · Deepgram · VA";
+          ? "Venice · Qwen fallback · local context"
+          : "Qwen · local context";
       }
       $("send").onclick = sendCommand;
       $("prompt").onkeydown = event => {
@@ -1002,12 +1161,12 @@
       addMessage(
         "system",
         state.meetingActive
-          ? "Recording in progress. Assistant is muted; Deepgram is saving the transcript."
+          ? "Capture in progress. The action layer is paused while channels are stored locally."
           : geminiPrimary
-          ? "VoiceLoop ready. Gemini handles conversation with Qwen as fallback; tasks flow Deepgram → VA/actions."
+          ? "VoiceLoop ready. Gemini handles the active thread with Qwen as fallback."
           : cloudPrimary
-          ? "VoiceLoop ready. Venice is the primary model, Qwen is the local fallback."
-          : "VoiceLoop ready. Qwen is the primary local model."
+          ? "VoiceLoop ready. Venice shapes the active context; Qwen is the local fallback."
+          : "VoiceLoop ready. Qwen shapes the active context locally."
       );
     }
 

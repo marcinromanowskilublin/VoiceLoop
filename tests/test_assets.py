@@ -51,7 +51,7 @@ def test_panel_explains_cloud_primary_mode() -> None:
     env_example = (ROOT / "listener" / ".env.example").read_text(encoding="utf-8")
 
     assert "llm_primary" in panel
-    assert "Start conversation" in panel
+    assert "Start session" in panel
     assert "/api/v1/conversation/start" in panel
     assert "Gemini is the primary model" in panel or "geminiPrimary" in panel
     assert "GEMINI_MODEL=gemini-3.6-flash" in env_example

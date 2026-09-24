@@ -1,39 +1,46 @@
 # VoiceLoop
 
-**A local-first Polish voice and context assistant for Windows.**
+**A local-first context workspace for work spread across too many tools.**
 
-VoiceLoop accepts Polish speech or text, assembles bounded context from local
-memory and desktop signals, and asks an LLM for either a conversational reply
-or a typed action plan. The model never executes arbitrary code and receives no
-general shell tool.
+Work already creates enough context: windows, meetings, documents, messages,
+decisions and local history. VoiceLoop turns those scattered signals into one
+bounded, source-aware view of what matters now.
 
-> **Model proposes. Local code decides.**
-> Every effect must match a registered `ActionSpec`, pass argument validation,
-> local risk policy and—when required—human confirmation. Only the executor can
-> report success.
+It is not another chatbot or another inbox. It is a context layer that sits
+beside existing software, reduces noise and keeps the current situation,
+evidence and next action visible.
 
 [![VoiceLoop CI](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-brightgreen.svg)](LICENSE)
 [![Version: 0.3.0](https://img.shields.io/badge/version-0.3.0-6e8fb3.svg)](CHANGELOG.md)
 
-## What You Can See Live
+![VoiceLoop turns scattered signals into a source-aware working view](docs/img/voiceloop-context-workspace.svg)
 
-VoiceLoop runs as a local control panel backed by a FastAPI core. The panel
-shows component health, conversation state, recent command results, answer
-sources, local memories and turn latency without exposing a general shell tool
-to the model.
+## What the user gets
 
-![VoiceLoop local panel showing conversation, health and local controls](docs/img/voiceloop-panel.png)
+The main interface is organized around the work, not the model:
 
-Live capabilities include:
+- **Current thread** — the situation in progress, without replaying every input.
+- **Context stack** — relevant people, decisions, sources and stable facts.
+- **Visible evidence** — retrieved material remains linked to its origin.
+- **Controlled next actions** — proposals pass local policy and confirmation
+  before execution.
 
-- Polish voice and text input with deterministic STOP.
-- Typed action plans that pass local allowlists, schemas, risk policy and
-  confirmation before execution.
-- A single executor queue whose `ActionResult` is the only source of execution
-  success.
-- Optional Notepad read/write, local memory, Screenpipe, Qdrant and cloud model
-  integrations behind explicit settings.
+Voice, text, meetings, active windows and documents can all be inputs. None of
+them defines the product; the value is the context VoiceLoop creates between
+them.
+
+![VoiceLoop light context workspace showing the current thread and context stack](docs/img/voiceloop-panel.png)
+
+## Windows-first, software-agnostic
+
+VoiceLoop is designed first for Windows and works across the software already
+used in a workflow: browsers, communication tools, office apps, local files and
+line-of-business systems. Integrations are explicit adapters, so adopting the
+context layer does not require replacing the underlying software.
+
+VoiceLoop is currently being rolled out with a partner as the context UI for an
+existing operational workflow.
 
 ## Safety Model
 
@@ -44,25 +51,38 @@ typed plan, but local code decides whether anything can happen. Retrieved
 context cannot create an action, lower risk, replace confirmation or claim that
 work succeeded.
 
+> **Model proposes. Local code decides.**
+> Every effect must match a registered `ActionSpec`, pass argument validation,
+> local risk policy and—when required—human confirmation. Only the executor can
+> report success.
+
 ## Quick start
 
 Requirements: Windows and Python 3.11.
 
 ```powershell
-copy .\listener\.env.example .\listener\.env
 .\scripts\start-core.bat
 ```
 
 Open `http://127.0.0.1:8765/`.
 
-Private routes require `X-VoiceLoop-Token` from the loopback-only
-`GET /api/v1/session`. The full optional stack can be started with
-`.\scripts\start-all.ps1`.
+`listener/.env` is optional; defaults are local-first. Copy
+`listener/.env.example` to `listener/.env` only when you need provider keys or
+non-default settings.
 
-Verify the core from `listener/`:
+Private routes require `X-VoiceLoop-Token` from the loopback-only
+`GET /api/v1/session`. The full optional stack (LM Studio, Qdrant, Screenpipe,
+VoiceAttack) can be started with `.\scripts\start-all.ps1`; pass
+`-NoVoiceAttack` on machines without VoiceAttack, otherwise the script stops
+when it is missing.
+
+Verify the core from `listener/` (the same scope as CI):
 
 ```powershell
-.\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests
+.\.venv\Scripts\python.exe -m ruff check voiceloop ..\tests ..\vectorscope `
+  ..\scripts\voice_capture_server.py `
+  ..\scripts\holding-commands\server.py `
+  ..\scripts\calibration-phrases\server.py
 .\.venv\Scripts\python.exe -m pytest -c pyproject.toml -q
 ```
 
@@ -100,7 +120,7 @@ running; local configuration can override the defaults.
 - Explicit document ingest and SQL-memory migration into the timeline, plus
   retention and retrieval-comparison commands.
 - Windows project projection, live-screen context for questions such as
-  “na tym ekranie”, and commitment review rows. Their runtime flags default to
+  “on this screen”, and commitment review rows. Their runtime flags default to
   `false`; review rows do not accept commitments or authorize actions.
 - Screenpipe vector memory, Qdrant and external voice/model providers.
 
@@ -205,8 +225,8 @@ Full contracts:
 
 ### Request received is not commitment accepted
 
-Polish “Wyślij mi dokumenty” is a request that needs user review.
-“Postaram się…” remains a cheap signal. Commitment analysis does not execute
+“Send me the documents” is a request that needs user review.
+“I’ll try…” remains a cheap signal. Commitment analysis does not execute
 actions or silently accept work on the user’s behalf.
 
 Checked in `tests/test_commitment_analysis.py` and invariant `INV-08`.
@@ -222,7 +242,7 @@ Checked in `tests/test_situation_state_v1.py` and
 
 ### Routing V2 would rather abstain
 
-The shadow router splits compound Polish commands and refuses a winner without
+The shadow router splits compound commands and refuses a winner without
 score, margin and coverage. Default production control remains Router V1.
 
 Checked in `tests/test_routing_v2.py`.
@@ -237,7 +257,7 @@ Checked in `tests/test_windows_shell.py` and `tests/test_actions.py`.
 
 ### STOP does not ask the model
 
-“stop” / “przerwij” is deterministic. It cancels pending confirmation, queued
+“stop” / “cancel” is deterministic. It cancels pending confirmation, queued
 work, the active execution task and TTS without waiting for a planner.
 
 Checked in invariant `INV-12`, `tests/test_executor.py` and

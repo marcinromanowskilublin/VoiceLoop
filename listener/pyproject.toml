@@ -1,7 +1,7 @@
 [project]
 name = "voiceloop"
 version = "0.3.0"
-description = "Local-first Windows voice assistant core"
+description = "Local-first Windows context workspace core"
 requires-python = ">=3.11,<3.12"
 
 [tool.pytest.ini_options]

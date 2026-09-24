@@ -39,13 +39,30 @@ These contracts exist in code but do not grant execution authority.
 
 ## Visual reference
 
+- [Context workspace — user view](img/voiceloop-context-workspace.svg)
+- [Live context workspace](img/voiceloop-panel.png)
 - [System architecture](img/voiceloop-system-architecture.svg)
 - [Memory and context architecture](img/voiceloop-memory-architecture.svg)
 - [Safe execution model](img/voiceloop-safe-execution.svg)
-- [Diagnostics panel](img/voiceloop-panel.png)
+
+## Optional integration directories
+
+The core lives in `listener/voiceloop/`. The directories below are tracked
+because the optional stack depends on them, but none of them is required to run
+the core, and none of them can bypass the executor or local policy.
+
+- [`panel/`](../panel/) — the local control panel served by the FastAPI core.
+- [`vectorscope/`](../vectorscope/README.md) — read-only Qdrant inspection lab
+  and threshold measurements; it never writes to memory.
+- [`voiceattack/`](../voiceattack/INSTRUKCJA.md) — VoiceAttack profiles that
+  forward configured commands to the core as the `voiceattack` source.
+- [`uivision/`](../uivision/) — UI.Vision macros used by the confirmed
+  `run_uivision_macro` action.
+- [`n8n/`](../n8n/) — exact-phrase webhook workflow for the optional n8n
+  fallback (`n8n_enabled=false` by default).
 
 ## Historical material
 
 Historical plans, handoffs and point-in-time audits are not part of the current
-architecture contract. They live under `archive/` only when retaining them is
-useful for project archaeology.
+architecture contract. They live under [`archive/`](archive/README.md) only when
+retaining them is useful for project archaeology.

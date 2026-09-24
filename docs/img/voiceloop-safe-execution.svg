@@ -3,27 +3,27 @@
   <desc id="desc">The model can propose a plan, but only local code can validate, ask for confirmation and execute it. Success is reported only by ActionResult.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#8aa0b8"/>
+      <path d="M0 0L10 5L0 10Z" fill="#91a69b"/>
     </marker>
     <style>
-      .title{font:800 34px "Segoe UI",Arial,sans-serif;fill:#f6f8fb}
-      .sub{font:15px "Segoe UI",Arial,sans-serif;fill:#a9b7c8}
-      .eyebrow{font:800 12px "Segoe UI",Arial,sans-serif;letter-spacing:1.4px;fill:#74f0b6}
-      .label{font:700 17px "Segoe UI",Arial,sans-serif;fill:#f3f7fb;text-anchor:middle}
-      .small{font:13px "Segoe UI",Arial,sans-serif;fill:#a9b7c8;text-anchor:middle}
-      .note{font:700 14px "Segoe UI",Arial,sans-serif;fill:#ffd6dd;text-anchor:middle}
-      .line{fill:none;stroke:#8aa0b8;stroke-width:2.8;marker-end:url(#arrow)}
-      .request{fill:#121a27;stroke:#506278;stroke-width:1.8}
-      .model{fill:#1b1730;stroke:#a78bfa;stroke-width:2.2}
-      .local{fill:#10251d;stroke:#52d89a;stroke-width:2.2}
-      .confirm{fill:#261f10;stroke:#f8d36b;stroke-width:2.2}
-      .result{fill:#0f2231;stroke:#7dd3fc;stroke-width:2.2}
+      .title{font:800 34px "Segoe UI",Arial,sans-serif;fill:#17231f}
+      .sub{font:15px "Segoe UI",Arial,sans-serif;fill:#66756e}
+      .eyebrow{font:800 12px "Segoe UI",Arial,sans-serif;letter-spacing:1.4px;fill:#2f6b55}
+      .label{font:700 17px "Segoe UI",Arial,sans-serif;fill:#17231f;text-anchor:middle}
+      .small{font:13px "Segoe UI",Arial,sans-serif;fill:#66756e;text-anchor:middle}
+      .note{font:700 14px "Segoe UI",Arial,sans-serif;fill:#8f3f50;text-anchor:middle}
+      .line{fill:none;stroke:#91a69b;stroke-width:2.8;marker-end:url(#arrow)}
+      .request{fill:#ffffff;stroke:#ced8d2;stroke-width:1.8}
+      .model{fill:#efedff;stroke:#7268c9;stroke-width:2.2}
+      .local{fill:#e7f2ec;stroke:#2f6b55;stroke-width:2.2}
+      .confirm{fill:#fff0e3;stroke:#b36d32;stroke-width:2.2}
+      .result{fill:#eef6f1;stroke:#4d876f;stroke-width:2.2}
     </style>
   </defs>
 
-  <rect width="1200" height="420" rx="24" fill="#070910"/>
-  <circle cx="1040" cy="-40" r="260" fill="#1a365d" opacity=".38"/>
-  <circle cx="120" cy="20" r="240" fill="#14532d" opacity=".22"/>
+  <rect width="1200" height="420" rx="24" fill="#f7f8f3"/>
+  <circle cx="1040" cy="-40" r="260" fill="#efedff" opacity=".85"/>
+  <circle cx="120" cy="20" r="240" fill="#eef6f1" opacity=".95"/>
   <text x="48" y="55" class="eyebrow">LOCAL AUTHORITY BOUNDARY</text>
   <text x="48" y="96" class="title">The model proposes. Local code decides.</text>
   <text x="48" y="123" class="sub">A plan is only a suggestion until local validation, policy and the executor accept it.</text>
@@ -67,6 +67,6 @@
     <text x="56" y="122" class="small">ActionResult</text>
   </g>
 
-  <rect x="282" y="336" width="674" height="42" rx="21" fill="#21131a" stroke="#713c46"/>
+  <rect x="282" y="336" width="674" height="42" rx="21" fill="#fff0f2" stroke="#d9aab4"/>
   <text x="619" y="362" class="note">No direct model path to shell, arbitrary OS control, filesystem, or executor.</text>
 </svg>

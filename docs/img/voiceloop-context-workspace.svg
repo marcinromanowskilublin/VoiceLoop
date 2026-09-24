@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860" role="img" aria-labelledby="title desc">
+  <title id="title">VoiceLoop context workspace from the user's perspective</title>
+  <desc id="desc">A light product diagram showing scattered signals from windows, meetings, documents and messages becoming one source-aware working view with a current thread, decisions, evidence and next actions.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbfcf9"/>
+      <stop offset="1" stop-color="#eef2ec"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eef7f2"/>
+      <stop offset=".72" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f4f8df"/>
+    </linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0V28" fill="none" stroke="#e4e9e5" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#233930" flood-opacity=".11"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#233930" flood-opacity=".08"/>
+    </filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0 0 11 5.5 0 11Z" fill="#91a69b"/>
+    </marker>
+    <style>
+      .eyebrow{font:800 13px "Segoe UI",Arial,sans-serif;letter-spacing:2px;fill:#2f6b55}
+      .title{font:750 48px "Segoe UI",Arial,sans-serif;letter-spacing:-2.2px;fill:#17231f}
+      .sub{font:19px "Segoe UI",Arial,sans-serif;fill:#66756e}
+      .section{font:800 11px "Segoe UI",Arial,sans-serif;letter-spacing:1.7px;fill:#718078}
+      .label{font:700 15px "Segoe UI",Arial,sans-serif;fill:#17231f}
+      .body{font:14px "Segoe UI",Arial,sans-serif;fill:#617068}
+      .small{font:12px "Segoe UI",Arial,sans-serif;fill:#718078}
+      .micro{font:700 10px "Segoe UI",Arial,sans-serif;letter-spacing:.7px;fill:#718078}
+      .white{fill:#fff}
+      .brand{fill:#2f6b55}
+      .line{fill:none;stroke:#91a69b;stroke-width:2;stroke-dasharray:6 7;marker-end:url(#arrow)}
+    </style>
+  </defs>
+
+  <rect width="1440" height="860" rx="38" fill="url(#canvas)"/>
+  <circle cx="1315" cy="42" r="250" fill="#efedff" opacity=".7"/>
+  <circle cx="92" cy="16" r="210" fill="#f1f8d8" opacity=".8"/>
+
+  <g transform="translate(54 44)">
+    <g>
+      <rect width="42" height="42" rx="14" fill="#17231f"/>
+      <circle cx="17" cy="21" r="8.5" fill="none" stroke="#cbe675" stroke-width="2.3"/>
+      <circle cx="25" cy="21" r="8.5" fill="none" stroke="#fff" stroke-width="2.3"/>
+    </g>
+    <text x="56" y="18" class="label">VoiceLoop</text>
+    <text x="56" y="35" class="micro">CONTEXT WORKSPACE</text>
+  </g>
+  <g transform="translate(1080 51)">
+    <rect width="302" height="31" rx="15.5" fill="#fff" stroke="#dce4de"/>
+    <circle cx="18" cy="15.5" r="4.5" fill="#cbe675"/>
+    <text x="31" y="20" class="small">Windows-first | works across existing software</text>
+  </g>
+
+  <text x="54" y="138" class="eyebrow">FROM CONTEXT OVERLOAD TO A WORKING VIEW</text>
+  <text x="54" y="191" class="title">The user sees what matters now.</text>
+  <text x="54" y="224" class="sub">Signals stay connected to their source, but arrive as one bounded view of the situation.</text>
+
+  <g transform="translate(54 278)">
+    <text x="0" y="0" class="section">TOO MUCH CONTEXT</text>
+    <g transform="translate(0 26)" filter="url(#softShadow)">
+      <rect width="250" height="74" rx="18" fill="#fff" stroke="#dce4de"/>
+      <rect x="14" y="14" width="46" height="46" rx="13" fill="#eef6f1"/>
+      <rect x="25" y="25" width="24" height="17" rx="2" fill="none" stroke="#2f6b55" stroke-width="2"/>
+      <path d="M25 30h24" stroke="#2f6b55" stroke-width="2"/>
+      <text x="76" y="32" class="label">Active windows</text>
+      <text x="76" y="53" class="small">The work happening now</text>
+    </g>
+    <g transform="translate(0 114)" filter="url(#softShadow)">
+      <rect width="250" height="74" rx="18" fill="#fff" stroke="#dce4de"/>
+      <rect x="14" y="14" width="46" height="46" rx="13" fill="#efedff"/>
+      <circle cx="37" cy="32" r="8" fill="none" stroke="#7268c9" stroke-width="2"/>
+      <path d="M25 52c2-7 7-10 12-10s10 3 12 10" fill="none" stroke="#7268c9" stroke-width="2"/>
+      <text x="76" y="32" class="label">Meetings &amp; people</text>
+      <text x="76" y="53" class="small">What was said and by whom</text>
+    </g>
+    <g transform="translate(0 202)" filter="url(#softShadow)">
+      <rect width="250" height="74" rx="18" fill="#fff" stroke="#dce4de"/>
+      <rect x="14" y="14" width="46" height="46" rx="13" fill="#fff0e3"/>
+      <path d="M28 24h14l6 6v20H28V24Z" fill="none" stroke="#b36d32" stroke-width="2"/>
+      <path d="M42 24v7h7M33 37h10M33 43h8" stroke="#b36d32" stroke-width="2"/>
+      <text x="76" y="32" class="label">Documents &amp; systems</text>
+      <text x="76" y="53" class="small">Evidence across existing tools</text>
+    </g>
+    <g transform="translate(0 290)" filter="url(#softShadow)">
+      <rect width="250" height="74" rx="18" fill="#fff" stroke="#dce4de"/>
+      <rect x="14" y="14" width="46" height="46" rx="13" fill="#f3f6f3"/>
+      <path d="M25 27h24v17H34l-9 7V27Z" fill="none" stroke="#607069" stroke-width="2"/>
+      <path d="M31 33h12M31 38h9" stroke="#607069" stroke-width="2"/>
+      <text x="76" y="32" class="label">Messages &amp; history</text>
+      <text x="76" y="53" class="small">Useful context mixed with noise</text>
+    </g>
+  </g>
+
+  <path d="M318 490H396" class="line"/>
+
+  <g transform="translate(390 322)" filter="url(#shadow)">
+    <rect width="268" height="330" rx="30" fill="url(#core)" stroke="#b9cec2" stroke-width="1.5"/>
+    <text x="24" y="34" class="section brand">VOICELOOP CONTEXT LAYER</text>
+    <text x="24" y="74" style="font:750 27px 'Segoe UI',Arial,sans-serif;letter-spacing:-1px;fill:#17231f">Bound, link, surface.</text>
+    <text x="24" y="101" class="body">Keep only the context needed</text>
+    <text x="24" y="121" class="body">for the current situation.</text>
+
+    <g transform="translate(24 151)">
+      <path d="M32 20 112 67 195 27M112 67 48 132M112 67 199 133" fill="none" stroke="#9dbbac" stroke-width="1.5" stroke-dasharray="5 6"/>
+      <circle cx="112" cy="67" r="12" fill="#cbe675" stroke="#2f6b55" stroke-width="2.5"/>
+      <g transform="translate(0 0)">
+        <rect width="76" height="33" rx="16.5" fill="#fff" stroke="#c8d8cf"/>
+        <circle cx="15" cy="16.5" r="4" fill="#2f6b55"/>
+        <text x="26" y="21" class="small">focus</text>
+      </g>
+      <g transform="translate(158 7)">
+        <rect width="76" height="33" rx="16.5" fill="#fff" stroke="#c8d8cf"/>
+        <circle cx="15" cy="16.5" r="4" fill="#7268c9"/>
+        <text x="26" y="21" class="small">source</text>
+      </g>
+      <g transform="translate(11 116)">
+        <rect width="87" height="33" rx="16.5" fill="#fff" stroke="#c8d8cf"/>
+        <circle cx="15" cy="16.5" r="4" fill="#b36d32"/>
+        <text x="26" y="21" class="small">decision</text>
+      </g>
+      <g transform="translate(160 116)">
+        <rect width="84" height="33" rx="16.5" fill="#fff" stroke="#c8d8cf"/>
+        <circle cx="15" cy="16.5" r="4" fill="#2f6b55"/>
+        <text x="26" y="21" class="small">next step</text>
+      </g>
+    </g>
+  </g>
+
+  <path d="M672 490H748" class="line"/>
+
+  <g transform="translate(742 278)" filter="url(#shadow)">
+    <rect width="640" height="452" rx="28" fill="#fff" stroke="#d4ded7"/>
+    <rect width="640" height="54" rx="28" fill="#17231f"/>
+    <path d="M0 27c0-15 12-27 27-27h586c15 0 27 12 27 27v27H0V27Z" fill="#17231f"/>
+    <circle cx="24" cy="27" r="4" fill="#cbe675"/>
+    <text x="38" y="32" style="font:700 13px 'Segoe UI',Arial,sans-serif;fill:#fff">VoiceLoop</text>
+    <text x="557" y="32" style="font:700 10px 'Segoe UI',Arial,sans-serif;fill:#c2ccc7">PARTNER UI</text>
+
+    <rect x="22" y="75" width="386" height="353" rx="20" fill="#fafbf9" stroke="#e1e7e2"/>
+    <text x="42" y="101" class="section brand">CURRENT THREAD</text>
+    <text x="42" y="130" style="font:750 23px 'Segoe UI',Arial,sans-serif;letter-spacing:-.7px;fill:#17231f">Partner rollout</text>
+    <rect x="42" y="151" width="346" height="53" rx="14" fill="#eef6f1" stroke="#c6d9ce"/>
+    <text x="57" y="173" class="micro brand">NOW</text>
+    <text x="57" y="191" class="small">Review the latest workflow feedback and open decisions.</text>
+
+    <g transform="translate(42 222)">
+      <line x1="10" y1="7" x2="10" y2="138" stroke="#cbd7d0" stroke-width="2"/>
+      <circle cx="10" cy="11" r="6" fill="#cbe675" stroke="#2f6b55" stroke-width="2"/>
+      <text x="28" y="7" class="micro">DECISION</text>
+      <text x="28" y="29" class="label">Keep source evidence visible</text>
+      <text x="28" y="48" class="small">Linked to meeting | 14:32</text>
+      <circle cx="10" cy="82" r="6" fill="#efedff" stroke="#7268c9" stroke-width="2"/>
+      <text x="28" y="78" class="micro">EVIDENCE</text>
+      <text x="28" y="100" class="label">3 relevant items, 12 excluded</text>
+      <text x="28" y="119" class="small">Documents | current window | local history</text>
+    </g>
+
+    <rect x="428" y="75" width="190" height="353" rx="20" fill="#f7f9f6" stroke="#e1e7e2"/>
+    <text x="448" y="101" class="section">CONTEXT STACK</text>
+    <g transform="translate(448 120)">
+      <rect width="150" height="61" rx="14" fill="#17231f"/>
+      <text x="14" y="22" style="font:800 10px 'Segoe UI',Arial,sans-serif;letter-spacing:1px;fill:#cbe675">CURRENT FOCUS</text>
+      <text x="14" y="44" style="font:700 13px 'Segoe UI',Arial,sans-serif;fill:#fff">Rollout readiness</text>
+    </g>
+    <g transform="translate(448 194)">
+      <rect width="150" height="59" rx="14" fill="#efedff" stroke="#d9d5f6"/>
+      <text x="14" y="21" class="micro">PEOPLE</text>
+      <text x="14" y="42" class="label">Partner team | 4</text>
+    </g>
+    <g transform="translate(448 266)">
+      <rect width="150" height="59" rx="14" fill="#fff0e3" stroke="#f0d5bd"/>
+      <text x="14" y="21" class="micro">OPEN DECISION</text>
+      <text x="14" y="42" class="label">1 needs review</text>
+    </g>
+    <g transform="translate(448 338)">
+      <rect width="150" height="68" rx="14" fill="#eef6f1" stroke="#c6d9ce"/>
+      <text x="14" y="21" class="micro brand">NEXT ACTION</text>
+      <text x="14" y="42" class="label">Confirm scope</text>
+      <text x="14" y="58" class="small">Local approval required</text>
+    </g>
+  </g>
+
+  <g transform="translate(54 774)">
+    <rect width="1328" height="52" rx="18" fill="#fff" stroke="#dce4de"/>
+    <g transform="translate(28 15)">
+      <circle cx="10" cy="11" r="10" fill="#eef6f1"/>
+      <path d="m6 11 3 3 6-7" fill="none" stroke="#2f6b55" stroke-width="2"/>
+      <text x="30" y="16" class="label">Source-aware</text>
+      <text x="141" y="16" class="small">Every item keeps its origin.</text>
+    </g>
+    <g transform="translate(462 15)">
+      <circle cx="10" cy="11" r="10" fill="#f1f8d8"/>
+      <path d="M6 8h8M6 12h6" stroke="#62782b" stroke-width="2"/>
+      <text x="30" y="16" class="label">Bounded</text>
+      <text x="111" y="16" class="small">Noise stays outside the active view.</text>
+    </g>
+    <g transform="translate(882 15)">
+      <circle cx="10" cy="11" r="10" fill="#efedff"/>
+      <path d="M10 5v12M5 11l5 6 5-6" fill="none" stroke="#7268c9" stroke-width="2"/>
+      <text x="30" y="16" class="label">Locally controlled</text>
+      <text x="164" y="16" class="small">Proposals never bypass policy or confirmation.</text>
+    </g>
+  </g>
+</svg>
