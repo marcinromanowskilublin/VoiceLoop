@@ -317,6 +317,7 @@ async def test_retention_dry_run_does_not_delete_rows_or_files(tmp_path) -> None
         managed_audio_root=audio_root,
         now=now,
         dry_run=True,
+        grace_until=now + timedelta(days=7),
     )
 
     assert report["dry_run"] == 1

@@ -233,3 +233,47 @@ async def test_destructive_retention_grace_starts_at_each_opt_in(tmp_path) -> No
     assert first_anchor == enabled_at
     assert restart_anchor == enabled_at
     assert second_anchor == reenabled_at
+
+
+@pytest.mark.asyncio
+async def test_retention_dry_run_counts_sql_and_qdrant_during_grace(tmp_path) -> None:
+    rollout_started_at = datetime.now(UTC)
+    memory = SimpleNamespace(
+        retention_policy_effective_at=rollout_started_at,
+        prune_expired_private_data=AsyncMock(
+            return_value={"commands": 3, "dry_run": 1}
+        ),
+        reconcile_orphaned_meeting_audio=AsyncMock(
+            return_value={
+                "orphan_candidates": 2,
+                "orphan_removed": 0,
+                "orphan_failed": 0,
+            }
+        ),
+    )
+    qdrant = SimpleNamespace(prune_expired=AsyncMock(return_value=4))
+    services = SimpleNamespace(
+        memory=memory,
+        qdrant=qdrant,
+        qdrant_shadow=None,
+        retention=RetentionWorkerState(rollout_started_at=rollout_started_at),
+    )
+    settings = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        private_data_prune_enabled=True,
+        private_data_prune_dry_run=True,
+        private_data_rollout_grace_days=7,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_private_data_retention_worker(
+            services,  # type: ignore[arg-type]
+            settings,
+            sleep=AsyncMock(side_effect=asyncio.CancelledError()),
+        )
+
+    prune_kwargs = memory.prune_expired_private_data.await_args.kwargs
+    assert prune_kwargs["dry_run"] is True
+    assert prune_kwargs["grace_until"] > rollout_started_at
+    qdrant.prune_expired.assert_awaited_once()
+    assert qdrant.prune_expired.await_args.kwargs["dry_run"] is True

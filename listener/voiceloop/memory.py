@@ -2867,7 +2867,7 @@ class MemoryStore:
         if grace_until is not None:
             if grace_until.tzinfo is None or grace_until.utcoffset() is None:
                 raise ValueError("retention grace time must be timezone-aware")
-            if moment < grace_until.astimezone(UTC):
+            if not dry_run and moment < grace_until.astimezone(UTC):
                 return {"grace_active": 1, "dry_run": int(dry_run)}
         cutoff = moment.isoformat()
         audio_root = Path(os.path.abspath(managed_audio_root))
@@ -3094,7 +3094,7 @@ class MemoryStore:
         if grace_until is not None:
             if grace_until.tzinfo is None or grace_until.utcoffset() is None:
                 raise ValueError("reconciliation grace time must be timezone-aware")
-            if moment < grace_until.astimezone(UTC):
+            if not dry_run and moment < grace_until.astimezone(UTC):
                 return {
                     "orphan_candidates": 0,
                     "orphan_removed": 0,

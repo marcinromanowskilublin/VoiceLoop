@@ -192,7 +192,7 @@ async def _run_private_data_retention_worker(
                 grace_until=grace_until,
             )
             vector_report: dict[str, int] = {}
-            if moment >= grace_until:
+            if settings.private_data_prune_dry_run or moment >= grace_until:
                 vector_report["primary"] = await services.qdrant.prune_expired(
                     now=moment,
                     dry_run=settings.private_data_prune_dry_run,
