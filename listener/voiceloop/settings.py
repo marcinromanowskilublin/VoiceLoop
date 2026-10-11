@@ -437,6 +437,7 @@ def _windows_token_security():
     dacl = win32security.ACL()
     dacl.AddAccessAllowedAce(win32security.ACL_REVISION, access, user_sid)
     descriptor = win32security.SECURITY_DESCRIPTOR()
+    descriptor.SetSecurityDescriptorOwner(user_sid, False)
     descriptor.SetSecurityDescriptorDacl(True, dacl, False)
     descriptor.SetSecurityDescriptorControl(
         win32security.SE_DACL_PROTECTED,
