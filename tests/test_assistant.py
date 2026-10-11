@@ -95,6 +95,7 @@ def _assistant(
     qdrant_shadow=None,
     vector_context_limit: int = 0,
     context_cascade_shadow_enabled: bool = False,
+    context_cascade_shadow_qmax: int = 5,
 ) -> AssistantService:
     return AssistantService(
         memory=memory,
@@ -112,6 +113,7 @@ def _assistant(
         vector_context_limit=vector_context_limit,
         routing_v2=routing_v2,
         context_cascade_shadow_enabled=context_cascade_shadow_enabled,
+        context_cascade_shadow_qmax=context_cascade_shadow_qmax,
     )
 
 
@@ -256,6 +258,7 @@ def test_compound_time_statement_runs_content_free_shadow_only(tmp_path) -> None
             qdrant=qdrant,
             vector_context_limit=5,
             context_cascade_shadow_enabled=True,
+            context_cascade_shadow_qmax=6,
         )
         text = "a jeszcze miesiąc temu mówiliśmy, że będzie wspaniale"
         request = CommandRequest(request_id="content-leak-123", text=text)
