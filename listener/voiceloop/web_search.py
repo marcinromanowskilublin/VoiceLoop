@@ -418,8 +418,9 @@ class WebSearchClient:
                 address = ipaddress.ip_address(raw_address)
             except ValueError as exc:
                 raise WebSearchError("Host dokumentacji ma niepoprawny adres.") from exc
-            if address.ipv4_mapped is not None:
-                address = address.ipv4_mapped
+            mapped = getattr(address, "ipv4_mapped", None)
+            if mapped is not None:
+                address = mapped
             if not address.is_global:
                 raise WebSearchError(
                     "Adres dokumentacji wskazuje na niedozwoloną sieć."
@@ -444,8 +445,9 @@ class WebSearchClient:
             address = ipaddress.ip_address(str(peer[0]))
         except ValueError as exc:
             raise WebSearchError("Połączenie użyło niepoprawnego adresu.") from exc
-        if address.ipv4_mapped is not None:
-            address = address.ipv4_mapped
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None:
+            address = mapped
         if not address.is_global or str(address) not in allowed_addresses:
             raise WebSearchError("Adres połączenia zmienił się po rozwiązaniu DNS.")
 

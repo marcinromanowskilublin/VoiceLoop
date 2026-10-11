@@ -10,7 +10,10 @@ from voiceloop.app import app
 async def test_health_and_events_require_local_token() -> None:
     missing = object()
     previous_services = getattr(app.state, "services", missing)
-    app.state.services = SimpleNamespace(token="expected-local-token")
+    app.state.services = SimpleNamespace(
+        token="expected-local-token",
+        settings=SimpleNamespace(llm_primary="local"),
+    )
     transport = httpx.ASGITransport(app=app)
 
     try:
@@ -70,7 +73,10 @@ async def test_session_rejects_cross_origin_even_for_local_host() -> None:
 async def test_session_accepts_same_local_origin() -> None:
     missing = object()
     previous_services = getattr(app.state, "services", missing)
-    app.state.services = SimpleNamespace(token="expected-local-token")
+    app.state.services = SimpleNamespace(
+        token="expected-local-token",
+        settings=SimpleNamespace(llm_primary="local"),
+    )
     transport = httpx.ASGITransport(app=app)
 
     try:
