@@ -6,6 +6,7 @@ import logging
 import secrets
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -79,6 +80,14 @@ LISTEN_ONCE_MODES = {
 
 
 @dataclass
+class RetentionWorkerState:
+    running: bool = False
+    consecutive_failures: int = 0
+    last_success_at: str | None = None
+    last_error_type: str | None = None
+
+
+@dataclass
 class Services:
     settings: Settings
     token: str
@@ -112,6 +121,84 @@ class Services:
     gemini_planner: OpenAICompatiblePlanner | None
     n8n: N8nClient
     situation: SituationStore
+    retention: RetentionWorkerState
+
+
+async def _run_private_data_retention_worker(
+    services: Services,
+    settings: Settings,
+    *,
+    sleep=asyncio.sleep,
+) -> None:
+    interval = max(300, settings.private_data_prune_interval_seconds)
+    policy_effective_at = services.memory.retention_policy_effective_at
+    grace_until = policy_effective_at + timedelta(
+        days=max(0, settings.private_data_rollout_grace_days)
+    )
+    services.retention.running = True
+    while True:
+        try:
+            moment = datetime.now(UTC)
+            report = await services.memory.prune_expired_private_data(
+                managed_audio_root=settings.data_dir / "meetings",
+                now=moment,
+                dry_run=settings.private_data_prune_dry_run,
+                grace_until=grace_until,
+            )
+            orphan_report = await services.memory.reconcile_orphaned_meeting_audio(
+                managed_audio_root=settings.data_dir / "meetings",
+                grace_seconds=settings.meeting_audio_orphan_grace_seconds,
+                now=moment,
+                dry_run=settings.private_data_prune_dry_run,
+                eligible_after=policy_effective_at,
+                grace_until=grace_until,
+            )
+            vector_report: dict[str, int] = {}
+            if moment >= grace_until:
+                vector_report["primary"] = await services.qdrant.prune_expired(
+                    now=moment,
+                    dry_run=settings.private_data_prune_dry_run,
+                )
+                if services.qdrant_shadow is not None:
+                    vector_report["shadow"] = (
+                        await services.qdrant_shadow.prune_expired(
+                            now=moment,
+                            dry_run=settings.private_data_prune_dry_run,
+                        )
+                    )
+            services.retention.consecutive_failures = 0
+            services.retention.last_error_type = None
+            services.retention.last_success_at = moment.isoformat()
+            if any(report.values()):
+                LOGGER.info("Expired private data pruned (counts only): %s", report)
+            if any(orphan_report.values()):
+                LOGGER.info(
+                    "Meeting audio reconciliation (counts only): %s",
+                    orphan_report,
+                )
+            if any(vector_report.values()):
+                LOGGER.info(
+                    "Expired vector data pruned (counts only): %s",
+                    vector_report,
+                )
+            await sleep(interval)
+        except asyncio.CancelledError:
+            services.retention.running = False
+            raise
+        except Exception as exc:
+            services.retention.consecutive_failures += 1
+            services.retention.last_error_type = type(exc).__name__
+            LOGGER.warning(
+                "Private data retention iteration failed "
+                "(error_type=%s failures=%d)",
+                type(exc).__name__,
+                services.retention.consecutive_failures,
+            )
+            backoff = min(
+                interval,
+                max(5, 2 ** min(services.retention.consecutive_failures, 8)),
+            )
+            await sleep(backoff)
 
 
 def _build_gemini_planner(settings: Settings) -> OpenAICompatiblePlanner | None:
@@ -469,6 +556,7 @@ def build_services(settings: Settings) -> Services:
         gemini_planner=gemini_planner,
         n8n=n8n,
         situation=SituationStore(),
+        retention=RetentionWorkerState(),
     )
 
 
@@ -489,15 +577,20 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(
                 "Retroactive retention apply is not available; use dry-run preview."
             )
+        preview_started_raw = await services.memory.get_state(
+            "retention.migration_preview_started_at"
+        )
+        if preview_started_raw is None:
+            preview_started_raw = datetime.now(UTC).isoformat()
+            await services.memory.set_state(
+                "retention.migration_preview_started_at",
+                preview_started_raw,
+            )
         preview = await services.memory.preview_legacy_retention_migration(
             grace_days=settings.retention_migration_grace_days,
+            preview_started_at=datetime.fromisoformat(preview_started_raw),
         )
         LOGGER.info("Legacy retention preview (counts only): %s", preview)
-    initial_prune = await services.memory.prune_expired_private_data(
-        managed_audio_root=settings.data_dir / "meetings",
-    )
-    if any(initial_prune.values()):
-        LOGGER.info("Expired private data pruned (counts only): %s", initial_prune)
     try:
         indexed_manual_memories = await services.manual_memory.sync()
         if indexed_manual_memories:
@@ -522,21 +615,6 @@ async def lifespan(app: FastAPI):
     listen_watch_task: asyncio.Task[None] | None = None
     conversation_start_task: asyncio.Task[dict[str, str]] | None = None
     retention_task: asyncio.Task[None] | None = None
-
-    async def _prune_expired_private_data() -> None:
-        interval = max(300, settings.private_data_prune_interval_seconds)
-        try:
-            while True:
-                await asyncio.sleep(interval)
-                report = await services.memory.prune_expired_private_data(
-                    managed_audio_root=settings.data_dir / "meetings",
-                )
-                if any(report.values()):
-                    LOGGER.info("Expired private data pruned (counts only): %s", report)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            LOGGER.exception("Private data retention worker stopped")
 
     async def _watch_conversation_listen_timeouts() -> None:
         try:
@@ -563,10 +641,11 @@ async def lifespan(app: FastAPI):
         _watch_conversation_listen_timeouts(),
         name="conversation-listen-timeout-watch",
     )
-    retention_task = asyncio.create_task(
-        _prune_expired_private_data(),
-        name="private-data-retention",
-    )
+    if settings.private_data_prune_enabled:
+        retention_task = asyncio.create_task(
+            _run_private_data_retention_worker(services, settings),
+            name="private-data-retention",
+        )
     if settings.auto_start_conversation:
         try:
             conversation_start_task = asyncio.create_task(
@@ -618,7 +697,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-_LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testserver"})
+_LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def _request_authority(value: str, *, scheme: str) -> tuple[str, str, int] | None:
@@ -788,6 +867,27 @@ async def health(
     llm_primary = services.settings.llm_primary.strip().lower()
     components = {
         "core": HealthComponent(status="ok", detail="local API"),
+        "private_data_retention": HealthComponent(
+            status=(
+                "stopped"
+                if not services.settings.private_data_prune_enabled
+                else (
+                    "error"
+                    if services.retention.consecutive_failures
+                    else "ok"
+                )
+            ),
+            detail=(
+                "disabled"
+                if not services.settings.private_data_prune_enabled
+                else (
+                    "failures="
+                    f"{services.retention.consecutive_failures}; "
+                    f"last_error={services.retention.last_error_type or 'none'}; "
+                    f"last_success={services.retention.last_success_at or 'pending'}"
+                )
+            ),
+        ),
         "lm_studio": HealthComponent(
             status="ok" if lm_ok else "error",
             detail=lm_detail,

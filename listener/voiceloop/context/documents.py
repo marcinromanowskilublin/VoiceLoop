@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -94,12 +95,10 @@ class DocumentTimelineIngestor:
         raw_path = str(event.metadata.get("document_path") or "")
         if not raw_path:
             raise DocumentAccessError("Zdarzenie nie ma odnośnika do dokumentu.")
-        path = self._safe_resolved_path(Path(raw_path))
-        if path is None or not self._allowed(path):
+        result = await asyncio.to_thread(self._secure_read, Path(raw_path))
+        if result is None:
             raise DocumentAccessError("Odnośnik wskazuje poza dozwolone korzenie.")
-        text = await asyncio.to_thread(self._read_text, path)
-        if text is None:
-            raise DocumentAccessError("Nie można odczytać dokumentu z dysku.")
+        _, _, text = result
         redacted, _ = _redact_document(text)
         return redacted
 
@@ -128,25 +127,100 @@ class DocumentTimelineIngestor:
             return False
         return path.suffix.lower() in self.allowed_suffixes
 
-    def _safe_resolved_path(self, path: Path) -> Path | None:
+    def _secure_read(
+        self,
+        path: Path,
+    ) -> tuple[Path, os.stat_result, str] | None:
+        candidate = Path(os.path.abspath(path))
+        root = next(
+            (root for root in self.roots if candidate.is_relative_to(root)),
+            None,
+        )
+        if root is None or not self._allowed(candidate):
+            return None
+        if os.name == "nt":
+            return self._secure_read_windows(candidate, root)
+        relative = candidate.relative_to(root)
+        if not relative.parts:
+            return None
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        descriptors: list[int] = []
         try:
-            resolved = path.resolve(strict=True)
+            current = os.open(root, directory_flags | nofollow)
+            descriptors.append(current)
+            for component in relative.parts[:-1]:
+                current = os.open(
+                    component,
+                    directory_flags | nofollow,
+                    dir_fd=current,
+                )
+                descriptors.append(current)
+            file_descriptor = os.open(
+                relative.parts[-1],
+                os.O_RDONLY | nofollow,
+                dir_fd=current,
+            )
+            descriptors.append(file_descriptor)
+            file_stat = os.fstat(file_descriptor)
+            if not stat.S_ISREG(file_stat.st_mode):
+                return None
+            chunks: list[bytes] = []
+            size = 0
+            while True:
+                chunk = os.read(file_descriptor, min(65_536, self.max_bytes + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+                if size > self.max_bytes:
+                    return None
+            raw = b"".join(chunks)
         except OSError:
             return None
-        if not resolved.is_file():
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+        if b"\x00" in raw[:4096]:
             return None
-        if not any(resolved.is_relative_to(root) for root in self.roots):
-            return None
-        return resolved
+        text = raw.decode("utf-8", errors="replace").strip()
+        return (candidate, file_stat, text) if text else None
 
-    def _read_text(self, path: Path) -> str | None:
+    def _secure_read_windows(
+        self,
+        path: Path,
+        root: Path,
+    ) -> tuple[Path, os.stat_result, str] | None:
         try:
-            raw = path.read_bytes()
+            before = os.lstat(path)
+            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            attributes = int(getattr(before, "st_file_attributes", 0))
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_ISLNK(before.st_mode)
+                or attributes & reparse_flag
+            ):
+                return None
+            descriptor = os.open(path, os.O_RDONLY)
         except OSError:
             return None
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
+                return None
+            final_path = Path(os.path.realpath(path))
+            if not final_path.is_relative_to(root):
+                return None
+            raw = os.read(descriptor, self.max_bytes + 1)
+        finally:
+            os.close(descriptor)
         if len(raw) > self.max_bytes or b"\x00" in raw[:4096]:
             return None
-        return raw.decode("utf-8", errors="replace").strip() or None
+        text = raw.decode("utf-8", errors="replace").strip()
+        return (final_path, opened, text) if text else None
 
     def _event_for_path(
         self,
@@ -155,18 +229,12 @@ class DocumentTimelineIngestor:
     ) -> tuple[ContextEventV1 | None, str]:
         """Return the event, or `None` with the reason the document was skipped."""
 
-        resolved = self._safe_resolved_path(path)
-        if resolved is None:
+        result = self._secure_read(path)
+        if result is None:
             return None, "unreadable"
+        resolved, stat_result, text = result
         if not self._allowed(resolved):
             return None, "secret"
-        try:
-            stat = resolved.stat()
-        except OSError:
-            return None, "unreadable"
-        text = self._read_text(resolved)
-        if text is None:
-            return None, "unreadable"
         redacted, flags = _redact_document(text)
         if "secret" in flags or "pesel" in flags:
             # Redaction already removed the match, but a file that carries one
@@ -176,7 +244,7 @@ class DocumentTimelineIngestor:
         source_id = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
         # The timeline axis is when the document changed, not when we scanned it.
         # Scan time would move on every run and rewrite the event content hash.
-        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
+        modified_at = datetime.fromtimestamp(stat_result.st_mtime, tz=UTC)
         event = ContextEventV1.from_observation(
             source="local_document",
             source_id=source_id,
@@ -191,7 +259,7 @@ class DocumentTimelineIngestor:
                 # which serializes source, time, trust, title and content only.
                 "document_path": str(resolved),
                 "path_sha256": source_id,
-                "byte_size": stat.st_size,
+                "byte_size": stat_result.st_size,
                 "digest_truncated": truncated,
                 "digest_method": "deterministic_document_v1",
                 "redaction_flags": flags,

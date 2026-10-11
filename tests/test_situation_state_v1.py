@@ -171,7 +171,7 @@ async def test_situation_get_is_token_protected_and_read_only() -> None:
     try:
         async with httpx.AsyncClient(
             transport=transport,
-            base_url="http://testserver",
+            base_url="http://localhost",
         ) as client:
             denied = await client.get("/api/v1/situation")
             assert denied.status_code == 401

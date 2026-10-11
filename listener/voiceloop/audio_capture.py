@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import wave
 from collections.abc import Awaitable, Callable
@@ -13,6 +14,7 @@ from uuid import uuid4
 import numpy as np
 import soundcard as sc
 
+from .memory import _safe_unlink_managed_file
 from .settings import Settings
 
 LOGGER = logging.getLogger("voiceloop.audio_capture")
@@ -182,16 +184,20 @@ class MeetingChannelCapture:
             self.input_sample_rate,
             1,
         )
-        await self.on_chunk(
-            CapturedAudioChunk(
-                chunk_id=f"direct-input:{name}",
-                channel="input",
-                device_name=self.input_device_name,
-                file_path=path,
-                started_at=started_at,
-                ended_at=ended_at,
+        try:
+            await self.on_chunk(
+                CapturedAudioChunk(
+                    chunk_id=f"direct-input:{name}",
+                    channel="input",
+                    device_name=self.input_device_name,
+                    file_path=path,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                )
             )
-        )
+        except BaseException:
+            await asyncio.to_thread(self._discard_unpersisted_chunk, path)
+            raise
 
     async def _run_output_recorder(self) -> None:
         loop = self._loop
@@ -293,9 +299,29 @@ class MeetingChannelCapture:
             try:
                 await self.on_chunk(chunk)
             except asyncio.CancelledError:
+                await asyncio.to_thread(
+                    self._discard_unpersisted_chunk,
+                    chunk.file_path,
+                )
                 raise
             except Exception:
+                await asyncio.to_thread(
+                    self._discard_unpersisted_chunk,
+                    chunk.file_path,
+                )
                 LOGGER.exception("Could not persist captured output chunk")
+
+    def _discard_unpersisted_chunk(self, path: Path) -> None:
+        audio_dir = self._audio_dir
+        if audio_dir is None:
+            return
+        candidate = Path(os.path.abspath(path))
+        root = Path(os.path.abspath(audio_dir))
+        if not candidate.is_relative_to(root):
+            return
+        outcome = _safe_unlink_managed_file(candidate, root=root)
+        if outcome not in {"removed", "missing"}:
+            LOGGER.warning("Could not remove unpersisted audio chunk")
 
 
 def _write_wave_bytes(

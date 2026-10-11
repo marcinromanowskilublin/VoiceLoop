@@ -198,3 +198,41 @@ async def test_output_audio_is_archived_and_split_by_deepgram_speaker(tmp_path) 
     assert (tmp_path / "data" / "meetings" / session.session_id / "audio").is_dir()
     assert transcriber.transcribe_envelope.await_count == 1
     await recorder.close()
+
+
+async def test_failed_database_write_removes_new_archive_copy(tmp_path) -> None:
+    recorder, memory, _, _, _ = await _recorder(tmp_path, archive_audio=True)
+    screenpipe_root = tmp_path / "screenpipe" / "data"
+    screenpipe_root.mkdir(parents=True)
+    source = screenpipe_root / "speaker-output.wav"
+    source.write_bytes(b"audio")
+    recorder.screenpipe_data_root = screenpipe_root.resolve()
+    await recorder.start()
+    await _cancel_poll(recorder)
+    session = recorder._active
+    assert session is not None
+    memory.save_meeting_audio_file = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("database unavailable")
+    )
+    now = datetime.now(UTC)
+    chunk = ScreenpipeAudioChunk(
+        chunk_id="output-failure",
+        file_path=source,
+        device_name="Głośniki",
+        device_type="Output",
+        start_time=now.isoformat(),
+        end_time=now.isoformat(),
+        text="",
+    )
+
+    try:
+        await recorder._process_chunk(session, chunk)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("database failure should be propagated")
+
+    archive_dir = tmp_path / "data" / "meetings" / session.session_id / "audio"
+    assert list(archive_dir.iterdir()) == []
+    assert source.exists()
+    await recorder.close()

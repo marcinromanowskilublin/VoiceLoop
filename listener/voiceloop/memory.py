@@ -6,10 +6,11 @@ import logging
 import os
 import re
 import sqlite3
+import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .context.entities import (
     ContextEntityCandidateV1,
@@ -69,6 +70,7 @@ class ScreenpipeTranscript:
     text: str
     source: str
     created_at: datetime
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,7 @@ class MeetingSession:
     audio_dir: str
     created_at: datetime
     updated_at: datetime
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,7 @@ class MeetingTranscriptSegment:
     emotions: tuple[dict[str, Any], ...]
     source: str
     created_at: datetime
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,7 @@ class MeetingAudioFile:
     source_path: str
     archived_path: str
     created_at: datetime
+    expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,7 @@ class MemoryStore:
             1,
             min(int(meeting_audio_retention_days), 3650),
         )
+        self._retention_policy_effective_at: datetime | None = None
         self._context_fts_enabled = False
 
     @staticmethod
@@ -155,6 +161,19 @@ class MemoryStore:
         if moment.tzinfo is None or moment.utcoffset() is None:
             moment = moment.replace(tzinfo=UTC)
         return (moment.astimezone(UTC) + timedelta(days=days)).isoformat()
+
+    @property
+    def retention_policy_effective_at(self) -> datetime:
+        if self._retention_policy_effective_at is None:
+            raise RuntimeError("MemoryStore retention policy is not initialized.")
+        return self._retention_policy_effective_at
+
+    def _server_retention_times(self, *, days: int) -> tuple[str, str]:
+        accepted_at = datetime.now(UTC)
+        return (
+            accepted_at.isoformat(),
+            self._expires_at(accepted_at, days=days),
+        )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=10)
@@ -183,6 +202,7 @@ class MemoryStore:
                         error TEXT,
                         plan_json TEXT,
                         results_json TEXT NOT NULL DEFAULT '[]',
+                        client_created_at TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
                         expires_at TEXT
@@ -285,7 +305,8 @@ class MemoryStore:
                         title TEXT NOT NULL DEFAULT '',
                         audio_dir TEXT NOT NULL,
                         created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
+                        updated_at TEXT NOT NULL,
+                        expires_at TEXT
                     );
 
                     CREATE TABLE IF NOT EXISTS meeting_transcript_segments (
@@ -543,6 +564,7 @@ class MemoryStore:
                     "command_transcripts",
                     "conversation",
                     "screenpipe_transcripts",
+                    "meeting_sessions",
                     "meeting_transcript_segments",
                     "meeting_audio_files",
                 ):
@@ -556,6 +578,16 @@ class MemoryStore:
                         connection.execute(
                             f"ALTER TABLE {table} ADD COLUMN expires_at TEXT"
                         )
+                command_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(commands)"
+                    ).fetchall()
+                }
+                if "client_created_at" not in command_columns:
+                    connection.execute(
+                        "ALTER TABLE commands ADD COLUMN client_created_at TEXT"
+                    )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_conversation_session
@@ -574,8 +606,29 @@ class MemoryStore:
                         ON meeting_transcript_segments(expires_at);
                     CREATE INDEX IF NOT EXISTS idx_meeting_audio_expires
                         ON meeting_audio_files(expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_meeting_sessions_expires
+                        ON meeting_sessions(expires_at);
                     """
                 )
+                policy_effective_at = _now_iso()
+                connection.execute(
+                    """
+                    INSERT INTO app_state(key, value, updated_at)
+                    VALUES ('retention.policy_effective_at', ?, ?)
+                    ON CONFLICT(key) DO NOTHING
+                    """,
+                    (policy_effective_at, policy_effective_at),
+                )
+                policy_row = connection.execute(
+                    """
+                    SELECT value FROM app_state
+                    WHERE key = 'retention.policy_effective_at'
+                    """
+                ).fetchone()
+                assert policy_row is not None
+                self._retention_policy_effective_at = datetime.fromisoformat(
+                    policy_row["value"]
+                ).astimezone(UTC)
 
         await asyncio.to_thread(_initialize)
 
@@ -617,7 +670,17 @@ class MemoryStore:
                         content_hash = excluded.content_hash,
                         metadata_json = excluded.metadata_json,
                         sensitivity = excluded.sensitivity,
-                        expires_at = excluded.expires_at,
+                        expires_at = CASE
+                            WHEN context_events.expires_at IS NULL
+                                 AND excluded.content_hash = context_events.content_hash
+                                THEN NULL
+                            WHEN excluded.expires_at IS NULL THEN context_events.expires_at
+                            WHEN context_events.expires_at IS NULL
+                                THEN excluded.expires_at
+                            WHEN excluded.expires_at < context_events.expires_at
+                                THEN excluded.expires_at
+                            ELSE context_events.expires_at
+                        END,
                         deleted_at = excluded.deleted_at,
                         updated_at = excluded.updated_at
                     """,
@@ -818,7 +881,19 @@ class MemoryStore:
                         metadata_json = excluded.metadata_json,
                         content_hash = excluded.content_hash,
                         sensitivity = excluded.sensitivity,
-                        expires_at = excluded.expires_at,
+                        expires_at = CASE
+                            WHEN context_episodes.expires_at IS NULL
+                                 AND excluded.content_hash = context_episodes.content_hash
+                                 AND excluded.source_event_ids_json =
+                                     context_episodes.source_event_ids_json
+                                THEN NULL
+                            WHEN excluded.expires_at IS NULL THEN context_episodes.expires_at
+                            WHEN context_episodes.expires_at IS NULL
+                                THEN excluded.expires_at
+                            WHEN excluded.expires_at < context_episodes.expires_at
+                                THEN excluded.expires_at
+                            ELSE context_episodes.expires_at
+                        END,
                         deleted_at = excluded.deleted_at,
                         updated_at = excluded.updated_at
                     """,
@@ -1471,11 +1546,10 @@ class MemoryStore:
         )
 
     async def create_command(self, request: CommandRequest) -> CommandView:
-        created = request.created_at.isoformat()
-        expires_at = self._expires_at(
-            request.created_at,
+        created, expires_at = self._server_retention_times(
             days=self.command_transcript_retention_days,
         )
+        client_created_at = request.created_at.astimezone(UTC).isoformat()
         input_text = (request.text or request.command_id or "").strip()
 
         def _create() -> None:
@@ -1483,15 +1557,16 @@ class MemoryStore:
                 connection.execute(
                     """
                     INSERT INTO commands (
-                        request_id, source, input_text, status, created_at, updated_at,
-                        expires_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        request_id, source, input_text, status, client_created_at,
+                        created_at, updated_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         request.request_id,
                         request.source.value,
                         input_text,
                         CommandStatus.RECEIVED.value,
+                        client_created_at,
                         created,
                         created,
                         expires_at,
@@ -2156,7 +2231,9 @@ class MemoryStore:
         audio_dir: Path,
         title: str = "",
     ) -> MeetingSession:
-        now = _now_iso()
+        now, expires_at = self._server_retention_times(
+            days=self.command_transcript_retention_days,
+        )
 
         def _create() -> sqlite3.Row:
             with self._connect() as connection:
@@ -2164,8 +2241,8 @@ class MemoryStore:
                     """
                     INSERT INTO meeting_sessions(
                         session_id, status, started_at, ended_at, title,
-                        audio_dir, created_at, updated_at
-                    ) VALUES (?, 'active', ?, NULL, ?, ?, ?, ?)
+                        audio_dir, created_at, updated_at, expires_at
+                    ) VALUES (?, 'active', ?, NULL, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -2174,6 +2251,7 @@ class MemoryStore:
                         str(audio_dir),
                         now,
                         now,
+                        expires_at,
                     ),
                 )
                 row = connection.execute(
@@ -2210,8 +2288,12 @@ class MemoryStore:
                     ),
                 )
                 return connection.execute(
-                    "SELECT * FROM meeting_sessions WHERE session_id = ?",
-                    (session_id,),
+                    """
+                    SELECT * FROM meeting_sessions
+                    WHERE session_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
+                    """,
+                    (session_id, _now_iso()),
                 ).fetchone()
 
         row = await asyncio.to_thread(_update)
@@ -2221,8 +2303,12 @@ class MemoryStore:
         def _get() -> sqlite3.Row | None:
             with self._connect() as connection:
                 return connection.execute(
-                    "SELECT * FROM meeting_sessions WHERE session_id = ?",
-                    (session_id,),
+                    """
+                    SELECT * FROM meeting_sessions
+                    WHERE session_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
+                    """,
+                    (session_id, _now_iso()),
                 ).fetchone()
 
         row = await asyncio.to_thread(_get)
@@ -2235,9 +2321,11 @@ class MemoryStore:
                     """
                     SELECT * FROM meeting_sessions
                     WHERE status IN ('active', 'finalizing')
+                      AND (expires_at IS NULL OR expires_at > ?)
                     ORDER BY started_at DESC
                     LIMIT 1
-                    """
+                    """,
+                    (_now_iso(),),
                 ).fetchone()
 
         row = await asyncio.to_thread(_get)
@@ -2251,10 +2339,11 @@ class MemoryStore:
                 return connection.execute(
                     """
                     SELECT * FROM meeting_sessions
+                    WHERE expires_at IS NULL OR expires_at > ?
                     ORDER BY started_at DESC
                     LIMIT ?
                     """,
-                    (safe_limit,),
+                    (_now_iso(), safe_limit),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -2388,6 +2477,11 @@ class MemoryStore:
                 emotions=self._emotions_from_row(row),
                 source=row["source"],
                 created_at=datetime.fromisoformat(row["created_at"]),
+                expires_at=(
+                    datetime.fromisoformat(row["expires_at"])
+                    if row["expires_at"]
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -2515,6 +2609,11 @@ class MemoryStore:
                 source_path=row["source_path"],
                 archived_path=row["archived_path"],
                 created_at=datetime.fromisoformat(row["created_at"]),
+                expires_at=(
+                    datetime.fromisoformat(row["expires_at"])
+                    if row["expires_at"]
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -2643,6 +2742,11 @@ class MemoryStore:
                 text=row["text"],
                 source=row["source"],
                 created_at=datetime.fromisoformat(row["created_at"]),
+                expires_at=(
+                    datetime.fromisoformat(row["expires_at"])
+                    if row["expires_at"]
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -2671,11 +2775,22 @@ class MemoryStore:
         *,
         managed_audio_root: Path,
         now: datetime | None = None,
+        dry_run: bool = False,
+        grace_until: datetime | None = None,
     ) -> dict[str, int]:
         """Delete only new records with explicit TTLs and managed audio files."""
 
-        cutoff = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
-        audio_root = managed_audio_root.resolve()
+        moment = now or datetime.now(UTC)
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            raise ValueError("retention time must be timezone-aware")
+        moment = moment.astimezone(UTC)
+        if grace_until is not None:
+            if grace_until.tzinfo is None or grace_until.utcoffset() is None:
+                raise ValueError("retention grace time must be timezone-aware")
+            if moment < grace_until.astimezone(UTC):
+                return {"grace_active": 1, "dry_run": int(dry_run)}
+        cutoff = moment.isoformat()
+        audio_root = Path(os.path.abspath(managed_audio_root))
 
         def _prune() -> dict[str, int]:
             removed_audio_files = 0
@@ -2688,25 +2803,109 @@ class MemoryStore:
                     """,
                     (cutoff,),
                 ).fetchall()
-                removed_audio_rows = 0
-                for row in audio_rows:
-                    delete_row = True
-                    try:
-                        path = Path(row["archived_path"]).resolve(strict=True)
-                        if path.is_file() and path.is_relative_to(audio_root):
-                            path.unlink()
-                            removed_audio_files += 1
-                    except FileNotFoundError:
-                        pass
-                    except OSError:
-                        failed_audio_files += 1
-                        delete_row = False
-                    if delete_row:
-                        removed_audio_rows += connection.execute(
-                            "DELETE FROM meeting_audio_files WHERE id = ?",
-                            (row["id"],),
-                        ).rowcount
+                count_queries = {
+                    "meeting_audio": (
+                        "SELECT COUNT(*) FROM meeting_audio_files "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "meeting_transcripts": (
+                        "SELECT COUNT(*) FROM meeting_transcript_segments "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "screenpipe_transcripts": (
+                        "SELECT COUNT(*) FROM screenpipe_transcripts "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "conversation": (
+                        "SELECT COUNT(*) FROM conversation "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "cascade_shadow_telemetry": (
+                        "SELECT COUNT(*) FROM context_cascade_shadow_telemetry "
+                        "WHERE expires_at <= ?"
+                    ),
+                    "command_events": (
+                        "SELECT COUNT(*) FROM command_events "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "command_transcripts": (
+                        "SELECT COUNT(*) FROM command_transcripts "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "commands": (
+                        "SELECT COUNT(*) FROM commands "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "meeting_sessions": (
+                        "SELECT COUNT(*) FROM meeting_sessions "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "context_events": (
+                        "SELECT COUNT(*) FROM context_events "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                    "context_episodes": (
+                        "SELECT COUNT(*) FROM context_episodes "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
+                }
+                counts = {
+                    name: int(connection.execute(sql, (cutoff,)).fetchone()[0])
+                    for name, sql in count_queries.items()
+                }
+            if dry_run:
+                counts["audio_files_removed"] = 0
+                counts["audio_files_failed"] = 0
+                counts["dry_run"] = 1
+                return counts
 
+            removable_audio_ids: list[int] = []
+            for row in audio_rows:
+                path = Path(row["archived_path"])
+                outcome = _safe_unlink_managed_file(path, root=audio_root)
+                if outcome == "removed":
+                    removed_audio_files += 1
+                if outcome in {"removed", "missing", "external"}:
+                    removable_audio_ids.append(int(row["id"]))
+                else:
+                    failed_audio_files += 1
+
+            with self._connect() as connection:
+                removed_audio_rows = 0
+                if removable_audio_ids:
+                    removed_audio_rows = connection.executemany(
+                        "DELETE FROM meeting_audio_files WHERE id = ?",
+                        [(row_id,) for row_id in removable_audio_ids],
+                    ).rowcount
+                expired_event_ids = [
+                    row["event_id"]
+                    for row in connection.execute(
+                        """
+                        SELECT event_id FROM context_events
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).fetchall()
+                ]
+                expired_episode_ids = [
+                    row["episode_id"]
+                    for row in connection.execute(
+                        """
+                        SELECT episode_id FROM context_episodes
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).fetchall()
+                ]
+                if self._context_fts_enabled:
+                    connection.executemany(
+                        "DELETE FROM context_events_fts WHERE event_id = ?",
+                        [(event_id,) for event_id in expired_event_ids],
+                    )
+                    connection.executemany(
+                        "DELETE FROM context_episodes_fts WHERE episode_id = ?",
+                        [(episode_id,) for episode_id in expired_episode_ids],
+                    )
                 counts = {
                     "meeting_audio": removed_audio_rows,
                     "meeting_transcripts": connection.execute(
@@ -2758,35 +2957,160 @@ class MemoryStore:
                         """,
                         (cutoff,),
                     ).rowcount,
+                    "meeting_sessions": connection.execute(
+                        """
+                        DELETE FROM meeting_sessions
+                        WHERE expires_at IS NOT NULL
+                          AND expires_at <= ?
+                          AND NOT EXISTS (
+                              SELECT 1 FROM meeting_transcript_segments segment
+                              WHERE segment.session_id = meeting_sessions.session_id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1 FROM meeting_audio_files audio
+                              WHERE audio.session_id = meeting_sessions.session_id
+                          )
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "context_events": connection.execute(
+                        """
+                        DELETE FROM context_events
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "context_episodes": connection.execute(
+                        """
+                        DELETE FROM context_episodes
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
                 }
             counts["audio_files_removed"] = removed_audio_files
             counts["audio_files_failed"] = failed_audio_files
+            counts["dry_run"] = 0
             return counts
 
         return await asyncio.to_thread(_prune)
+
+    async def reconcile_orphaned_meeting_audio(
+        self,
+        *,
+        managed_audio_root: Path,
+        grace_seconds: int = 300,
+        now: datetime | None = None,
+        dry_run: bool = False,
+        eligible_after: datetime | None = None,
+        grace_until: datetime | None = None,
+    ) -> dict[str, int]:
+        """Remove old managed audio files that never received a database row."""
+
+        moment = now or datetime.now(UTC)
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            raise ValueError("reconciliation time must be timezone-aware")
+        moment = moment.astimezone(UTC)
+        if grace_until is not None:
+            if grace_until.tzinfo is None or grace_until.utcoffset() is None:
+                raise ValueError("reconciliation grace time must be timezone-aware")
+            if moment < grace_until.astimezone(UTC):
+                return {
+                    "orphan_candidates": 0,
+                    "orphan_removed": 0,
+                    "orphan_failed": 0,
+                    "grace_active": 1,
+                }
+        eligible_timestamp: float | None = None
+        if eligible_after is not None:
+            if eligible_after.tzinfo is None or eligible_after.utcoffset() is None:
+                raise ValueError("orphan policy time must be timezone-aware")
+            eligible_timestamp = eligible_after.astimezone(UTC).timestamp()
+        cutoff = moment.timestamp() - max(60, min(int(grace_seconds), 86400))
+        root = Path(os.path.abspath(managed_audio_root))
+
+        def _reconcile() -> dict[str, int]:
+            if not root.is_dir():
+                return {"orphan_candidates": 0, "orphan_removed": 0, "orphan_failed": 0}
+            with self._connect() as connection:
+                managed_rows = connection.execute(
+                    "SELECT archived_path FROM meeting_audio_files"
+                ).fetchall()
+            referenced = {
+                str(Path(os.path.abspath(row["archived_path"])))
+                for row in managed_rows
+                if Path(os.path.abspath(row["archived_path"])).is_relative_to(root)
+            }
+            candidates: list[Path] = []
+            for current, directories, files in os.walk(root, followlinks=False):
+                directories[:] = [
+                    name
+                    for name in directories
+                    if not (Path(current) / name).is_symlink()
+                ]
+                for name in files:
+                    path = Path(current) / name
+                    try:
+                        item_stat = path.lstat()
+                    except OSError:
+                        continue
+                    relative = path.relative_to(root)
+                    if (
+                        len(relative.parts) < 3
+                        or relative.parts[1] != "audio"
+                        or not stat.S_ISREG(item_stat.st_mode)
+                        or stat.S_ISLNK(item_stat.st_mode)
+                        or item_stat.st_mtime > cutoff
+                        or (
+                            eligible_timestamp is not None
+                            and item_stat.st_ctime < eligible_timestamp
+                        )
+                        or str(Path(os.path.abspath(path))) in referenced
+                    ):
+                        continue
+                    candidates.append(path)
+            if dry_run:
+                return {
+                    "orphan_candidates": len(candidates),
+                    "orphan_removed": 0,
+                    "orphan_failed": 0,
+                }
+            removed = 0
+            failed = 0
+            for path in candidates:
+                outcome = _safe_unlink_managed_file(path, root=root)
+                if outcome == "removed":
+                    removed += 1
+                elif outcome not in {"missing"}:
+                    failed += 1
+            return {
+                "orphan_candidates": len(candidates),
+                "orphan_removed": removed,
+                "orphan_failed": failed,
+            }
+
+        return await asyncio.to_thread(_reconcile)
 
     async def preview_legacy_retention_migration(
         self,
         *,
         grace_days: int,
+        preview_started_at: datetime,
         now: datetime | None = None,
     ) -> dict[str, int]:
         """Count legacy rows eligible for a future opt-in migration; never mutate."""
 
         moment = (now or datetime.now(UTC)).astimezone(UTC)
+        if preview_started_at.tzinfo is None or preview_started_at.utcoffset() is None:
+            raise ValueError("preview_started_at must be timezone-aware")
+        grace_until = preview_started_at.astimezone(UTC) + timedelta(
+            days=max(0, min(int(grace_days), 3650))
+        )
         text_cutoff = (
-            moment
-            - timedelta(
-                days=self.command_transcript_retention_days
-                + max(0, min(int(grace_days), 3650))
-            )
+            moment - timedelta(days=self.command_transcript_retention_days)
         ).isoformat()
         audio_cutoff = (
-            moment
-            - timedelta(
-                days=self.meeting_audio_retention_days
-                + max(0, min(int(grace_days), 3650))
-            )
+            moment - timedelta(days=self.meeting_audio_retention_days)
         ).isoformat()
 
         def _preview() -> dict[str, int]:
@@ -2820,6 +3144,8 @@ class MemoryStore:
                         (audio_cutoff,),
                     ).fetchone()[0]
                 )
+                result["grace_active"] = int(moment < grace_until)
+                result["apply_supported"] = 0
                 return result
 
         return await asyncio.to_thread(_preview)
@@ -2992,6 +3318,9 @@ class MemoryStore:
             audio_dir=row["audio_dir"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+            expires_at=(
+                datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+            ),
         )
 
     @staticmethod
@@ -3029,3 +3358,132 @@ class MemoryStore:
         if left_norm <= 0.0 or right_norm <= 0.0:
             return 0.0
         return dot / ((left_norm**0.5) * (right_norm**0.5))
+
+
+def _safe_unlink_managed_file(
+    path: Path,
+    *,
+    root: Path,
+) -> Literal["removed", "missing", "external", "unsafe", "failed"]:
+    root_path = Path(os.path.abspath(root))
+    candidate = Path(os.path.abspath(path))
+    if not candidate.is_relative_to(root_path):
+        return "external"
+    relative = candidate.relative_to(root_path)
+    if not relative.parts:
+        return "unsafe"
+    if os.name == "nt":
+        return _safe_unlink_managed_file_windows(candidate, root_path)
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    try:
+        current = os.open(root_path, directory_flags | nofollow)
+        descriptors.append(current)
+        for component in relative.parts[:-1]:
+            current = os.open(
+                component,
+                directory_flags | nofollow,
+                dir_fd=current,
+            )
+            descriptors.append(current)
+        try:
+            file_stat = os.stat(
+                relative.parts[-1],
+                dir_fd=current,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return "missing"
+        if not stat.S_ISREG(file_stat.st_mode):
+            return "unsafe"
+        os.unlink(relative.parts[-1], dir_fd=current)
+        return "removed"
+    except FileNotFoundError:
+        return "missing"
+    except OSError:
+        return "failed"
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _safe_unlink_managed_file_windows(
+    path: Path,
+    root: Path,
+) -> Literal["removed", "missing", "external", "unsafe", "failed"]:
+    import ctypes
+    from ctypes import wintypes
+
+    import pywintypes
+    import win32con
+    import win32file
+
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    handle = None
+    try:
+        root_stat = os.lstat(root)
+        if int(getattr(root_stat, "st_file_attributes", 0)) & reparse_flag:
+            return "unsafe"
+        current = root
+        for component in path.relative_to(root).parts:
+            current = current / component
+            item_stat = os.lstat(current)
+            attributes = int(getattr(item_stat, "st_file_attributes", 0))
+            if stat.S_ISLNK(item_stat.st_mode) or attributes & reparse_flag:
+                return "unsafe"
+        if not stat.S_ISREG(item_stat.st_mode):
+            return "unsafe"
+        handle = win32file.CreateFile(
+            str(path),
+            win32con.DELETE | win32con.FILE_READ_ATTRIBUTES,
+            (
+                win32con.FILE_SHARE_READ
+                | win32con.FILE_SHARE_WRITE
+                | win32con.FILE_SHARE_DELETE
+            ),
+            None,
+            win32con.OPEN_EXISTING,
+            win32con.FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        information = win32file.GetFileInformationByHandle(handle)
+        if int(information[0]) & (
+            win32con.FILE_ATTRIBUTE_DIRECTORY
+            | win32con.FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            return "unsafe"
+        final_path = str(win32file.GetFinalPathNameByHandle(handle, 0))
+        if final_path.startswith("\\\\?\\"):
+            final_path = final_path[4:]
+        normalized_root = os.path.normcase(os.path.abspath(root))
+        normalized_final = os.path.normcase(os.path.abspath(final_path))
+        try:
+            common = os.path.commonpath((normalized_root, normalized_final))
+        except ValueError:
+            return "unsafe"
+        if common != normalized_root:
+            return "unsafe"
+
+        class FileDispositionInfo(ctypes.Structure):
+            _fields_ = [("DeleteFile", wintypes.BOOL)]
+
+        disposition = FileDispositionInfo(True)
+        if not ctypes.windll.kernel32.SetFileInformationByHandle(
+            int(handle),
+            4,
+            ctypes.byref(disposition),
+            ctypes.sizeof(disposition),
+        ):
+            raise ctypes.WinError()
+        return "removed"
+    except FileNotFoundError:
+        return "missing"
+    except pywintypes.error as exc:
+        return "missing" if exc.winerror in {2, 3} else "failed"
+    except OSError:
+        return "failed"
+    finally:
+        if handle is not None:
+            handle.Close()

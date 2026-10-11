@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -89,7 +90,7 @@ async def test_document_event_keeps_modification_time_and_structure(tmp_path) ->
     assert "\n" in event.text
     assert event.window_title == "Plan"
     assert "kto@example.com" not in event.text
-    assert event.expires_at == datetime(2026, 10, 12, tzinfo=UTC)
+    assert event.expires_at == datetime(2026, 10, 5, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -196,6 +197,53 @@ async def test_full_read_refuses_directory_symlink_escape(tmp_path) -> None:
         await ingestor.load_full_text(event)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor race regression")
+@pytest.mark.asyncio
+async def test_full_read_uses_open_descriptor_during_path_swap(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "docs"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    document = root / "notatka.md"
+    original = root / "notatka-original.md"
+    document.write_text("Bezpieczna treść.", encoding="utf-8")
+    secret = outside / "private.md"
+    secret.write_text("PRIVATE OUTSIDE CONTENT", encoding="utf-8")
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    ingestor = DocumentTimelineIngestor(memory=store, roots=[root])
+    event = ContextEventV1.from_observation(
+        source="local_document",
+        source_id="race",
+        started_at=datetime(2026, 9, 21, tzinfo=UTC),
+        event_type="document",
+        text="digest",
+        metadata={"document_path": str(document)},
+    )
+    real_fstat = os.fstat
+    swapped = False
+
+    def swap_after_open(descriptor):
+        nonlocal swapped
+        result = real_fstat(descriptor)
+        if not swapped and stat.S_ISREG(result.st_mode):
+            document.rename(original)
+            document.symlink_to(secret)
+            swapped = True
+        return result
+
+    monkeypatch.setattr("voiceloop.context.documents.os.fstat", swap_after_open)
+
+    text = await ingestor.load_full_text(event)
+
+    assert swapped is True
+    assert text == "Bezpieczna treść."
+    assert "PRIVATE OUTSIDE CONTENT" not in text
+
+
 @pytest.mark.asyncio
 async def test_windows_projection_keeps_paths_out_of_event_text(tmp_path) -> None:
     store = MemoryStore(tmp_path / "voice.db")
@@ -243,7 +291,7 @@ async def test_windows_projection_keeps_paths_out_of_event_text(tmp_path) -> Non
     assert event.metadata["vectorize"] is False
     assert event.started_at == first_seen
     assert event.metadata["last_seen"] == "2026-09-22T12:00:00+00:00"
-    assert event.expires_at == datetime(2026, 10, 6, 12, tzinfo=UTC)
+    assert event.expires_at == datetime(2026, 10, 5, 12, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

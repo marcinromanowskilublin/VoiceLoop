@@ -31,7 +31,7 @@ async def test_listen_once_cursor_mode_starts_deepgram_without_prefix() -> None:
     transport = httpx.ASGITransport(app=app)
 
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
             response = await client.post(
                 "/api/v1/listening/once",
                 params={"mode": "cursor"},
@@ -60,7 +60,7 @@ async def test_listen_once_rejects_unknown_mode() -> None:
     transport = httpx.ASGITransport(app=app)
 
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
             response = await client.post(
                 "/api/v1/listening/once",
                 params={"mode": "nieznany"},

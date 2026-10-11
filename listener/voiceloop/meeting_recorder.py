@@ -16,6 +16,7 @@ from .memory import (
     MeetingSession,
     MeetingTranscriptSegment,
     MemoryStore,
+    _safe_unlink_managed_file,
 )
 from .models import TranscriptEnvelopeV1, TranscriptWordV1
 from .screenpipe import ScreenpipeAudioChunk, ScreenpipeClient, ScreenpipeError
@@ -558,8 +559,9 @@ class MeetingRecorder:
             return False
         channel = _channel_for_chunk(chunk)
         archived_path = source_path
+        archived_created = False
         if self.archive_audio:
-            archived_path = await self._archive_chunk(
+            archived_path, archived_created = await self._archive_chunk(
                 session=session,
                 chunk=chunk,
                 source_path=source_path,
@@ -572,6 +574,7 @@ class MeetingRecorder:
             archived_path=archived_path,
             channel=channel,
             source_kind="screenpipe",
+            archived_created=archived_created,
         )
 
     async def _handle_direct_chunk(self, captured: CapturedAudioChunk) -> None:
@@ -594,6 +597,7 @@ class MeetingRecorder:
             archived_path=captured.file_path.resolve(),
             channel=captured.channel,
             source_kind="direct",
+            archived_created=True,
         )
 
     async def _persist_audio_chunk(
@@ -605,19 +609,37 @@ class MeetingRecorder:
         archived_path: Path,
         channel: str,
         source_kind: str,
+        archived_created: bool = False,
     ) -> bool:
         start_time = _parse_timestamp(chunk.start_time)
         end_time = _parse_timestamp(chunk.end_time)
-        await self.memory.save_meeting_audio_file(
-            session_id=session.session_id,
-            chunk_id=chunk.chunk_id,
-            channel=channel,
-            device_name=chunk.device_name,
-            start_time=start_time,
-            end_time=end_time,
-            source_path=source_path,
-            archived_path=archived_path,
-        )
+        try:
+            stored = await self.memory.save_meeting_audio_file(
+                session_id=session.session_id,
+                chunk_id=chunk.chunk_id,
+                channel=channel,
+                device_name=chunk.device_name,
+                start_time=start_time,
+                end_time=end_time,
+                source_path=source_path,
+                archived_path=archived_path,
+            )
+        except BaseException:
+            if archived_created:
+                await asyncio.to_thread(
+                    _safe_unlink_managed_file,
+                    archived_path,
+                    root=Path(session.audio_dir),
+                )
+            raise
+        if not stored:
+            if archived_created:
+                await asyncio.to_thread(
+                    _safe_unlink_managed_file,
+                    archived_path,
+                    root=Path(session.audio_dir),
+                )
+            return False
         await self.events.publish(
             "meeting.audio.archived",
             {
@@ -755,7 +777,10 @@ class MeetingRecorder:
         try:
             windows = await self.emotion_analyzer.analyze_file(audio_path)
         except (HumeEmotionError, OSError) as exc:
-            LOGGER.warning("Hume emotion analysis skipped for %s: %s", audio_path, exc)
+            LOGGER.warning(
+                "Hume emotion analysis skipped (error_type=%s)",
+                type(exc).__name__,
+            )
             return
         if not windows:
             return
@@ -837,16 +862,17 @@ class MeetingRecorder:
         chunk: ScreenpipeAudioChunk,
         source_path: Path,
         channel: str,
-    ) -> Path:
+    ) -> tuple[Path, bool]:
         audio_dir = Path(session.audio_dir)
         audio_dir.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(str(source_path).encode()).hexdigest()[:16]
         device = re.sub(r"[^A-Za-z0-9._-]+", "-", chunk.device_name).strip("-")
         device = device[:60] or "device"
         target = audio_dir / f"{channel}-{device}-{digest}{source_path.suffix.lower()}"
-        if not target.exists():
+        created = not target.exists()
+        if created:
             await asyncio.to_thread(shutil.copy2, source_path, target)
-        return target
+        return target, created
 
     def _safe_audio_path(self, chunk: ScreenpipeAudioChunk) -> Path | None:
         candidate = chunk.file_path

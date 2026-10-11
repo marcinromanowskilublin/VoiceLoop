@@ -1,7 +1,9 @@
+import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from voiceloop.context.schema import ContextEpisodeV1, ContextEventV1, stable_episode_id
 from voiceloop.manual_memory import MANUAL_MEMORY_SOURCE, ManualMemoryService
 from voiceloop.memory import MemoryStore
 from voiceloop.models import (
@@ -111,6 +113,62 @@ async def test_new_private_rows_receive_ttl_but_explicit_memories_do_not(tmp_pat
     assert (await store.list_memories())[0].id == memory.id
 
 
+async def test_command_ttl_uses_server_acceptance_time(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db", command_transcript_retention_days=30)
+    await store.initialize()
+    client_time = datetime.now(UTC) + timedelta(days=6)
+    request = CommandRequest(text="Polecenie", created_at=client_time)
+    before = datetime.now(UTC)
+
+    await store.create_command(request)
+
+    after = datetime.now(UTC)
+    with store._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT client_created_at, created_at, expires_at
+            FROM commands WHERE request_id = ?
+            """,
+            (request.request_id,),
+        ).fetchone()
+    accepted_at = datetime.fromisoformat(row["created_at"])
+    assert before <= accepted_at <= after
+    assert datetime.fromisoformat(row["client_created_at"]) == client_time
+    assert datetime.fromisoformat(row["expires_at"]) == accepted_at + timedelta(days=30)
+    assert datetime.fromisoformat(row["expires_at"]) != client_time + timedelta(days=30)
+
+
+@pytest.mark.parametrize(
+    "created_at",
+    [
+        datetime(2026, 10, 11),
+        datetime.now(UTC) - timedelta(days=8),
+        datetime.now(UTC) + timedelta(days=8),
+    ],
+)
+async def test_command_rejects_untrusted_client_time(created_at) -> None:
+    with pytest.raises(ValueError):
+        CommandRequest(text="Polecenie", created_at=created_at)
+
+
+@pytest.mark.parametrize("request_id", ["tekst prywatny", "x" * 121, "/tmp/secret"])
+async def test_command_rejects_content_bearing_request_ids(request_id) -> None:
+    with pytest.raises(ValueError):
+        CommandRequest(request_id=request_id, text="Polecenie")
+
+
+async def test_retention_policy_effective_time_survives_restart(tmp_path) -> None:
+    database = tmp_path / "voice.db"
+    first = MemoryStore(database)
+    await first.initialize()
+    effective_at = first.retention_policy_effective_at
+
+    second = MemoryStore(database)
+    await second.initialize()
+
+    assert second.retention_policy_effective_at == effective_at
+
+
 async def test_retention_prunes_only_explicitly_expired_new_rows(tmp_path) -> None:
     audio_root = tmp_path / "meetings"
     audio_root.mkdir()
@@ -169,6 +227,7 @@ async def test_retention_prunes_only_explicitly_expired_new_rows(tmp_path) -> No
 
     preview = await store.preview_legacy_retention_migration(
         grace_days=0,
+        preview_started_at=now,
         now=now,
     )
     report = await store.prune_expired_private_data(
@@ -193,6 +252,293 @@ async def test_retention_prunes_only_explicitly_expired_new_rows(tmp_path) -> No
     assert managed_audio.exists() is False
     assert external_audio.exists() is True
     assert [item.content for item in await store.list_memories()] == ["Bez TTL"]
+
+
+async def test_retention_dry_run_does_not_delete_rows_or_files(tmp_path) -> None:
+    audio_root = tmp_path / "meetings"
+    audio_path = audio_root / "session" / "audio" / "chunk.wav"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"audio")
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    session = await store.create_meeting_session(
+        session_id="dry-run",
+        started_at=now,
+        audio_dir=audio_path.parent,
+    )
+    await store.save_meeting_audio_file(
+        session_id=session.session_id,
+        chunk_id="chunk",
+        channel="input",
+        device_name="mic",
+        start_time=now,
+        end_time=now + timedelta(seconds=1),
+        source_path=audio_path,
+        archived_path=audio_path,
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE meeting_audio_files SET expires_at = ?",
+            ((now - timedelta(seconds=1)).isoformat(),),
+        )
+
+    report = await store.prune_expired_private_data(
+        managed_audio_root=audio_root,
+        now=now,
+        dry_run=True,
+    )
+
+    assert report["dry_run"] == 1
+    assert report["meeting_audio"] == 1
+    assert audio_path.exists()
+    with store._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM meeting_audio_files WHERE session_id = ?",
+                (session.session_id,),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+async def test_retention_rollout_grace_prevents_all_deletion(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    await store.add_message("user", "Chronione przez rollout grace")
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE conversation SET expires_at = ?",
+            ((now - timedelta(seconds=1)).isoformat(),),
+        )
+
+    report = await store.prune_expired_private_data(
+        managed_audio_root=tmp_path / "meetings",
+        now=now,
+        grace_until=now + timedelta(days=1),
+    )
+
+    assert report == {"grace_active": 1, "dry_run": 0}
+    with store._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM conversation WHERE content = ?",
+                ("Chronione przez rollout grace",),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
+async def test_audio_prune_never_follows_managed_symlink(tmp_path) -> None:
+    audio_root = tmp_path / "meetings"
+    audio_dir = audio_root / "session" / "audio"
+    audio_dir.mkdir(parents=True)
+    target = tmp_path / "unrelated-private.txt"
+    target.write_text("do not delete", encoding="utf-8")
+    link = audio_dir / "chunk.wav"
+    link.symlink_to(target)
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    session = await store.create_meeting_session(
+        session_id="symlink",
+        started_at=now,
+        audio_dir=audio_dir,
+    )
+    await store.save_meeting_audio_file(
+        session_id=session.session_id,
+        chunk_id="chunk",
+        channel="input",
+        device_name="mic",
+        start_time=now,
+        end_time=now + timedelta(seconds=1),
+        source_path=link,
+        archived_path=link,
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE meeting_audio_files SET expires_at = ?",
+            ((now - timedelta(seconds=1)).isoformat(),),
+        )
+
+    report = await store.prune_expired_private_data(
+        managed_audio_root=audio_root,
+        now=now,
+    )
+
+    assert target.read_text(encoding="utf-8") == "do not delete"
+    assert link.is_symlink()
+    assert report["audio_files_removed"] == 0
+    assert report["audio_files_failed"] == 1
+    with store._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM meeting_audio_files WHERE session_id = ?",
+                (session.session_id,),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
+async def test_audio_prune_rejects_symlinked_parent_directory(tmp_path) -> None:
+    audio_root = tmp_path / "meetings"
+    audio_root.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    target = outside_dir / "chunk.wav"
+    target.write_bytes(b"do not delete")
+    linked_session = audio_root / "session"
+    linked_session.symlink_to(outside_dir, target_is_directory=True)
+    linked_path = linked_session / "chunk.wav"
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    session = await store.create_meeting_session(
+        session_id="parent-symlink",
+        started_at=now,
+        audio_dir=linked_session,
+    )
+    await store.save_meeting_audio_file(
+        session_id=session.session_id,
+        chunk_id="chunk",
+        channel="input",
+        device_name="mic",
+        start_time=now,
+        end_time=now + timedelta(seconds=1),
+        source_path=linked_path,
+        archived_path=linked_path,
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE meeting_audio_files SET expires_at = ?",
+            ((now - timedelta(seconds=1)).isoformat(),),
+        )
+
+    report = await store.prune_expired_private_data(
+        managed_audio_root=audio_root,
+        now=now,
+    )
+
+    assert target.read_bytes() == b"do not delete"
+    assert report["audio_files_failed"] == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics")
+async def test_orphan_reconciliation_is_bounded_and_policy_anchored(tmp_path) -> None:
+    audio_root = tmp_path / "meetings"
+    audio_dir = audio_root / "session" / "audio"
+    audio_dir.mkdir(parents=True)
+    orphan = audio_dir / "orphan.wav"
+    referenced = audio_dir / "referenced.wav"
+    fresh = audio_dir / "fresh.wav"
+    target = tmp_path / "outside.wav"
+    for path in (orphan, referenced, fresh, target):
+        path.write_bytes(path.name.encode())
+    moment = datetime.now(UTC)
+    old_timestamp = (moment - timedelta(minutes=5)).timestamp()
+    os.utime(orphan, (old_timestamp, old_timestamp))
+    os.utime(referenced, (old_timestamp, old_timestamp))
+    (audio_dir / "linked.wav").symlink_to(target)
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    session = await store.create_meeting_session(
+        session_id="session",
+        started_at=moment,
+        audio_dir=audio_dir,
+    )
+    await store.save_meeting_audio_file(
+        session_id=session.session_id,
+        chunk_id="referenced",
+        channel="input",
+        device_name="mic",
+        start_time=moment,
+        end_time=moment + timedelta(seconds=1),
+        source_path=referenced,
+        archived_path=referenced,
+    )
+
+    preview = await store.reconcile_orphaned_meeting_audio(
+        managed_audio_root=audio_root,
+        grace_seconds=60,
+        now=moment,
+        dry_run=True,
+        eligible_after=moment - timedelta(seconds=10),
+    )
+    report = await store.reconcile_orphaned_meeting_audio(
+        managed_audio_root=audio_root,
+        grace_seconds=60,
+        now=moment,
+        eligible_after=moment - timedelta(seconds=10),
+    )
+
+    assert preview["orphan_candidates"] == 1
+    assert preview["orphan_removed"] == 0
+    assert report["orphan_removed"] == 1
+    assert orphan.exists() is False
+    assert referenced.exists()
+    assert fresh.exists()
+    assert target.exists()
+    assert (audio_dir / "linked.wav").is_symlink()
+
+
+async def test_retention_deletes_expired_context_copies_and_empty_session(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    expired = now - timedelta(seconds=1)
+    event = ContextEventV1.from_observation(
+        source="screenpipe_meeting",
+        source_id="segment",
+        started_at=now - timedelta(days=2),
+        text="Prywatny transkrypt.",
+        expires_at=expired,
+    )
+    await store.upsert_context_event(event)
+    episode = ContextEpisodeV1(
+        episode_id=stable_episode_id("screenpipe_meeting", "meeting"),
+        source="screenpipe_meeting",
+        source_id="meeting",
+        started_at=event.started_at,
+        ended_at=event.started_at,
+        title="Prywatne spotkanie",
+        summary="Prywatny transkrypt.",
+        source_event_ids=(event.event_id,),
+        expires_at=expired,
+    )
+    await store.upsert_context_episode(episode)
+    await store.create_meeting_session(
+        session_id="expired-session",
+        started_at=now,
+        title="Prywatny tytuł",
+        audio_dir=tmp_path / "meetings" / "expired-session" / "audio",
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE meeting_sessions SET expires_at = ? WHERE session_id = ?",
+            (expired.isoformat(), "expired-session"),
+        )
+
+    report = await store.prune_expired_private_data(
+        managed_audio_root=tmp_path / "meetings",
+        now=now,
+    )
+
+    assert report["context_events"] == 1
+    assert report["context_episodes"] == 1
+    assert report["meeting_sessions"] == 1
+    assert await store.get_context_event(event.event_id) is None
+    assert await store.get_context_episode(episode.episode_id) is None
+    with store._connect() as connection:
+        assert (
+            connection.execute(
+                "SELECT COUNT(*) FROM meeting_sessions WHERE session_id = ?",
+                ("expired-session",),
+            ).fetchone()[0]
+            == 0
+        )
 
 
 async def test_meeting_segment_emotions_are_persisted(tmp_path) -> None:

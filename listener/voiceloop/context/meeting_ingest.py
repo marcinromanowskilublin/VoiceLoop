@@ -57,6 +57,7 @@ class MeetingTimelineIngestor:
                         "device_name": segment.device_name,
                         "transcript_source": segment.source,
                     },
+                    expires_at=segment.expires_at,
                 )
                 for segment in segments
                 if segment.text.strip()
@@ -110,6 +111,7 @@ class MeetingTimelineIngestor:
                         "device_type": chunk.device_type,
                         "transcript_source": chunk.source,
                     },
+                    expires_at=chunk.expires_at,
                 )
                 for chunk in ordered
             ]
@@ -138,6 +140,7 @@ class MeetingTimelineIngestor:
                     "meeting_id": meeting_id,
                     "digest_method": "deterministic_meeting_v1",
                 },
+                expires_at=_shared_expiry(stored_events),
             )
             await self.memory.upsert_context_episode(episode)
             event_count += len(stored_events)
@@ -172,6 +175,7 @@ class MeetingTimelineIngestor:
                 "session_id": session_id,
                 "digest_method": "deterministic_meeting_v1",
             },
+            expires_at=_shared_expiry(events),
         )
 
 
@@ -184,6 +188,13 @@ def _meeting_summary(events: list[ContextEventV1]) -> str:
         if line and line not in lines:
             lines.append(line)
     return "\n".join(lines)[:20000] or "Zarejestrowane spotkanie."
+
+
+def _shared_expiry(events: list[ContextEventV1]) -> datetime | None:
+    expiries = [event.expires_at for event in events]
+    if not expiries or any(expiry is None for expiry in expiries):
+        return None
+    return min(expiry for expiry in expiries if expiry is not None)
 
 
 def _parse_timestamp(value: str) -> datetime:
