@@ -318,7 +318,12 @@ class RiskLevel(StrEnum):
 
 class CommandRequest(BaseModel):
     schema_version: int = SCHEMA_VERSION
-    request_id: str = Field(default_factory=lambda: str(uuid4()))
+    request_id: str = Field(
+        default_factory=lambda: str(uuid4()),
+        min_length=1,
+        max_length=120,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
     source: CommandSource = CommandSource.API
     text: str | None = Field(default=None, max_length=8000)
     command_id: str | None = Field(default=None, max_length=120)
@@ -333,6 +338,12 @@ class CommandRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_input(self) -> CommandRequest:
+        if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
+            raise ValueError("created_at must be timezone-aware")
+        normalized_created_at = self.created_at.astimezone(UTC)
+        if abs((normalized_created_at - utc_now()).total_seconds()) > 7 * 86400:
+            raise ValueError("created_at is outside the accepted clock-skew range")
+        self.created_at = normalized_created_at
         if self.interaction_session_id is not None:
             normalized_session_id = self.interaction_session_id.strip()
             self.interaction_session_id = normalized_session_id or None

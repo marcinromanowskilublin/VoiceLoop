@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import ipaddress
 import re
 import socket
+import ssl
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -53,6 +55,12 @@ BINARY_CONTENT_TYPE_MARKERS = (
 )
 MAX_INSPECTION_BYTES = 1_000_000
 MAX_INSPECTION_REDIRECTS = 5
+_BLOCKED_IPV6_PREFIXES = (
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+    ipaddress.ip_network("2001::/32"),
+    ipaddress.ip_network("2002::/16"),
+)
 
 
 class WebSearchError(RuntimeError):
@@ -73,6 +81,24 @@ class WebSearchResult:
             "snippet": self.snippet,
             "provider": self.provider,
         }
+
+
+@dataclass(frozen=True)
+class _InspectionTarget:
+    url: str
+    scheme: str
+    hostname: str
+    port: int
+    request_target: str
+    host_header: str
+    addresses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _InspectionResponse:
+    status_code: int
+    headers: dict[str, str]
+    content: bytes
 
 
 class WebSearchClient:
@@ -331,60 +357,46 @@ class WebSearchClient:
         }
         current_url = url
         try:
-            async with httpx.AsyncClient(
-                timeout=timeout,
-                follow_redirects=False,
-            ) as client:
-                for redirect_count in range(MAX_INSPECTION_REDIRECTS + 1):
-                    allowed_addresses = await self._validate_inspection_url(current_url)
-                    async with client.stream(
-                        "GET",
-                        current_url,
-                        headers=headers,
-                    ) as response:
-                        self._validate_connected_peer(response, allowed_addresses)
-                        if response.is_redirect:
-                            location = response.headers.get("location", "").strip()
-                            if not location:
-                                raise WebSearchError(
-                                    "Dokumentacja zwróciła przekierowanie bez celu."
-                                )
-                            if redirect_count >= MAX_INSPECTION_REDIRECTS:
-                                raise WebSearchError(
-                                    "Dokumentacja przekroczyła limit przekierowań."
-                                )
-                            current_url = urljoin(current_url, location)
-                            continue
-                        if response.status_code >= 400:
-                            raise WebSearchError(
-                                "Dokumentacja zwróciła HTTP "
-                                f"{response.status_code}."
-                            )
-                        content_type = str(
-                            response.headers.get("content-type", "")
-                        ).casefold()
-                        chunks: list[bytes] = []
-                        size = 0
-                        async for chunk in response.aiter_bytes():
-                            size += len(chunk)
-                            if size > MAX_INSPECTION_BYTES:
-                                raise WebSearchError(
-                                    "Dokumentacja przekroczyła limit rozmiaru."
-                                )
-                            chunks.append(chunk)
-                        raw = b"".join(chunks)
-                        encoding = response.encoding or "utf-8"
-                        try:
-                            text = raw.decode(encoding, errors="ignore")
-                        except (LookupError, UnicodeError):
-                            text = raw.decode("utf-8", errors="ignore")
-                        return text, content_type
-        except httpx.HTTPError as exc:
+            for redirect_count in range(MAX_INSPECTION_REDIRECTS + 1):
+                target = await self._validate_inspection_url(current_url)
+                response = await self._pinned_request(
+                    target,
+                    headers=headers,
+                    timeout=timeout,
+                )
+                if 300 <= response.status_code < 400:
+                    location = response.headers.get("location", "").strip()
+                    if not location:
+                        raise WebSearchError(
+                            "Dokumentacja zwróciła przekierowanie bez celu."
+                        )
+                    if redirect_count >= MAX_INSPECTION_REDIRECTS:
+                        raise WebSearchError(
+                            "Dokumentacja przekroczyła limit przekierowań."
+                        )
+                    current_url = urljoin(current_url, location)
+                    continue
+                if response.status_code >= 400:
+                    raise WebSearchError(
+                        f"Dokumentacja zwróciła HTTP {response.status_code}."
+                    )
+                content_type = response.headers.get("content-type", "").casefold()
+                encoding_match = re.search(
+                    r"(?:^|;)\s*charset=([A-Za-z0-9._-]+)",
+                    content_type,
+                )
+                encoding = encoding_match.group(1) if encoding_match else "utf-8"
+                try:
+                    text = response.content.decode(encoding, errors="ignore")
+                except (LookupError, UnicodeError):
+                    text = response.content.decode("utf-8", errors="ignore")
+                return text, content_type
+        except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
             raise WebSearchError("Nie udało się pobrać dokumentacji.") from exc
 
         raise WebSearchError("Nie udało się pobrać dokumentacji.")
 
-    async def _validate_inspection_url(self, url: str) -> frozenset[str]:
+    async def _validate_inspection_url(self, url: str) -> _InspectionTarget:
         try:
             parsed = urlsplit(url)
             port = parsed.port
@@ -398,7 +410,24 @@ class WebSearchClient:
         if not hostname:
             raise WebSearchError("Adres dokumentacji nie zawiera hosta.")
         resolved_port = port or (443 if parsed.scheme.casefold() == "https" else 80)
-        return await self._resolve_public_addresses(hostname, resolved_port)
+        addresses = await self._resolve_public_addresses(hostname, resolved_port)
+        request_target = urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        default_port = 443 if parsed.scheme.casefold() == "https" else 80
+        host_literal = f"[{hostname}]" if ":" in hostname else hostname
+        host_header = (
+            host_literal
+            if resolved_port == default_port
+            else f"{host_literal}:{resolved_port}"
+        )
+        return _InspectionTarget(
+            url=url,
+            scheme=parsed.scheme.casefold(),
+            hostname=hostname,
+            port=resolved_port,
+            request_target=request_target,
+            host_header=host_header,
+            addresses=tuple(sorted(addresses)),
+        )
 
     @staticmethod
     async def _resolve_public_addresses(hostname: str, port: int) -> frozenset[str]:
@@ -418,10 +447,7 @@ class WebSearchClient:
                 address = ipaddress.ip_address(raw_address)
             except ValueError as exc:
                 raise WebSearchError("Host dokumentacji ma niepoprawny adres.") from exc
-            mapped = getattr(address, "ipv4_mapped", None)
-            if mapped is not None:
-                address = mapped
-            if not address.is_global:
+            if not _is_public_unicast(address):
                 raise WebSearchError(
                     "Adres dokumentacji wskazuje na niedozwoloną sieć."
                 )
@@ -431,25 +457,18 @@ class WebSearchClient:
         return frozenset(addresses)
 
     @staticmethod
-    def _validate_connected_peer(
-        response: httpx.Response,
-        allowed_addresses: frozenset[str],
-    ) -> None:
-        stream = response.extensions.get("network_stream")
-        if stream is None:
-            return
-        peer = stream.get_extra_info("server_addr")
-        if not isinstance(peer, tuple) or not peer:
-            return
-        try:
-            address = ipaddress.ip_address(str(peer[0]))
-        except ValueError as exc:
-            raise WebSearchError("Połączenie użyło niepoprawnego adresu.") from exc
-        mapped = getattr(address, "ipv4_mapped", None)
-        if mapped is not None:
-            address = mapped
-        if not address.is_global or str(address) not in allowed_addresses:
-            raise WebSearchError("Adres połączenia zmienił się po rozwiązaniu DNS.")
+    async def _pinned_request(
+        target: _InspectionTarget,
+        *,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> _InspectionResponse:
+        return await asyncio.to_thread(
+            _pinned_request_sync,
+            target,
+            headers,
+            timeout,
+        )
 
     @staticmethod
     def _normalize_text_for_match(value: str) -> str:
@@ -914,3 +933,104 @@ class WebSearchClient:
             return response.json()
         except ValueError as exc:
             raise WebSearchError("Wyszukiwanie internetowe zwróciło niepoprawny JSON.") from exc
+
+
+def _is_public_unicast(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(address, ipaddress.IPv6Address):
+        if (
+            address.ipv4_mapped is not None
+            or address.sixtofour is not None
+            or address.teredo is not None
+            or address.is_site_local
+            or any(address in network for network in _BLOCKED_IPV6_PREFIXES)
+        ):
+            return False
+    return bool(
+        address.is_global
+        and not address.is_private
+        and not address.is_loopback
+        and not address.is_link_local
+        and not address.is_multicast
+        and not address.is_reserved
+        and not address.is_unspecified
+    )
+
+
+def _pinned_request_sync(
+    target: _InspectionTarget,
+    headers: dict[str, str],
+    timeout: float,
+) -> _InspectionResponse:
+    last_error: Exception | None = None
+    for raw_address in target.addresses:
+        sock: socket.socket | ssl.SSLSocket | None = None
+        connection: http.client.HTTPConnection | None = None
+        try:
+            address = ipaddress.ip_address(raw_address)
+            if not _is_public_unicast(address):
+                raise WebSearchError("Przypięty adres nie jest publicznym unicastem.")
+            family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+            sock = socket.socket(family, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            destination = (
+                (raw_address, target.port, 0, 0)
+                if family == socket.AF_INET6
+                else (raw_address, target.port)
+            )
+            sock.connect(destination)
+            peer = sock.getpeername()
+            if not isinstance(peer, tuple) or not peer:
+                raise WebSearchError("Nie można potwierdzić adresu połączenia.")
+            peer_address = ipaddress.ip_address(str(peer[0]))
+            if not _is_public_unicast(peer_address) or peer_address != address:
+                raise WebSearchError(
+                    "Połączenie nie trafiło do przypiętego publicznego adresu."
+                )
+            if target.scheme == "https":
+                context = ssl.create_default_context()
+                sock = context.wrap_socket(sock, server_hostname=target.hostname)
+
+            request_headers = {
+                **headers,
+                "Host": target.host_header,
+                "Connection": "close",
+                "User-Agent": "VoiceLoop/inspection",
+            }
+            connection = http.client.HTTPConnection(
+                target.hostname,
+                target.port,
+                timeout=timeout,
+            )
+            connection.sock = sock
+            connection.request("GET", target.request_target, headers=request_headers)
+            response = connection.getresponse()
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > MAX_INSPECTION_BYTES:
+                        raise WebSearchError(
+                            "Dokumentacja przekroczyła limit rozmiaru."
+                        )
+                except ValueError:
+                    pass
+            content = response.read(MAX_INSPECTION_BYTES + 1)
+            if len(content) > MAX_INSPECTION_BYTES:
+                raise WebSearchError("Dokumentacja przekroczyła limit rozmiaru.")
+            response_headers = {
+                key.casefold(): value for key, value in response.getheaders()
+            }
+            return _InspectionResponse(
+                status_code=response.status,
+                headers=response_headers,
+                content=content,
+            )
+        except WebSearchError:
+            raise
+        except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+            last_error = exc
+        finally:
+            if connection is not None:
+                connection.close()
+            elif sock is not None:
+                sock.close()
+    raise WebSearchError("Nie udało się połączyć z publicznym hostem.") from last_error

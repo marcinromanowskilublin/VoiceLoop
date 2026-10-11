@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import stat
 from functools import lru_cache
 from pathlib import Path
 
@@ -169,7 +170,11 @@ class Settings(BaseSettings):
     meeting_recording_archive_audio: bool = False
     meeting_audio_retention_days: int = 7
     command_transcript_retention_days: int = 30
+    private_data_prune_enabled: bool = True
+    private_data_prune_dry_run: bool = False
     private_data_prune_interval_seconds: int = 3600
+    private_data_rollout_grace_days: int = 7
+    meeting_audio_orphan_grace_seconds: int = 300
     retention_migration_enabled: bool = False
     retention_migration_dry_run: bool = True
     retention_migration_grace_days: int = 30
@@ -339,32 +344,176 @@ class Settings(BaseSettings):
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
         token_path = self.data_dir / "voiceloop.token"
-        if token_path.exists():
-            token_path.chmod(0o600)
-            value = token_path.read_text(encoding="utf-8").strip()
-            if value:
-                return value
+        try:
+            os.lstat(token_path)
+        except FileNotFoundError:
+            pass
+        else:
+            return _read_existing_private_token(token_path)
 
         value = secrets.token_urlsafe(32)
+        if os.name == "nt":
+            _create_private_token_windows(token_path, value)
+            return value
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(token_path, flags, 0o600)
         try:
-            descriptor = os.open(
-                token_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
-        except FileExistsError:
-            token_path.chmod(0o600)
-            existing = token_path.read_text(encoding="utf-8").strip()
-            if existing:
-                return existing
-            token_path.unlink()
-            return self.ensure_local_token()
-        with os.fdopen(descriptor, "w", encoding="utf-8") as token_file:
-            token_file.write(value)
-        token_path.chmod(0o600)
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as token_file:
+                token_file.write(value)
+                token_file.flush()
+                os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
         return value
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def _validate_token_value(value: str) -> str:
+    cleaned = value.strip()
+    if not 32 <= len(cleaned) <= 512:
+        raise RuntimeError("Local token file has an invalid token length.")
+    if not all(char.isalnum() or char in {"-", "_"} for char in cleaned):
+        raise RuntimeError("Local token file has an invalid token format.")
+    return cleaned
+
+
+def _read_existing_private_token(token_path: Path) -> str:
+    if os.name == "nt":
+        return _read_existing_private_token_windows(token_path)
+    before = os.lstat(token_path)
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+        raise RuntimeError("Local token path must be a regular non-symlink file.")
+    if hasattr(os, "getuid") and before.st_uid != os.getuid():
+        raise RuntimeError("Local token file is owned by another user.")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(token_path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+        ):
+            raise RuntimeError("Local token file changed during secure open.")
+        os.fchmod(descriptor, 0o600)
+        raw = os.read(descriptor, 513)
+        if len(raw) > 512:
+            raise RuntimeError("Local token file is too large.")
+    finally:
+        os.close(descriptor)
+    return _validate_token_value(raw.decode("utf-8", errors="strict"))
+
+
+def _windows_token_security():
+    import ntsecuritycon
+    import pywintypes
+    import win32api
+    import win32con
+    import win32security
+
+    process_token = win32security.OpenProcessToken(
+        win32api.GetCurrentProcess(),
+        win32con.TOKEN_QUERY,
+    )
+    try:
+        user_sid = win32security.GetTokenInformation(
+            process_token,
+            win32security.TokenUser,
+        )[0]
+    finally:
+        process_token.Close()
+    access = (
+        ntsecuritycon.FILE_GENERIC_READ
+        | ntsecuritycon.FILE_GENERIC_WRITE
+        | ntsecuritycon.DELETE
+        | ntsecuritycon.READ_CONTROL
+        | ntsecuritycon.WRITE_DAC
+    )
+    dacl = win32security.ACL()
+    dacl.AddAccessAllowedAce(win32security.ACL_REVISION, access, user_sid)
+    descriptor = win32security.SECURITY_DESCRIPTOR()
+    descriptor.SetSecurityDescriptorDacl(True, dacl, False)
+    descriptor.SetSecurityDescriptorControl(
+        win32security.SE_DACL_PROTECTED,
+        win32security.SE_DACL_PROTECTED,
+    )
+    security_attributes = pywintypes.SECURITY_ATTRIBUTES()
+    security_attributes.SECURITY_DESCRIPTOR = descriptor
+    return user_sid, dacl, security_attributes
+
+
+def _create_private_token_windows(token_path: Path, value: str) -> None:
+    import win32con
+    import win32file
+
+    _, _, security_attributes = _windows_token_security()
+    handle = win32file.CreateFile(
+        str(token_path),
+        win32con.GENERIC_WRITE | win32con.READ_CONTROL | win32con.WRITE_DAC,
+        0,
+        security_attributes,
+        win32con.CREATE_NEW,
+        win32con.FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
+    try:
+        win32file.WriteFile(handle, value.encode("utf-8"))
+        win32file.FlushFileBuffers(handle)
+    finally:
+        handle.Close()
+
+
+def _read_existing_private_token_windows(token_path: Path) -> str:
+    import win32con
+    import win32file
+    import win32security
+
+    user_sid, dacl, _ = _windows_token_security()
+    handle = win32file.CreateFile(
+        str(token_path),
+        win32con.GENERIC_READ | win32con.READ_CONTROL | win32con.WRITE_DAC,
+        0,
+        None,
+        win32con.OPEN_EXISTING,
+        win32con.FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    try:
+        information = win32file.GetFileInformationByHandle(handle)
+        attributes = int(information[0])
+        if attributes & (
+            win32con.FILE_ATTRIBUTE_DIRECTORY
+            | win32con.FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            raise RuntimeError("Local token path must be a regular non-reparse file.")
+        security = win32security.GetSecurityInfo(
+            handle,
+            win32security.SE_FILE_OBJECT,
+            win32security.OWNER_SECURITY_INFORMATION,
+        )
+        owner_sid = security.GetSecurityDescriptorOwner()
+        if not win32security.EqualSid(owner_sid, user_sid):
+            raise RuntimeError("Local token file is owned by another user.")
+        win32security.SetSecurityInfo(
+            handle,
+            win32security.SE_FILE_OBJECT,
+            (
+                win32security.DACL_SECURITY_INFORMATION
+                | win32security.PROTECTED_DACL_SECURITY_INFORMATION
+            ),
+            None,
+            None,
+            dacl,
+            None,
+        )
+        raw = win32file.ReadFile(handle, 513)[1]
+        if len(raw) > 512:
+            raise RuntimeError("Local token file is too large.")
+    finally:
+        handle.Close()
+    return _validate_token_value(raw.decode("utf-8", errors="strict"))

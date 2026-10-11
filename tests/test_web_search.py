@@ -1,10 +1,19 @@
-from unittest.mock import AsyncMock, patch
+import ipaddress
+from unittest.mock import AsyncMock, Mock, patch
 
-import httpx
 import pytest
 
 from voiceloop.settings import Settings
-from voiceloop.web_search import WebSearchClient, WebSearchError, WebSearchResult
+from voiceloop.web_search import (
+    MAX_INSPECTION_BYTES,
+    WebSearchClient,
+    WebSearchError,
+    WebSearchResult,
+    _InspectionResponse,
+    _InspectionTarget,
+    _is_public_unicast,
+    _pinned_request_sync,
+)
 
 
 @pytest.mark.asyncio
@@ -349,48 +358,131 @@ async def test_document_inspection_rejects_unsafe_urls(tmp_path, url) -> None:
 @pytest.mark.asyncio
 async def test_document_inspection_validates_every_redirect(tmp_path) -> None:
     client = WebSearchClient(Settings(voiceloop_data_dir=str(tmp_path)))
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            302,
-            headers={"Location": "http://127.0.0.1/private"},
-        )
-
-    transport = httpx.MockTransport(handler)
-    async_client = httpx.AsyncClient
     client._resolve_public_addresses = AsyncMock(  # type: ignore[method-assign]
         side_effect=[
             frozenset({"93.184.216.34"}),
             WebSearchError("blocked redirect"),
         ]
     )
+    client._pinned_request = AsyncMock(  # type: ignore[method-assign]
+        return_value=_InspectionResponse(
+            status_code=302,
+            headers={"location": "http://127.0.0.1/private"},
+            content=b"",
+        )
+    )
 
-    with patch(
-        "voiceloop.web_search.httpx.AsyncClient",
-        side_effect=lambda **kwargs: async_client(transport=transport, **kwargs),
-    ):
-        with pytest.raises(WebSearchError, match="blocked redirect"):
-            await client._fetch_text_for_inspection("https://docs.example/start")
+    with pytest.raises(WebSearchError, match="blocked redirect"):
+        await client._fetch_text_for_inspection("https://docs.example/start")
 
-    assert len(requests) == 1
+    client._pinned_request.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_document_inspection_rejects_oversized_response(tmp_path) -> None:
     client = WebSearchClient(Settings(voiceloop_data_dir=str(tmp_path)))
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(200, content=b"x" * 1_000_001)
-    )
-    async_client = httpx.AsyncClient
     client._resolve_public_addresses = AsyncMock(  # type: ignore[method-assign]
         return_value=frozenset({"93.184.216.34"})
     )
+    client._pinned_request = AsyncMock(  # type: ignore[method-assign]
+        side_effect=WebSearchError("Dokumentacja przekroczyła limit rozmiaru.")
+    )
 
-    with patch(
-        "voiceloop.web_search.httpx.AsyncClient",
-        side_effect=lambda **kwargs: async_client(transport=transport, **kwargs),
+    with pytest.raises(WebSearchError, match="limit rozmiaru"):
+        await client._fetch_text_for_inspection("https://docs.example/large")
+
+
+class _FakeSocket:
+    def __init__(self, peer) -> None:
+        self.peer = peer
+        self.connected_to = None
+        self.closed = False
+
+    def settimeout(self, _timeout) -> None:
+        return None
+
+    def connect(self, destination) -> None:
+        self.connected_to = destination
+
+    def getpeername(self):
+        return self.peer
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _inspection_target() -> _InspectionTarget:
+    return _InspectionTarget(
+        url="http://docs.example/reference",
+        scheme="http",
+        hostname="docs.example",
+        port=80,
+        request_target="/reference",
+        host_header="docs.example",
+        addresses=("93.184.216.34",),
+    )
+
+
+@pytest.mark.parametrize("peer", [(), ("127.0.0.1", 80), ("93.184.216.35", 80)])
+def test_pinned_inspection_fails_closed_before_http_request(peer) -> None:
+    sock = _FakeSocket(peer)
+    connection_factory = Mock(side_effect=AssertionError("HTTP request must not start"))
+
+    with (
+        patch("voiceloop.web_search.socket.socket", return_value=sock),
+        patch("voiceloop.web_search.http.client.HTTPConnection", connection_factory),
+        pytest.raises(WebSearchError),
     ):
-        with pytest.raises(WebSearchError, match="limit rozmiaru"):
-            await client._fetch_text_for_inspection("https://docs.example/large")
+        _pinned_request_sync(_inspection_target(), {}, 1.0)
+
+    connection_factory.assert_not_called()
+    assert sock.closed is True
+
+
+def test_pinned_inspection_enforces_body_limit() -> None:
+    sock = _FakeSocket(("93.184.216.34", 80))
+
+    class Response:
+        status = 200
+        headers = {}
+
+        @staticmethod
+        def read(_limit):
+            return b"x" * (MAX_INSPECTION_BYTES + 1)
+
+        @staticmethod
+        def getheaders():
+            return []
+
+    connection = Mock()
+    connection.getresponse.return_value = Response()
+
+    with (
+        patch("voiceloop.web_search.socket.socket", return_value=sock),
+        patch(
+            "voiceloop.web_search.http.client.HTTPConnection",
+            return_value=connection,
+        ),
+        pytest.raises(WebSearchError, match="limit rozmiaru"),
+    ):
+        _pinned_request_sync(_inspection_target(), {}, 1.0)
+
+    connection.request.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "224.0.0.1",
+        "ff02::1",
+        "::ffff:127.0.0.1",
+        "64:ff9b::7f00:1",
+        "64:ff9b:1::7f00:1",
+        "2002:7f00:1::",
+        "2001:0000:4136:e378:8000:63bf:3fff:fdd2",
+    ],
+)
+def test_inspection_rejects_multicast_translation_and_transition_addresses(
+    address,
+) -> None:
+    assert _is_public_unicast(ipaddress.ip_address(address)) is False
