@@ -475,7 +475,8 @@ def _read_existing_private_token_windows(token_path: Path) -> str:
     import win32security
 
     file_flag_open_reparse_point = 0x00200000
-    protected_dacl_security_information = 0x80000000
+    # Pywin32 parses SECURITY_INFORMATION as signed C long on Windows.
+    protected_dacl_security_information = -0x80000000
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     before = os.lstat(token_path)
     attributes = int(getattr(before, "st_file_attributes", 0))
