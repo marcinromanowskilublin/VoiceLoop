@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -238,7 +239,7 @@ class MemoryStore:
                     );
 
                     CREATE TABLE IF NOT EXISTS context_cascade_shadow_telemetry (
-                        request_id TEXT PRIMARY KEY,
+                        telemetry_id TEXT PRIMARY KEY,
                         utterance_start TEXT,
                         utterance_end TEXT,
                         utterance_precision TEXT NOT NULL,
@@ -256,9 +257,7 @@ class MemoryStore:
                         gap_present INTEGER NOT NULL DEFAULT 0,
                         axis_insufficiency_json TEXT NOT NULL DEFAULT '[]',
                         created_at TEXT NOT NULL,
-                        expires_at TEXT NOT NULL,
-                        FOREIGN KEY(request_id) REFERENCES commands(request_id)
-                            ON DELETE CASCADE
+                        expires_at TEXT NOT NULL
                     );
 
                     CREATE TABLE IF NOT EXISTS memories (
@@ -587,6 +586,84 @@ class MemoryStore:
                 if "client_created_at" not in command_columns:
                     connection.execute(
                         "ALTER TABLE commands ADD COLUMN client_created_at TEXT"
+                    )
+                shadow_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(context_cascade_shadow_telemetry)"
+                    ).fetchall()
+                }
+                if "request_id" in shadow_columns and "telemetry_id" not in shadow_columns:
+                    legacy_rows = connection.execute(
+                        "SELECT * FROM context_cascade_shadow_telemetry"
+                    ).fetchall()
+                    connection.execute(
+                        "ALTER TABLE context_cascade_shadow_telemetry "
+                        "RENAME TO context_cascade_shadow_telemetry_legacy"
+                    )
+                    connection.execute(
+                        """
+                        CREATE TABLE context_cascade_shadow_telemetry (
+                            telemetry_id TEXT PRIMARY KEY,
+                            utterance_start TEXT,
+                            utterance_end TEXT,
+                            utterance_precision TEXT NOT NULL,
+                            utterance_source TEXT NOT NULL,
+                            utterance_confidence REAL NOT NULL,
+                            content_start TEXT,
+                            content_end TEXT,
+                            content_relation TEXT NOT NULL,
+                            content_precision TEXT NOT NULL,
+                            content_source TEXT NOT NULL,
+                            content_confidence REAL NOT NULL,
+                            epistemic_role TEXT NOT NULL,
+                            relevance_gate TEXT NOT NULL,
+                            approved_claim_count INTEGER NOT NULL DEFAULT 0,
+                            gap_present INTEGER NOT NULL DEFAULT 0,
+                            axis_insufficiency_json TEXT NOT NULL DEFAULT '[]',
+                            created_at TEXT NOT NULL,
+                            expires_at TEXT NOT NULL
+                        )
+                        """
+                    )
+                    for row in legacy_rows:
+                        connection.execute(
+                            """
+                            INSERT INTO context_cascade_shadow_telemetry
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                hashlib.sha256(
+                                    row["request_id"].encode("utf-8")
+                                ).hexdigest()[:24],
+                                row["utterance_start"],
+                                row["utterance_end"],
+                                row["utterance_precision"],
+                                row["utterance_source"],
+                                row["utterance_confidence"],
+                                row["content_start"],
+                                row["content_end"],
+                                row["content_relation"],
+                                row["content_precision"],
+                                row["content_source"],
+                                row["content_confidence"],
+                                row["epistemic_role"],
+                                row["relevance_gate"],
+                                row["approved_claim_count"],
+                                row["gap_present"],
+                                row["axis_insufficiency_json"],
+                                row["created_at"],
+                                row["expires_at"],
+                            ),
+                        )
+                    connection.execute(
+                        "DROP TABLE context_cascade_shadow_telemetry_legacy"
+                    )
+                    connection.execute(
+                        """
+                        CREATE INDEX IF NOT EXISTS idx_context_cascade_shadow_expires
+                        ON context_cascade_shadow_telemetry(expires_at)
+                        """
                     )
                 connection.execute(
                     """
@@ -1833,6 +1910,9 @@ class MemoryStore:
             created_at,
             days=self.command_transcript_retention_days,
         )
+        opaque_request_id = hashlib.sha256(
+            str(analysis.provenance_request_id).encode("utf-8")
+        ).hexdigest()[:24]
 
         def _iso(value: datetime | None) -> str | None:
             return value.astimezone(UTC).isoformat() if value is not None else None
@@ -1842,7 +1922,7 @@ class MemoryStore:
                 connection.execute(
                     """
                     INSERT INTO context_cascade_shadow_telemetry(
-                        request_id,
+                        telemetry_id,
                         utterance_start, utterance_end, utterance_precision,
                         utterance_source, utterance_confidence,
                         content_start, content_end, content_relation,
@@ -1850,7 +1930,7 @@ class MemoryStore:
                         epistemic_role, relevance_gate, approved_claim_count,
                         gap_present, axis_insufficiency_json, created_at, expires_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(request_id) DO UPDATE SET
+                    ON CONFLICT(telemetry_id) DO UPDATE SET
                         utterance_start = excluded.utterance_start,
                         utterance_end = excluded.utterance_end,
                         utterance_precision = excluded.utterance_precision,
@@ -1871,7 +1951,7 @@ class MemoryStore:
                         expires_at = excluded.expires_at
                     """,
                     (
-                        analysis.provenance_request_id,
+                        opaque_request_id,
                         _iso(analysis.utterance_time.start),
                         _iso(analysis.utterance_time.end),
                         analysis.utterance_time.precision,
@@ -3413,9 +3493,6 @@ def _safe_unlink_managed_file_windows(
     path: Path,
     root: Path,
 ) -> Literal["removed", "missing", "external", "unsafe", "failed"]:
-    import ctypes
-    from ctypes import wintypes
-
     import pywintypes
     import win32con
     import win32file
@@ -3468,25 +3545,7 @@ def _safe_unlink_managed_file_windows(
         if common != normalized_root:
             return "unsafe"
 
-        class FileDispositionInfo(ctypes.Structure):
-            _fields_ = [("DeleteFile", wintypes.BOOL)]
-
-        disposition = FileDispositionInfo(True)
-        set_file_information = ctypes.windll.kernel32.SetFileInformationByHandle
-        set_file_information.argtypes = (
-            wintypes.HANDLE,
-            wintypes.INT,
-            wintypes.LPVOID,
-            wintypes.DWORD,
-        )
-        set_file_information.restype = wintypes.BOOL
-        if not set_file_information(
-            wintypes.HANDLE(int(handle)),
-            4,
-            ctypes.byref(disposition),
-            ctypes.sizeof(disposition),
-        ):
-            raise ctypes.WinError()
+        _mark_windows_handle_for_deletion(handle)
         return "removed"
     except FileNotFoundError:
         return "missing"
@@ -3497,3 +3556,28 @@ def _safe_unlink_managed_file_windows(
     finally:
         if handle is not None:
             handle.Close()
+
+
+def _mark_windows_handle_for_deletion(handle: Any) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    class FileDispositionInfo(ctypes.Structure):
+        _fields_ = [("DeleteFile", wintypes.BOOL)]
+
+    disposition = FileDispositionInfo(True)
+    set_file_information = ctypes.windll.kernel32.SetFileInformationByHandle
+    set_file_information.argtypes = (
+        wintypes.HANDLE,
+        wintypes.INT,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    )
+    set_file_information.restype = wintypes.BOOL
+    if not set_file_information(
+        wintypes.HANDLE(int(handle)),
+        4,
+        ctypes.byref(disposition),
+        ctypes.sizeof(disposition),
+    ):
+        raise ctypes.WinError()

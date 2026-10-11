@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+import hashlib
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -103,6 +104,7 @@ async def test_shadow_sql_stores_time_roles_without_duplicate_raw_text(tmp_path)
     assert analysis is not None
 
     await store.save_context_cascade_shadow_temporal_roles(analysis)
+    opaque_id = hashlib.sha256(request.request_id.encode("utf-8")).hexdigest()[:24]
 
     with store._connect() as connection:
         command = connection.execute(
@@ -112,10 +114,17 @@ async def test_shadow_sql_stores_time_roles_without_duplicate_raw_text(tmp_path)
         shadow = connection.execute(
             """
             SELECT * FROM context_cascade_shadow_telemetry
-            WHERE request_id = ?
+            WHERE telemetry_id = ?
+            """,
+            (opaque_id,),
+        ).fetchone()
+        raw_id_count = connection.execute(
+            """
+            SELECT COUNT(*) FROM context_cascade_shadow_telemetry
+            WHERE telemetry_id = ?
             """,
             (request.request_id,),
-        ).fetchone()
+        ).fetchone()[0]
         shadow_columns = {
             row["name"]
             for row in connection.execute(
@@ -131,4 +140,71 @@ async def test_shadow_sql_stores_time_roles_without_duplicate_raw_text(tmp_path)
     assert shadow["content_relation"] == "future_relative_to_utterance"
     assert shadow["epistemic_role"] == "prediction"
     assert shadow["relevance_gate"] == "candidate"
-    assert not {"raw_text", "claim_text", "query_text"} & shadow_columns
+    assert raw_id_count == 0
+    assert not {"request_id", "raw_text", "claim_text", "query_text"} & shadow_columns
+
+
+@pytest.mark.asyncio
+async def test_shadow_schema_migration_hashes_legacy_request_id(tmp_path) -> None:
+    database = tmp_path / "voice.db"
+    store = MemoryStore(database)
+    await store.initialize()
+    request_id = "diagnosis-cancer"
+    with store._connect() as connection:
+        connection.execute("DROP INDEX idx_context_cascade_shadow_expires")
+        connection.execute("DROP TABLE context_cascade_shadow_telemetry")
+        connection.execute(
+            """
+            CREATE TABLE context_cascade_shadow_telemetry (
+                request_id TEXT PRIMARY KEY,
+                utterance_start TEXT,
+                utterance_end TEXT,
+                utterance_precision TEXT NOT NULL,
+                utterance_source TEXT NOT NULL,
+                utterance_confidence REAL NOT NULL,
+                content_start TEXT,
+                content_end TEXT,
+                content_relation TEXT NOT NULL,
+                content_precision TEXT NOT NULL,
+                content_source TEXT NOT NULL,
+                content_confidence REAL NOT NULL,
+                epistemic_role TEXT NOT NULL,
+                relevance_gate TEXT NOT NULL,
+                approved_claim_count INTEGER NOT NULL DEFAULT 0,
+                gap_present INTEGER NOT NULL DEFAULT 0,
+                axis_insufficiency_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO context_cascade_shadow_telemetry
+            VALUES (?, NULL, NULL, 'unknown', 'relative_text', 0.5,
+                    NULL, NULL, 'unknown', 'unknown', 'semantic_relation', 0.5,
+                    'opinion', 'candidate', 0, 1, '[]', ?, ?)
+            """,
+            (
+                request_id,
+                NOW.isoformat(),
+                (NOW + timedelta(days=30)).isoformat(),
+            ),
+        )
+
+    restarted = MemoryStore(database)
+    await restarted.initialize()
+
+    opaque_id = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:24]
+    with restarted._connect() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(context_cascade_shadow_telemetry)"
+            ).fetchall()
+        }
+        rows = connection.execute(
+            "SELECT telemetry_id FROM context_cascade_shadow_telemetry"
+        ).fetchall()
+    assert "request_id" not in columns
+    assert [row["telemetry_id"] for row in rows] == [opaque_id]

@@ -1,9 +1,13 @@
 import asyncio
+import os
+import stat
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from voiceloop.meeting_recorder import MeetingRecorder
+import pytest
+
+from voiceloop.meeting_recorder import MeetingRecorder, _secure_copy_audio_file
 from voiceloop.memory import MemoryStore
 from voiceloop.models import (
     TranscriptEnvelopeV1,
@@ -236,3 +240,90 @@ async def test_failed_database_write_removes_new_archive_copy(tmp_path) -> None:
     assert list(archive_dir.iterdir()) == []
     assert source.exists()
     await recorder.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor race regression")
+def test_archive_copy_reads_pinned_source_during_path_swap(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    source_root = tmp_path / "screenpipe"
+    target_root = tmp_path / "meetings"
+    target_dir = target_root / "session" / "audio"
+    source_root.mkdir()
+    target_dir.mkdir(parents=True)
+    source = source_root / "chunk.wav"
+    original = source_root / "chunk-original.wav"
+    outside = tmp_path / "outside.wav"
+    target = target_dir / "archive.wav"
+    source.write_bytes(b"safe audio")
+    outside.write_bytes(b"private outside")
+    real_fstat = os.fstat
+    swapped = False
+
+    def swap_after_source_open(descriptor):
+        nonlocal swapped
+        result = real_fstat(descriptor)
+        if not swapped and stat.S_ISREG(result.st_mode):
+            source.rename(original)
+            source.symlink_to(outside)
+            swapped = True
+        return result
+
+    monkeypatch.setattr(
+        "voiceloop.meeting_recorder.os.fstat",
+        swap_after_source_open,
+    )
+
+    created = _secure_copy_audio_file(
+        source,
+        source_root=source_root,
+        target=target,
+        target_root=target_root,
+    )
+
+    assert created is True
+    assert swapped is True
+    assert target.read_bytes() == b"safe audio"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor race regression")
+def test_archive_copy_never_overwrites_symlink_target(tmp_path, monkeypatch) -> None:
+    source_root = tmp_path / "screenpipe"
+    target_root = tmp_path / "meetings"
+    target_dir = target_root / "session" / "audio"
+    source_root.mkdir()
+    target_dir.mkdir(parents=True)
+    source = source_root / "chunk.wav"
+    outside = tmp_path / "outside.wav"
+    target = target_dir / "archive.wav"
+    source.write_bytes(b"safe audio")
+    outside.write_bytes(b"private outside")
+    real_open = os.open
+    planted = False
+
+    def plant_symlink(path, flags, *args, **kwargs):
+        nonlocal planted
+        if (
+            not planted
+            and path == target.name
+            and flags & os.O_CREAT
+            and kwargs.get("dir_fd") is not None
+        ):
+            target.symlink_to(outside)
+            planted = True
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr("voiceloop.meeting_recorder.os.open", plant_symlink)
+
+    with pytest.raises(OSError):
+        _secure_copy_audio_file(
+            source,
+            source_root=source_root,
+            target=target,
+            target_root=target_root,
+        )
+
+    assert planted is True
+    assert target.is_symlink()
+    assert outside.read_bytes() == b"private outside"

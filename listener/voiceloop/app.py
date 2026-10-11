@@ -85,6 +85,7 @@ class RetentionWorkerState:
     consecutive_failures: int = 0
     last_success_at: str | None = None
     last_error_type: str | None = None
+    rollout_started_at: datetime | None = None
 
 
 @dataclass
@@ -124,6 +125,41 @@ class Services:
     retention: RetentionWorkerState
 
 
+async def _configure_retention_rollout(
+    memory: MemoryStore,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> datetime:
+    """Persist transitions so destructive pruning always receives a fresh grace."""
+
+    moment = (now or datetime.now(UTC)).astimezone(UTC)
+    if not settings.private_data_prune_enabled:
+        mode = "disabled"
+    elif settings.private_data_prune_dry_run:
+        mode = "dry_run"
+    else:
+        mode = "destructive"
+    previous_mode = await memory.get_state("retention.prune_mode")
+    anchor = moment
+    if mode == "destructive":
+        raw_anchor = await memory.get_state("retention.prune_destructive_enabled_at")
+        if previous_mode == "destructive" and raw_anchor:
+            try:
+                parsed = datetime.fromisoformat(raw_anchor)
+                if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+                    anchor = parsed.astimezone(UTC)
+            except ValueError:
+                anchor = moment
+        if previous_mode != "destructive" or anchor == moment:
+            await memory.set_state(
+                "retention.prune_destructive_enabled_at",
+                anchor.isoformat(),
+            )
+    await memory.set_state("retention.prune_mode", mode)
+    return anchor
+
+
 async def _run_private_data_retention_worker(
     services: Services,
     settings: Settings,
@@ -131,8 +167,10 @@ async def _run_private_data_retention_worker(
     sleep=asyncio.sleep,
 ) -> None:
     interval = max(300, settings.private_data_prune_interval_seconds)
-    policy_effective_at = services.memory.retention_policy_effective_at
-    grace_until = policy_effective_at + timedelta(
+    rollout_started_at = (
+        services.retention.rollout_started_at or datetime.now(UTC)
+    )
+    grace_until = rollout_started_at + timedelta(
         days=max(0, settings.private_data_rollout_grace_days)
     )
     services.retention.running = True
@@ -150,7 +188,7 @@ async def _run_private_data_retention_worker(
                 grace_seconds=settings.meeting_audio_orphan_grace_seconds,
                 now=moment,
                 dry_run=settings.private_data_prune_dry_run,
-                eligible_after=policy_effective_at,
+                eligible_after=rollout_started_at,
                 grace_until=grace_until,
             )
             vector_report: dict[str, int] = {}
@@ -572,6 +610,10 @@ async def lifespan(app: FastAPI):
     services = build_services(settings)
     app.state.services = services
     await services.memory.initialize()
+    services.retention.rollout_started_at = await _configure_retention_rollout(
+        services.memory,
+        settings,
+    )
     if settings.retention_migration_enabled:
         if not settings.retention_migration_dry_run:
             raise RuntimeError(

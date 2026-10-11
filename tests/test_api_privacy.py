@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from voiceloop.app import RetentionWorkerState, _run_private_data_retention_worker, app
+from voiceloop.app import (
+    RetentionWorkerState,
+    _configure_retention_rollout,
+    _run_private_data_retention_worker,
+    app,
+)
+from voiceloop.memory import MemoryStore
 from voiceloop.settings import Settings
 
 
@@ -159,7 +165,9 @@ async def test_retention_worker_recovers_after_transient_failure(tmp_path) -> No
         memory=memory,
         qdrant=qdrant,
         qdrant_shadow=None,
-        retention=RetentionWorkerState(),
+        retention=RetentionWorkerState(
+            rollout_started_at=datetime.now(UTC) - timedelta(days=1)
+        ),
     )
     settings = Settings(
         voiceloop_data_dir=str(tmp_path),
@@ -181,3 +189,47 @@ async def test_retention_worker_recovers_after_transient_failure(tmp_path) -> No
     assert services.retention.consecutive_failures == 0
     assert services.retention.last_error_type is None
     assert services.retention.last_success_at is not None
+
+
+@pytest.mark.asyncio
+async def test_destructive_retention_grace_starts_at_each_opt_in(tmp_path) -> None:
+    memory = MemoryStore(tmp_path / "voice.db")
+    await memory.initialize()
+    initial = datetime(2026, 10, 1, tzinfo=UTC)
+    enabled_at = datetime(2026, 10, 11, tzinfo=UTC)
+    reenabled_at = datetime(2026, 10, 21, tzinfo=UTC)
+    disabled = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        private_data_prune_enabled=False,
+    )
+    destructive = Settings(
+        voiceloop_data_dir=str(tmp_path),
+        private_data_prune_enabled=True,
+        private_data_prune_dry_run=False,
+    )
+
+    await _configure_retention_rollout(memory, disabled, now=initial)
+    first_anchor = await _configure_retention_rollout(
+        memory,
+        destructive,
+        now=enabled_at,
+    )
+    restart_anchor = await _configure_retention_rollout(
+        memory,
+        destructive,
+        now=enabled_at + timedelta(days=1),
+    )
+    await _configure_retention_rollout(
+        memory,
+        disabled,
+        now=reenabled_at - timedelta(days=1),
+    )
+    second_anchor = await _configure_retention_rollout(
+        memory,
+        destructive,
+        now=reenabled_at,
+    )
+
+    assert first_anchor == enabled_at
+    assert restart_anchor == enabled_at
+    assert second_anchor == reenabled_at

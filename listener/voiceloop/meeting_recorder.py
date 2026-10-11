@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import re
-import shutil
+import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +17,7 @@ from .memory import (
     MeetingSession,
     MeetingTranscriptSegment,
     MemoryStore,
+    _mark_windows_handle_for_deletion,
     _safe_unlink_managed_file,
 )
 from .models import TranscriptEnvelopeV1, TranscriptWordV1
@@ -39,6 +41,220 @@ def _channel_for_chunk(chunk: ScreenpipeAudioChunk) -> str:
         return "input"
     if "output" in value or "speaker" in value or "głoś" in value:
         return "output"
+
+
+def _secure_copy_audio_file(
+    source: Path,
+    *,
+    source_root: Path,
+    target: Path,
+    target_root: Path,
+) -> bool:
+    """Copy through verified handles; return False for a safe existing target."""
+
+    source_root = Path(os.path.abspath(source_root))
+    source = Path(os.path.abspath(source))
+    target_root = Path(os.path.abspath(target_root))
+    target = Path(os.path.abspath(target))
+    if not source.is_relative_to(source_root) or not target.is_relative_to(target_root):
+        raise OSError("audio copy path is outside its managed root")
+    if os.name == "nt":
+        return _secure_copy_audio_file_windows(
+            source,
+            source_root=source_root,
+            target=target,
+            target_root=target_root,
+        )
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    descriptors: list[int] = []
+    target_descriptor: int | None = None
+    target_parent: int | None = None
+    target_created = False
+    try:
+        source_current = os.open(source_root, directory_flags | nofollow)
+        descriptors.append(source_current)
+        source_relative = source.relative_to(source_root)
+        for component in source_relative.parts[:-1]:
+            source_current = os.open(
+                component,
+                directory_flags | nofollow,
+                dir_fd=source_current,
+            )
+            descriptors.append(source_current)
+        source_descriptor = os.open(
+            source_relative.parts[-1],
+            os.O_RDONLY | nofollow,
+            dir_fd=source_current,
+        )
+        descriptors.append(source_descriptor)
+        if not stat.S_ISREG(os.fstat(source_descriptor).st_mode):
+            raise OSError("audio source is not a regular file")
+
+        target_current = os.open(target_root, directory_flags | nofollow)
+        descriptors.append(target_current)
+        target_relative = target.relative_to(target_root)
+        for component in target_relative.parts[:-1]:
+            target_current = os.open(
+                component,
+                directory_flags | nofollow,
+                dir_fd=target_current,
+            )
+            descriptors.append(target_current)
+        target_parent = target_current
+        try:
+            target_descriptor = os.open(
+                target_relative.parts[-1],
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
+                0o600,
+                dir_fd=target_parent,
+            )
+            target_created = True
+        except FileExistsError:
+            existing = os.open(
+                target_relative.parts[-1],
+                os.O_RDONLY | nofollow,
+                dir_fd=target_parent,
+            )
+            descriptors.append(existing)
+            if not stat.S_ISREG(os.fstat(existing).st_mode):
+                raise OSError(
+                    "existing audio archive is not a regular file"
+                ) from None
+            return False
+        descriptors.append(target_descriptor)
+        while True:
+            chunk = os.read(source_descriptor, 65_536)
+            if not chunk:
+                break
+            view = memoryview(chunk)
+            while view:
+                written = os.write(target_descriptor, view)
+                if written <= 0:
+                    raise OSError("short write while archiving audio")
+                view = view[written:]
+        os.fsync(target_descriptor)
+        return True
+    except BaseException:
+        if target_created and target_parent is not None:
+            try:
+                os.unlink(target.name, dir_fd=target_parent)
+            except OSError:
+                pass
+        raise
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _secure_copy_audio_file_windows(
+    source: Path,
+    *,
+    source_root: Path,
+    target: Path,
+    target_root: Path,
+) -> bool:
+    import pywintypes
+    import win32con
+    import win32file
+
+    file_flag_open_reparse_point = 0x00200000
+    file_read_attributes = 0x00000080
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    source_handle = None
+    target_handle = None
+    target_created = False
+
+    def inside(handle, root: Path) -> bool:
+        final_path = str(win32file.GetFinalPathNameByHandle(handle, 0))
+        if final_path.startswith("\\\\?\\"):
+            final_path = final_path[4:]
+        normalized_root = os.path.normcase(os.path.abspath(root))
+        normalized_final = os.path.normcase(os.path.abspath(final_path))
+        try:
+            return os.path.commonpath((normalized_root, normalized_final)) == normalized_root
+        except ValueError:
+            return False
+
+    try:
+        source_handle = win32file.CreateFile(
+            str(source),
+            win32con.GENERIC_READ | file_read_attributes,
+            (
+                win32con.FILE_SHARE_READ
+                | win32con.FILE_SHARE_WRITE
+                | win32con.FILE_SHARE_DELETE
+            ),
+            None,
+            win32con.OPEN_EXISTING,
+            file_flag_open_reparse_point,
+            None,
+        )
+        source_attributes = int(
+            win32file.GetFileInformationByHandle(source_handle)[0]
+        )
+        if source_attributes & (
+            win32con.FILE_ATTRIBUTE_DIRECTORY | reparse_flag
+        ) or not inside(source_handle, source_root):
+            raise OSError("audio source handle escaped its managed root")
+        try:
+            target_handle = win32file.CreateFile(
+                str(target),
+                win32con.GENERIC_WRITE
+                | file_read_attributes
+                | win32con.DELETE,
+                0,
+                None,
+                win32con.CREATE_NEW,
+                win32con.FILE_ATTRIBUTE_NORMAL | file_flag_open_reparse_point,
+                None,
+            )
+            target_created = True
+        except pywintypes.error as exc:
+            if exc.winerror not in {80, 183}:
+                raise
+            target_handle = win32file.CreateFile(
+                str(target),
+                win32con.GENERIC_READ | file_read_attributes,
+                (
+                    win32con.FILE_SHARE_READ
+                    | win32con.FILE_SHARE_WRITE
+                    | win32con.FILE_SHARE_DELETE
+                ),
+                None,
+                win32con.OPEN_EXISTING,
+                file_flag_open_reparse_point,
+                None,
+            )
+        target_attributes = int(
+            win32file.GetFileInformationByHandle(target_handle)[0]
+        )
+        if target_attributes & (
+            win32con.FILE_ATTRIBUTE_DIRECTORY | reparse_flag
+        ) or not inside(target_handle, target_root):
+            raise OSError("audio target handle escaped its managed root")
+        if not target_created:
+            return False
+        while True:
+            _, chunk = win32file.ReadFile(source_handle, 65_536)
+            if not chunk:
+                break
+            win32file.WriteFile(target_handle, chunk)
+        win32file.FlushFileBuffers(target_handle)
+        return True
+    except BaseException:
+        if target_created and target_handle is not None:
+            try:
+                _mark_windows_handle_for_deletion(target_handle)
+            except OSError:
+                pass
+        raise
+    finally:
+        if target_handle is not None:
+            target_handle.Close()
+        if source_handle is not None:
+            source_handle.Close()
     return "unknown"
 
 
@@ -869,9 +1085,13 @@ class MeetingRecorder:
         device = re.sub(r"[^A-Za-z0-9._-]+", "-", chunk.device_name).strip("-")
         device = device[:60] or "device"
         target = audio_dir / f"{channel}-{device}-{digest}{source_path.suffix.lower()}"
-        created = not target.exists()
-        if created:
-            await asyncio.to_thread(shutil.copy2, source_path, target)
+        created = await asyncio.to_thread(
+            _secure_copy_audio_file,
+            source_path,
+            source_root=self.screenpipe_data_root,
+            target=target,
+            target_root=self.settings.data_dir / "meetings",
+        )
         return target, created
 
     def _safe_audio_path(self, chunk: ScreenpipeAudioChunk) -> Path | None:

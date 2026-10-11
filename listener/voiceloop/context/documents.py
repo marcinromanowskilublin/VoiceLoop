@@ -98,7 +98,7 @@ class DocumentTimelineIngestor:
         result = await asyncio.to_thread(self._secure_read, Path(raw_path))
         if result is None:
             raise DocumentAccessError("Odnośnik wskazuje poza dozwolone korzenie.")
-        _, _, text = result
+        _, _, _, text = result
         redacted, _ = _redact_document(text)
         return redacted
 
@@ -130,7 +130,7 @@ class DocumentTimelineIngestor:
     def _secure_read(
         self,
         path: Path,
-    ) -> tuple[Path, os.stat_result, str] | None:
+    ) -> tuple[Path, float, int, str] | None:
         candidate = Path(os.path.abspath(path))
         root = next(
             (root for root in self.roots if candidate.is_relative_to(root)),
@@ -184,43 +184,78 @@ class DocumentTimelineIngestor:
         if b"\x00" in raw[:4096]:
             return None
         text = raw.decode("utf-8", errors="replace").strip()
-        return (candidate, file_stat, text) if text else None
+        return (candidate, file_stat.st_mtime, file_stat.st_size, text) if text else None
 
     def _secure_read_windows(
         self,
         path: Path,
         root: Path,
-    ) -> tuple[Path, os.stat_result, str] | None:
+    ) -> tuple[Path, float, int, str] | None:
+        import pywintypes
+        import win32con
+        import win32file
+
+        file_flag_open_reparse_point = 0x00200000
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        handle = None
         try:
-            before = os.lstat(path)
-            reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-            attributes = int(getattr(before, "st_file_attributes", 0))
-            if (
-                not stat.S_ISREG(before.st_mode)
-                or stat.S_ISLNK(before.st_mode)
-                or attributes & reparse_flag
+            handle = win32file.CreateFile(
+                str(path),
+                win32con.GENERIC_READ,
+                (
+                    win32con.FILE_SHARE_READ
+                    | win32con.FILE_SHARE_WRITE
+                    | win32con.FILE_SHARE_DELETE
+                ),
+                None,
+                win32con.OPEN_EXISTING,
+                file_flag_open_reparse_point,
+                None,
+            )
+            information = win32file.GetFileInformationByHandle(handle)
+            attributes = int(information[0])
+            if attributes & (
+                win32con.FILE_ATTRIBUTE_DIRECTORY | reparse_flag
             ):
                 return None
-            descriptor = os.open(path, os.O_RDONLY)
-        except OSError:
+            final_path = str(win32file.GetFinalPathNameByHandle(handle, 0))
+            if final_path.startswith("\\\\?\\"):
+                final_path = final_path[4:]
+            normalized_root = os.path.normcase(os.path.abspath(root))
+            normalized_final = os.path.normcase(os.path.abspath(final_path))
+            try:
+                common = os.path.commonpath((normalized_root, normalized_final))
+            except ValueError:
+                return None
+            if common != normalized_root:
+                return None
+            chunks: list[bytes] = []
+            size = 0
+            while size <= self.max_bytes:
+                _, chunk = win32file.ReadFile(
+                    handle,
+                    min(65_536, self.max_bytes + 1 - size),
+                )
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            raw = b"".join(chunks)
+            modified_timestamp = information[3].timestamp()
+            byte_size = (int(information[5]) << 32) | int(information[6])
+        except (OSError, pywintypes.error):
             return None
-        try:
-            opened = os.fstat(descriptor)
-            if (
-                not stat.S_ISREG(opened.st_mode)
-                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
-            ):
-                return None
-            final_path = Path(os.path.realpath(path))
-            if not final_path.is_relative_to(root):
-                return None
-            raw = os.read(descriptor, self.max_bytes + 1)
         finally:
-            os.close(descriptor)
+            if handle is not None:
+                handle.Close()
         if len(raw) > self.max_bytes or b"\x00" in raw[:4096]:
             return None
         text = raw.decode("utf-8", errors="replace").strip()
-        return (final_path, opened, text) if text else None
+        return (
+            (Path(final_path), modified_timestamp, byte_size, text)
+            if text
+            else None
+        )
 
     def _event_for_path(
         self,
@@ -232,7 +267,7 @@ class DocumentTimelineIngestor:
         result = self._secure_read(path)
         if result is None:
             return None, "unreadable"
-        resolved, stat_result, text = result
+        resolved, modified_timestamp, byte_size, text = result
         if not self._allowed(resolved):
             return None, "secret"
         redacted, flags = _redact_document(text)
@@ -244,7 +279,7 @@ class DocumentTimelineIngestor:
         source_id = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
         # The timeline axis is when the document changed, not when we scanned it.
         # Scan time would move on every run and rewrite the event content hash.
-        modified_at = datetime.fromtimestamp(stat_result.st_mtime, tz=UTC)
+        modified_at = datetime.fromtimestamp(modified_timestamp, tz=UTC)
         event = ContextEventV1.from_observation(
             source="local_document",
             source_id=source_id,
@@ -259,7 +294,7 @@ class DocumentTimelineIngestor:
                 # which serializes source, time, trust, title and content only.
                 "document_path": str(resolved),
                 "path_sha256": source_id,
-                "byte_size": stat_result.st_size,
+                "byte_size": byte_size,
                 "digest_truncated": truncated,
                 "digest_method": "deterministic_document_v1",
                 "redaction_flags": flags,
