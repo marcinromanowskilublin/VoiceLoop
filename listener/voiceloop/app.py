@@ -136,7 +136,11 @@ def build_services(settings: Settings) -> Services:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     token = settings.ensure_local_token()
-    memory = MemoryStore(settings.data_dir / "voiceloop.db")
+    memory = MemoryStore(
+        settings.data_dir / "voiceloop.db",
+        command_transcript_retention_days=settings.command_transcript_retention_days,
+        meeting_audio_retention_days=settings.meeting_audio_retention_days,
+    )
     events = EventBus()
     telemetry = ConversationTelemetry(
         events,
@@ -322,6 +326,12 @@ def build_services(settings: Settings) -> Services:
             settings.context_timeline_commitment_review_enabled
         ),
         context_timeline_auto_ttl_days=settings.context_timeline_auto_ttl_days,
+        context_cascade_shadow_enabled=settings.context_cascade_shadow_enabled,
+        context_cascade_shadow_qmax=settings.context_cascade_shadow_qmax,
+        context_cascade_shadow_wave_size=settings.context_cascade_shadow_wave_size,
+        context_cascade_shadow_timeout_seconds=(
+            settings.context_cascade_shadow_timeout_seconds
+        ),
     )
     assistant.configure_stt_threshold(settings.stt_min_action_confidence)
     assistant.configure_speaker_gate(
@@ -474,6 +484,20 @@ async def lifespan(app: FastAPI):
     services = build_services(settings)
     app.state.services = services
     await services.memory.initialize()
+    if settings.retention_migration_enabled:
+        if not settings.retention_migration_dry_run:
+            raise RuntimeError(
+                "Retroactive retention apply is not available; use dry-run preview."
+            )
+        preview = await services.memory.preview_legacy_retention_migration(
+            grace_days=settings.retention_migration_grace_days,
+        )
+        LOGGER.info("Legacy retention preview (counts only): %s", preview)
+    initial_prune = await services.memory.prune_expired_private_data(
+        managed_audio_root=settings.data_dir / "meetings",
+    )
+    if any(initial_prune.values()):
+        LOGGER.info("Expired private data pruned (counts only): %s", initial_prune)
     try:
         indexed_manual_memories = await services.manual_memory.sync()
         if indexed_manual_memories:
@@ -497,6 +521,22 @@ async def lifespan(app: FastAPI):
     await services.threshold_guard.start()
     listen_watch_task: asyncio.Task[None] | None = None
     conversation_start_task: asyncio.Task[dict[str, str]] | None = None
+    retention_task: asyncio.Task[None] | None = None
+
+    async def _prune_expired_private_data() -> None:
+        interval = max(300, settings.private_data_prune_interval_seconds)
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                report = await services.memory.prune_expired_private_data(
+                    managed_audio_root=settings.data_dir / "meetings",
+                )
+                if any(report.values()):
+                    LOGGER.info("Expired private data pruned (counts only): %s", report)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("Private data retention worker stopped")
 
     async def _watch_conversation_listen_timeouts() -> None:
         try:
@@ -523,6 +563,10 @@ async def lifespan(app: FastAPI):
         _watch_conversation_listen_timeouts(),
         name="conversation-listen-timeout-watch",
     )
+    retention_task = asyncio.create_task(
+        _prune_expired_private_data(),
+        name="private-data-retention",
+    )
     if settings.auto_start_conversation:
         try:
             conversation_start_task = asyncio.create_task(
@@ -539,6 +583,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if retention_task is not None:
+            retention_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await retention_task
         if listen_watch_task is not None:
             listen_watch_task.cancel()
             with suppress(asyncio.CancelledError):

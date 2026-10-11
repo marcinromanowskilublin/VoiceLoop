@@ -301,6 +301,64 @@ async def test_semantic_scout_uses_reserve_axis_only_after_sparse_exact_results(
 
 
 @pytest.mark.asyncio
+async def test_shadow_cascade_uses_five_unique_axes_in_2_2_1_waves(tmp_path) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_queries(self, documents):
+            return [[1.0, 0.0] for _ in documents]
+
+    class QdrantStub:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.axes: list[str] = []
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def search(self, *, vector_names, **_kwargs):
+            self.axes.append(vector_names[0])
+            return []
+
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    qdrant = QdrantStub()
+    retriever = TimeFirstRetriever(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        scout_mode="cascade_2_2_1",
+        qmax=5,
+        wave_size=2,
+    )
+
+    pack = await retriever.retrieve(
+        "Co ustaliliśmy wczoraj?",
+        now=datetime(2026, 9, 20, 12, tzinfo=UTC),
+    )
+
+    assert pack.items == ()
+    assert retriever.last_trace.waves == (
+        ("semantic", "decision"),
+        ("topic", "intent"),
+        ("person_context",),
+    )
+    assert qdrant.axes == [
+        "semantic",
+        "decision",
+        "topic",
+        "intent",
+        "person_context",
+    ]
+    assert len(set(qdrant.axes)) == 5
+    assert retriever.last_trace.stop_reason == "axes_exhausted"
+
+
+@pytest.mark.asyncio
 async def test_context_eval_measures_recall_abstention_and_axes() -> None:
     records = [
         ContextRetrievalEvalRecordV1(

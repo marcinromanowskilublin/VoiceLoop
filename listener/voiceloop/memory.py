@@ -131,9 +131,30 @@ class PathHistoryItem:
 
 
 class MemoryStore:
-    def __init__(self, database_path: Path) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        *,
+        command_transcript_retention_days: int = 30,
+        meeting_audio_retention_days: int = 7,
+    ) -> None:
         self.database_path = database_path
+        self.command_transcript_retention_days = max(
+            1,
+            min(int(command_transcript_retention_days), 3650),
+        )
+        self.meeting_audio_retention_days = max(
+            1,
+            min(int(meeting_audio_retention_days), 3650),
+        )
         self._context_fts_enabled = False
+
+    @staticmethod
+    def _expires_at(created_at: datetime, *, days: int) -> str:
+        moment = created_at
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            moment = moment.replace(tzinfo=UTC)
+        return (moment.astimezone(UTC) + timedelta(days=days)).isoformat()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=10)
@@ -163,7 +184,8 @@ class MemoryStore:
                         plan_json TEXT,
                         results_json TEXT NOT NULL DEFAULT '[]',
                         created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
+                        updated_at TEXT NOT NULL,
+                        expires_at TEXT
                     );
 
                     CREATE TABLE IF NOT EXISTS command_events (
@@ -172,6 +194,7 @@ class MemoryStore:
                         status TEXT NOT NULL,
                         detail_json TEXT NOT NULL DEFAULT '{}',
                         created_at TEXT NOT NULL,
+                        expires_at TEXT,
                         FOREIGN KEY(request_id) REFERENCES commands(request_id)
                     );
 
@@ -180,6 +203,7 @@ class MemoryStore:
                         segment_id TEXT NOT NULL,
                         transcript_json TEXT NOT NULL,
                         created_at TEXT NOT NULL,
+                        expires_at TEXT,
                         FOREIGN KEY(request_id) REFERENCES commands(request_id)
                     );
 
@@ -189,7 +213,32 @@ class MemoryStore:
                         session_id TEXT,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
-                        created_at TEXT NOT NULL
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_cascade_shadow_telemetry (
+                        request_id TEXT PRIMARY KEY,
+                        utterance_start TEXT,
+                        utterance_end TEXT,
+                        utterance_precision TEXT NOT NULL,
+                        utterance_source TEXT NOT NULL,
+                        utterance_confidence REAL NOT NULL,
+                        content_start TEXT,
+                        content_end TEXT,
+                        content_relation TEXT NOT NULL,
+                        content_precision TEXT NOT NULL,
+                        content_source TEXT NOT NULL,
+                        content_confidence REAL NOT NULL,
+                        epistemic_role TEXT NOT NULL,
+                        relevance_gate TEXT NOT NULL,
+                        approved_claim_count INTEGER NOT NULL DEFAULT 0,
+                        gap_present INTEGER NOT NULL DEFAULT 0,
+                        axis_insufficiency_json TEXT NOT NULL DEFAULT '[]',
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        FOREIGN KEY(request_id) REFERENCES commands(request_id)
+                            ON DELETE CASCADE
                     );
 
                     CREATE TABLE IF NOT EXISTS memories (
@@ -224,7 +273,8 @@ class MemoryStore:
                         end_time TEXT NOT NULL,
                         text TEXT NOT NULL,
                         source TEXT NOT NULL,
-                        created_at TEXT NOT NULL
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT
                     );
 
                     CREATE TABLE IF NOT EXISTS meeting_sessions (
@@ -253,6 +303,7 @@ class MemoryStore:
                         emotion_json TEXT,
                         source TEXT NOT NULL,
                         created_at TEXT NOT NULL,
+                        expires_at TEXT,
                         FOREIGN KEY(session_id) REFERENCES meeting_sessions(session_id)
                     );
 
@@ -267,6 +318,7 @@ class MemoryStore:
                         source_path TEXT NOT NULL,
                         archived_path TEXT NOT NULL,
                         created_at TEXT NOT NULL,
+                        expires_at TEXT,
                         UNIQUE(session_id, chunk_id),
                         FOREIGN KEY(session_id) REFERENCES meeting_sessions(session_id)
                     );
@@ -394,6 +446,8 @@ class MemoryStore:
                         ON command_events(status, created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_conversation_created
                         ON conversation(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_cascade_shadow_expires
+                        ON context_cascade_shadow_telemetry(expires_at);
                     CREATE INDEX IF NOT EXISTS idx_memories_kind
                         ON memories(kind, created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_screenpipe_transcripts_created
@@ -483,10 +537,43 @@ class MemoryStore:
                     connection.execute(
                         "ALTER TABLE conversation ADD COLUMN session_id TEXT"
                     )
+                for table in (
+                    "commands",
+                    "command_events",
+                    "command_transcripts",
+                    "conversation",
+                    "screenpipe_transcripts",
+                    "meeting_transcript_segments",
+                    "meeting_audio_files",
+                ):
+                    table_columns = {
+                        row["name"]
+                        for row in connection.execute(
+                            f"PRAGMA table_info({table})"
+                        ).fetchall()
+                    }
+                    if "expires_at" not in table_columns:
+                        connection.execute(
+                            f"ALTER TABLE {table} ADD COLUMN expires_at TEXT"
+                        )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_conversation_session
                     ON conversation(session_id, id DESC)
+                    """
+                )
+                connection.executescript(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_commands_expires
+                        ON commands(expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_conversation_expires
+                        ON conversation(expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_screenpipe_transcripts_expires
+                        ON screenpipe_transcripts(expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_meeting_segments_expires
+                        ON meeting_transcript_segments(expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_meeting_audio_expires
+                        ON meeting_audio_files(expires_at);
                     """
                 )
 
@@ -1385,6 +1472,10 @@ class MemoryStore:
 
     async def create_command(self, request: CommandRequest) -> CommandView:
         created = request.created_at.isoformat()
+        expires_at = self._expires_at(
+            request.created_at,
+            days=self.command_transcript_retention_days,
+        )
         input_text = (request.text or request.command_id or "").strip()
 
         def _create() -> None:
@@ -1392,8 +1483,9 @@ class MemoryStore:
                 connection.execute(
                     """
                     INSERT INTO commands (
-                        request_id, source, input_text, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        request_id, source, input_text, status, created_at, updated_at,
+                        expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         request.request_id,
@@ -1402,35 +1494,40 @@ class MemoryStore:
                         CommandStatus.RECEIVED.value,
                         created,
                         created,
+                        expires_at,
                     ),
                 )
                 connection.execute(
                     """
-                    INSERT INTO command_events(request_id, status, detail_json, created_at)
-                    VALUES (?, ?, '{}', ?)
+                    INSERT INTO command_events(
+                        request_id, status, detail_json, created_at, expires_at
+                    ) VALUES (?, ?, '{}', ?, ?)
                     """,
                     (
                         request.request_id,
                         CommandStatus.RECEIVED.value,
                         created,
+                        expires_at,
                     ),
                 )
                 if request.transcript is not None:
                     connection.execute(
                         """
                         INSERT INTO command_transcripts(
-                            request_id, segment_id, transcript_json, created_at
-                        ) VALUES (?, ?, ?, ?)
+                            request_id, segment_id, transcript_json, created_at, expires_at
+                        ) VALUES (?, ?, ?, ?, ?)
                         ON CONFLICT(request_id) DO UPDATE SET
                             segment_id = excluded.segment_id,
                             transcript_json = excluded.transcript_json,
-                            created_at = excluded.created_at
+                            created_at = excluded.created_at,
+                            expires_at = excluded.expires_at
                         """,
                         (
                             request.request_id,
                             request.transcript.segment_id,
                             request.transcript.model_dump_json(),
                             created,
+                            expires_at,
                         ),
                     )
 
@@ -1498,14 +1595,18 @@ class MemoryStore:
                     connection.execute(
                         """
                         INSERT INTO command_events(
-                            request_id, status, detail_json, created_at
-                        ) VALUES (?, ?, ?, ?)
+                            request_id, status, detail_json, created_at, expires_at
+                        )
+                        SELECT ?, ?, ?, ?, expires_at
+                        FROM commands
+                        WHERE request_id = ?
                         """,
                         (
                             request_id,
                             status.value,
                             json.dumps(detail, separators=(",", ":")),
                             values[0],
+                            request_id,
                         ),
                     )
 
@@ -1516,7 +1617,12 @@ class MemoryStore:
         def _get() -> sqlite3.Row | None:
             with self._connect() as connection:
                 return connection.execute(
-                    "SELECT * FROM commands WHERE request_id = ?", (request_id,)
+                    """
+                    SELECT * FROM commands
+                    WHERE request_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
+                    """,
+                    (request_id, _now_iso()),
                 ).fetchone()
 
         row = await asyncio.to_thread(_get)
@@ -1528,7 +1634,13 @@ class MemoryStore:
         def _list() -> list[sqlite3.Row]:
             with self._connect() as connection:
                 return connection.execute(
-                    "SELECT * FROM commands ORDER BY created_at DESC LIMIT ?", (safe_limit,)
+                    """
+                    SELECT * FROM commands
+                    WHERE expires_at IS NULL OR expires_at > ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (_now_iso(), safe_limit),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -1542,9 +1654,10 @@ class MemoryStore:
                     SELECT status, detail_json, created_at
                     FROM command_events
                     WHERE request_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
                     ORDER BY id ASC
                     """,
-                    (request_id,),
+                    (request_id, _now_iso()),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -1570,20 +1683,27 @@ class MemoryStore:
         request_id: str | None = None,
         session_id: str | None = None,
     ) -> None:
+        created_at = datetime.now(UTC)
+        expires_at = self._expires_at(
+            created_at,
+            days=self.command_transcript_retention_days,
+        )
+
         def _add() -> None:
             with self._connect() as connection:
                 connection.execute(
                     """
                     INSERT INTO conversation(
-                        request_id, session_id, role, content, created_at
-                    ) VALUES (?, ?, ?, ?, ?)
+                        request_id, session_id, role, content, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         request_id,
                         session_id[:120] if session_id else None,
                         role,
                         content[:20000],
-                        _now_iso(),
+                        created_at.isoformat(),
+                        expires_at,
                     ),
                 )
 
@@ -1600,8 +1720,15 @@ class MemoryStore:
         def _list() -> list[sqlite3.Row]:
             with self._connect() as connection:
                 where = "WHERE session_id = ?" if session_id else ""
+                expiry_condition = (
+                    "AND (expires_at IS NULL OR expires_at > ?)"
+                    if session_id
+                    else "WHERE expires_at IS NULL OR expires_at > ?"
+                )
                 parameters: tuple[Any, ...] = (
-                    (session_id, safe_limit) if session_id else (safe_limit,)
+                    (session_id, _now_iso(), safe_limit)
+                    if session_id
+                    else (_now_iso(), safe_limit)
                 )
                 return connection.execute(
                     f"""
@@ -1609,6 +1736,7 @@ class MemoryStore:
                         SELECT id, role, content
                         FROM conversation
                         {where}
+                        {expiry_condition}
                         ORDER BY id DESC
                         LIMIT ?
                     ) ORDER BY id ASC
@@ -1618,6 +1746,83 @@ class MemoryStore:
 
         rows = await asyncio.to_thread(_list)
         return [{"role": row["role"], "content": row["content"]} for row in rows]
+
+    async def save_context_cascade_shadow_temporal_roles(
+        self,
+        analysis: Any,
+    ) -> None:
+        """Persist content-free time roles; raw text remains in command provenance."""
+
+        created_at = datetime.now(UTC)
+        expires_at = self._expires_at(
+            created_at,
+            days=self.command_transcript_retention_days,
+        )
+
+        def _iso(value: datetime | None) -> str | None:
+            return value.astimezone(UTC).isoformat() if value is not None else None
+
+        def _save() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO context_cascade_shadow_telemetry(
+                        request_id,
+                        utterance_start, utterance_end, utterance_precision,
+                        utterance_source, utterance_confidence,
+                        content_start, content_end, content_relation,
+                        content_precision, content_source, content_confidence,
+                        epistemic_role, relevance_gate, approved_claim_count,
+                        gap_present, axis_insufficiency_json, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(request_id) DO UPDATE SET
+                        utterance_start = excluded.utterance_start,
+                        utterance_end = excluded.utterance_end,
+                        utterance_precision = excluded.utterance_precision,
+                        utterance_source = excluded.utterance_source,
+                        utterance_confidence = excluded.utterance_confidence,
+                        content_start = excluded.content_start,
+                        content_end = excluded.content_end,
+                        content_relation = excluded.content_relation,
+                        content_precision = excluded.content_precision,
+                        content_source = excluded.content_source,
+                        content_confidence = excluded.content_confidence,
+                        epistemic_role = excluded.epistemic_role,
+                        relevance_gate = excluded.relevance_gate,
+                        approved_claim_count = excluded.approved_claim_count,
+                        gap_present = excluded.gap_present,
+                        axis_insufficiency_json = excluded.axis_insufficiency_json,
+                        created_at = excluded.created_at,
+                        expires_at = excluded.expires_at
+                    """,
+                    (
+                        analysis.provenance_request_id,
+                        _iso(analysis.utterance_time.start),
+                        _iso(analysis.utterance_time.end),
+                        analysis.utterance_time.precision,
+                        analysis.utterance_time.source,
+                        analysis.utterance_time.confidence,
+                        _iso(analysis.content_time.start),
+                        _iso(analysis.content_time.end),
+                        analysis.content_time.relation,
+                        analysis.content_time.precision,
+                        analysis.content_time.source,
+                        analysis.content_time.confidence,
+                        analysis.epistemic_role,
+                        analysis.relevance_gate,
+                        len(analysis.approved_claims),
+                        int(bool(analysis.gap)),
+                        json.dumps(
+                            analysis.axis_insufficiency,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        created_at.isoformat(),
+                        expires_at,
+                    ),
+                )
+
+        await asyncio.to_thread(_save)
 
     async def create_memory(self, item: MemoryCreate) -> MemoryItem:
         now = _now_iso()
@@ -2070,6 +2275,12 @@ class MemoryStore:
         transcript: TranscriptEnvelopeV1 | None,
         source: str,
     ) -> bool:
+        created_at = datetime.now(UTC)
+        expires_at = self._expires_at(
+            created_at,
+            days=self.command_transcript_retention_days,
+        )
+
         def _save() -> bool:
             with self._connect() as connection:
                 cursor = connection.execute(
@@ -2077,8 +2288,8 @@ class MemoryStore:
                     INSERT INTO meeting_transcript_segments(
                         session_id, segment_key, channel, speaker_label,
                         speaker_id, device_name, start_time, end_time, text,
-                        transcript_json, emotion_json, source, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                        transcript_json, emotion_json, source, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                     ON CONFLICT(segment_key) DO NOTHING
                     """,
                     (
@@ -2093,7 +2304,8 @@ class MemoryStore:
                         text[:100000],
                         transcript.model_dump_json() if transcript is not None else None,
                         source[:80],
-                        _now_iso(),
+                        created_at.isoformat(),
+                        expires_at,
                     ),
                 )
                 return cursor.rowcount > 0
@@ -2148,10 +2360,11 @@ class MemoryStore:
                     """
                     SELECT * FROM meeting_transcript_segments
                     WHERE session_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
                     ORDER BY start_time ASC, id ASC
                     LIMIT ?
                     """,
-                    (session_id, safe_limit),
+                    (session_id, _now_iso(), safe_limit),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -2219,14 +2432,21 @@ class MemoryStore:
         source_path: Path,
         archived_path: Path,
     ) -> bool:
+        created_at = datetime.now(UTC)
+        expires_at = self._expires_at(
+            created_at,
+            days=self.meeting_audio_retention_days,
+        )
+
         def _save() -> bool:
             with self._connect() as connection:
                 cursor = connection.execute(
                     """
                     INSERT INTO meeting_audio_files(
                         session_id, chunk_id, channel, device_name,
-                        start_time, end_time, source_path, archived_path, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        start_time, end_time, source_path, archived_path, created_at,
+                        expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(session_id, chunk_id) DO NOTHING
                     """,
                     (
@@ -2238,7 +2458,8 @@ class MemoryStore:
                         end_time.isoformat(),
                         str(source_path),
                         str(archived_path),
-                        _now_iso(),
+                        created_at.isoformat(),
+                        expires_at,
                     ),
                 )
                 return cursor.rowcount > 0
@@ -2252,8 +2473,9 @@ class MemoryStore:
                     """
                     SELECT 1 FROM meeting_audio_files
                     WHERE session_id = ? AND chunk_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (session_id, chunk_id),
+                    (session_id, chunk_id, _now_iso()),
                 ).fetchone()
                 return row is not None
 
@@ -2273,10 +2495,11 @@ class MemoryStore:
                     """
                     SELECT * FROM meeting_audio_files
                     WHERE session_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
                     ORDER BY start_time ASC, id ASC
                     LIMIT ?
                     """,
-                    (session_id, safe_limit),
+                    (session_id, _now_iso(), safe_limit),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -2342,14 +2565,20 @@ class MemoryStore:
         text: str,
         source: str,
     ) -> None:
+        created_at = datetime.now(UTC)
+        expires_at = self._expires_at(
+            created_at,
+            days=self.command_transcript_retention_days,
+        )
+
         def _save() -> None:
             with self._connect() as connection:
                 connection.execute(
                     """
                     INSERT INTO screenpipe_transcripts(
                         chunk_id, meeting_id, device_name, device_type,
-                        start_time, end_time, text, source, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        start_time, end_time, text, source, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(chunk_id) DO NOTHING
                     """,
                     (
@@ -2361,7 +2590,8 @@ class MemoryStore:
                         end_time,
                         text[:100000],
                         source[:40],
-                        _now_iso(),
+                        created_at.isoformat(),
+                        expires_at,
                     ),
                 )
 
@@ -2371,8 +2601,12 @@ class MemoryStore:
         def _has() -> bool:
             with self._connect() as connection:
                 row = connection.execute(
-                    "SELECT 1 FROM screenpipe_transcripts WHERE chunk_id = ?",
-                    (chunk_id,),
+                    """
+                    SELECT 1 FROM screenpipe_transcripts
+                    WHERE chunk_id = ?
+                      AND (expires_at IS NULL OR expires_at > ?)
+                    """,
+                    (chunk_id, _now_iso()),
                 ).fetchone()
                 return row is not None
 
@@ -2390,10 +2624,11 @@ class MemoryStore:
                 return connection.execute(
                     """
                     SELECT * FROM screenpipe_transcripts
+                    WHERE expires_at IS NULL OR expires_at > ?
                     ORDER BY start_time DESC
                     LIMIT ?
                     """,
-                    (safe_limit,),
+                    (_now_iso(), safe_limit),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_rows)
@@ -2413,20 +2648,179 @@ class MemoryStore:
         ]
 
     async def prune_screenpipe_transcripts(self, *, retention_days: int) -> int:
-        retention_days = max(1, min(retention_days, 365))
+        """Prune only rows carrying a new-policy expiry; legacy rows stay intact."""
+
+        del retention_days
+        cutoff = _now_iso()
 
         def _prune() -> int:
             with self._connect() as connection:
                 cursor = connection.execute(
                     """
                     DELETE FROM screenpipe_transcripts
-                    WHERE datetime(created_at) < datetime('now', ?)
+                    WHERE expires_at IS NOT NULL AND expires_at <= ?
                     """,
-                    (f"-{retention_days} days",),
+                    (cutoff,),
                 )
                 return cursor.rowcount
 
         return await asyncio.to_thread(_prune)
+
+    async def prune_expired_private_data(
+        self,
+        *,
+        managed_audio_root: Path,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Delete only new records with explicit TTLs and managed audio files."""
+
+        cutoff = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
+        audio_root = managed_audio_root.resolve()
+
+        def _prune() -> dict[str, int]:
+            removed_audio_files = 0
+            failed_audio_files = 0
+            with self._connect() as connection:
+                audio_rows = connection.execute(
+                    """
+                    SELECT archived_path FROM meeting_audio_files
+                    WHERE expires_at IS NOT NULL AND expires_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                for row in audio_rows:
+                    try:
+                        path = Path(row["archived_path"]).resolve(strict=True)
+                        if path.is_file() and path.is_relative_to(audio_root):
+                            path.unlink()
+                            removed_audio_files += 1
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        failed_audio_files += 1
+
+                counts = {
+                    "meeting_audio": connection.execute(
+                        """
+                        DELETE FROM meeting_audio_files
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "meeting_transcripts": connection.execute(
+                        """
+                        DELETE FROM meeting_transcript_segments
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "screenpipe_transcripts": connection.execute(
+                        """
+                        DELETE FROM screenpipe_transcripts
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "conversation": connection.execute(
+                        """
+                        DELETE FROM conversation
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "cascade_shadow_telemetry": connection.execute(
+                        """
+                        DELETE FROM context_cascade_shadow_telemetry
+                        WHERE expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "command_events": connection.execute(
+                        """
+                        DELETE FROM command_events
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "command_transcripts": connection.execute(
+                        """
+                        DELETE FROM command_transcripts
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "commands": connection.execute(
+                        """
+                        DELETE FROM commands
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                }
+            counts["audio_files_removed"] = removed_audio_files
+            counts["audio_files_failed"] = failed_audio_files
+            return counts
+
+        return await asyncio.to_thread(_prune)
+
+    async def preview_legacy_retention_migration(
+        self,
+        *,
+        grace_days: int,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Count legacy rows eligible for a future opt-in migration; never mutate."""
+
+        moment = (now or datetime.now(UTC)).astimezone(UTC)
+        text_cutoff = (
+            moment
+            - timedelta(
+                days=self.command_transcript_retention_days
+                + max(0, min(int(grace_days), 3650))
+            )
+        ).isoformat()
+        audio_cutoff = (
+            moment
+            - timedelta(
+                days=self.meeting_audio_retention_days
+                + max(0, min(int(grace_days), 3650))
+            )
+        ).isoformat()
+
+        def _preview() -> dict[str, int]:
+            tables = (
+                "commands",
+                "command_events",
+                "command_transcripts",
+                "conversation",
+                "screenpipe_transcripts",
+                "meeting_transcript_segments",
+            )
+            with self._connect() as connection:
+                result = {
+                    table: int(
+                        connection.execute(
+                            f"""
+                            SELECT COUNT(*) FROM {table}
+                            WHERE expires_at IS NULL AND created_at <= ?
+                            """,
+                            (text_cutoff,),
+                        ).fetchone()[0]
+                    )
+                    for table in tables
+                }
+                result["meeting_audio_files"] = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM meeting_audio_files
+                        WHERE expires_at IS NULL AND created_at <= ?
+                        """,
+                        (audio_cutoff,),
+                    ).fetchone()[0]
+                )
+                return result
+
+        return await asyncio.to_thread(_preview)
 
     @staticmethod
     def _aware_iso(value: datetime) -> str:

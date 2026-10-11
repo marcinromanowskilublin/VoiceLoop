@@ -166,7 +166,13 @@ class Settings(BaseSettings):
     screenpipe_deepgram_max_file_mb: int = 100
     meeting_recording_poll_seconds: int = 5
     meeting_recording_finalize_seconds: int = 25
-    meeting_recording_archive_audio: bool = True
+    meeting_recording_archive_audio: bool = False
+    meeting_audio_retention_days: int = 7
+    command_transcript_retention_days: int = 30
+    private_data_prune_interval_seconds: int = 3600
+    retention_migration_enabled: bool = False
+    retention_migration_dry_run: bool = True
+    retention_migration_grace_days: int = 30
     meeting_recording_audio_chunk_seconds: int = 15
     meeting_recording_output_sample_rate: int = 48000
     screenpipe_vector_memory_enabled: bool = False
@@ -179,6 +185,10 @@ class Settings(BaseSettings):
     context_timeline_windows_projection_enabled: bool = False
     context_timeline_deictic_screen_enabled: bool = False
     context_timeline_commitment_review_enabled: bool = False
+    context_cascade_shadow_enabled: bool = False
+    context_cascade_shadow_qmax: int = 5
+    context_cascade_shadow_wave_size: int = 2
+    context_cascade_shadow_timeout_seconds: float = 5.0
     windows_context_enabled: bool = True
     windows_context_roots: str = ""
     windows_context_reconcile_seconds: int = 120

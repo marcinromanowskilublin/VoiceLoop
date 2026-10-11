@@ -138,6 +138,10 @@ class AssistantService:
         deictic_screen_enabled: bool = False,
         commitment_timeline_review_enabled: bool = False,
         context_timeline_auto_ttl_days: int = 14,
+        context_cascade_shadow_enabled: bool = False,
+        context_cascade_shadow_qmax: int = 5,
+        context_cascade_shadow_wave_size: int = 2,
+        context_cascade_shadow_timeout_seconds: float = 5.0,
     ) -> None:
         self.memory = memory
         self.events = events
@@ -158,6 +162,19 @@ class AssistantService:
         self.deictic_screen_enabled = deictic_screen_enabled
         self.commitment_timeline_review_enabled = commitment_timeline_review_enabled
         self.context_timeline_auto_ttl_days = context_timeline_auto_ttl_days
+        self.context_cascade_shadow_enabled = context_cascade_shadow_enabled
+        self.context_cascade_shadow_qmax = max(
+            1,
+            min(int(context_cascade_shadow_qmax), len(MEMORY_VECTOR_NAMES)),
+        )
+        self.context_cascade_shadow_wave_size = max(
+            1,
+            min(int(context_cascade_shadow_wave_size), 2),
+        )
+        self.context_cascade_shadow_timeout_seconds = max(
+            0.1,
+            min(float(context_cascade_shadow_timeout_seconds), 30.0),
+        )
         self.context_assembler = ContextAssembler()
         self._latest_tool_observations: list[dict[str, object]] = []
         self.action_definitions = action_definitions
@@ -730,6 +747,7 @@ class AssistantService:
             screen_coro,
             knowledge_coro,
         )
+        self._schedule_context_cascade_shadow(request, text)
         tool_observations = (
             list(knowledge_lookup.observations)
             if knowledge_lookup is not None
@@ -1240,6 +1258,148 @@ class AssistantService:
         )
         self._recent_action_summaries.append(summary)
         self._recent_action_summaries = self._recent_action_summaries[-8:]
+
+    def _schedule_context_cascade_shadow(
+        self,
+        request: CommandRequest,
+        text: str,
+    ) -> None:
+        if (
+            not self.context_cascade_shadow_enabled
+            or not text.strip()
+            or self.embeddings is None
+            or self.qdrant is None
+        ):
+            return
+        from .context.retrieval import build_time_first_query
+        from .context.shadow_statements import (
+            analyze_temporal_statement_shadow,
+            comparative_shadow_question,
+        )
+
+        normalized = normalize_text(text)
+        statement = analyze_temporal_statement_shadow(
+            text,
+            request_id=request.request_id,
+            comparative_question=comparative_shadow_question(text),
+            conflict=any(
+                marker in normalized
+                for marker in ("sprzecz", "konflikt", "nie zgadza", "ale teraz")
+            ),
+            decision_context=any(
+                marker in normalized
+                for marker in ("decyz", "wybier", "ustalmy", "postanow")
+            ),
+            action_impact=any(
+                marker in normalized
+                for marker in ("mam zrobic", "wykonaj", "uruchom", "usun")
+            ),
+        )
+        plan = statement.query_plan() if statement is not None else build_time_first_query(text)
+        if not plan.used_time_filter:
+            return
+        task = asyncio.create_task(
+            self._run_context_cascade_shadow(
+                request=request,
+                text=text,
+                plan=plan,
+                statement=statement,
+            ),
+            name=f"context-cascade-shadow-{request.request_id}",
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    async def _run_context_cascade_shadow(
+        self,
+        *,
+        request: CommandRequest,
+        text: str,
+        plan,
+        statement,
+    ) -> None:
+        from .context.retrieval import TimeFirstRetriever
+
+        started = time.perf_counter()
+        retriever = TimeFirstRetriever(
+            memory=self.memory,
+            embeddings=self.embeddings,
+            qdrant=self.qdrant,
+            scout_mode="cascade_2_2_1",
+            qmax=self.context_cascade_shadow_qmax,
+            wave_size=self.context_cascade_shadow_wave_size,
+            preferred_axes=(
+                tuple(statement.preferred_axes) if statement is not None else ()
+            ),
+            allowed_axes=(
+                tuple(statement.preferred_axes)
+                if statement is not None
+                else MEMORY_VECTOR_NAMES
+            ),
+        )
+        try:
+            pack = await asyncio.wait_for(
+                retriever.retrieve(
+                    text,
+                    session_id=request.interaction_session_id,
+                    limit=min(8, self.vector_context_limit or 8),
+                    query_plan=plan,
+                ),
+                timeout=self.context_cascade_shadow_timeout_seconds,
+            )
+            if statement is not None:
+                await self.memory.save_context_cascade_shadow_temporal_roles(statement)
+            trace = retriever.last_trace
+            payload: dict[str, object] = {
+                "schema_version": "context-cascade-shadow-v1",
+                "request_id": request.request_id,
+                "mode": "shadow",
+                "bounded": True,
+                "stages": ["Czas", "FTS", "adaptive_vectors"],
+                "waves": [list(wave) for wave in trace.waves],
+                "axes_queried": list(trace.axes_queried),
+                "query_count": len(trace.axes_queried),
+                "qmax": self.context_cascade_shadow_qmax,
+                "stop_reason": trace.stop_reason,
+                "candidate_item_count": len(pack.items),
+                "verified_rejected": trace.verified_rejected,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
+            if statement is not None:
+                payload["statement"] = statement.telemetry()
+            await self.events.publish("context.retrieval_cascade_shadow", payload)
+            if self.telemetry is not None:
+                await self.telemetry.mark_request(
+                    request.request_id,
+                    "context_cascade_shadow",
+                    metadata={
+                        "query_count": payload["query_count"],
+                        "stop_reason": payload["stop_reason"],
+                        "candidate_item_count": payload["candidate_item_count"],
+                        "duration_ms": payload["duration_ms"],
+                    },
+                )
+        except TimeoutError:
+            await self.events.publish(
+                "context.retrieval_cascade_shadow",
+                {
+                    "schema_version": "context-cascade-shadow-v1",
+                    "request_id": request.request_id,
+                    "mode": "shadow",
+                    "bounded": True,
+                    "stages": ["Czas"],
+                    "query_count": len(retriever.last_trace.axes_queried),
+                    "qmax": self.context_cascade_shadow_qmax,
+                    "stop_reason": "timeout",
+                    "candidate_item_count": 0,
+                    "duration_ms": round(
+                        (time.perf_counter() - started) * 1000,
+                        3,
+                    ),
+                },
+            )
+        except Exception:
+            LOGGER.exception("Context cascade shadow failed")
 
     async def _vector_memories_for_request(self, request: CommandRequest) -> list[str]:
         if (

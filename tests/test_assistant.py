@@ -94,6 +94,7 @@ def _assistant(
     qdrant=None,
     qdrant_shadow=None,
     vector_context_limit: int = 0,
+    context_cascade_shadow_enabled: bool = False,
 ) -> AssistantService:
     return AssistantService(
         memory=memory,
@@ -110,6 +111,7 @@ def _assistant(
         dedupe_seconds=0,
         vector_context_limit=vector_context_limit,
         routing_v2=routing_v2,
+        context_cascade_shadow_enabled=context_cascade_shadow_enabled,
     )
 
 
@@ -212,6 +214,73 @@ def test_vector_memory_query_uses_five_distinct_spaces(tmp_path) -> None:
         assert shadow_event["payload"]["active_source_ids"] == ["meeting:7"]
         assert shadow_event["payload"]["shadow_source_ids"] == ["meeting:8"]
         assert shadow_event["payload"]["top1_match"] is False
+        await assistant.close()
+
+    asyncio.run(scenario())
+
+
+def test_compound_time_statement_runs_content_free_shadow_only(tmp_path) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_queries(self, documents):
+            return [[1.0, 0.0] for _ in documents]
+
+    class QdrantStub:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.axes: list[str] = []
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def search(self, *, vector_names, **_kwargs):
+            self.axes.append(vector_names[0])
+            return []
+
+    async def scenario() -> None:
+        memory = MemoryStore(tmp_path / "voice.db")
+        await memory.initialize()
+        qdrant = QdrantStub()
+        assistant = _assistant(
+            memory,
+            router=RouterStub(),
+            n8n=N8nStub(),
+            executor=ExecutorStub(memory),
+            tts=TTSStub(),
+            embeddings=EmbeddingsStub(),
+            qdrant=qdrant,
+            vector_context_limit=5,
+            context_cascade_shadow_enabled=True,
+        )
+        text = "a jeszcze miesiąc temu mówiliśmy, że będzie wspaniale"
+        request = CommandRequest(text=text)
+        await memory.create_command(request)
+        events = assistant.events.subscribe()
+        next_event = asyncio.create_task(anext(events))
+        await asyncio.sleep(0)
+
+        assistant._schedule_context_cascade_shadow(request, text)
+        event = await asyncio.wait_for(next_event, timeout=1.0)
+        await events.aclose()
+
+        assert event["type"] == "context.retrieval_cascade_shadow"
+        payload = event["payload"]
+        assert payload["stages"][0] == "Czas"
+        assert payload["axes_queried"] == ["semantic", "topic"]
+        assert payload["query_count"] == 2
+        assert payload["statement"]["epistemic_role"] == "prediction"
+        assert payload["statement"]["relevance_gate"] == "candidate"
+        assert payload["statement"]["axis_insufficiency"] == [
+            "claim_axis_not_available"
+        ]
+        assert text not in str(payload)
+        assert await memory.recent_messages() == []
+        assert await memory.list_memories() == []
         await assistant.close()
 
     asyncio.run(scenario())

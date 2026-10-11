@@ -50,6 +50,12 @@ def test_env_example_matches_stabilization_defaults(tmp_path) -> None:
     assert int(values["CONTEXT_TIMELINE_BUCKET_MINUTES"]) == (
         settings.context_timeline_bucket_minutes
     )
+    assert values["MEETING_RECORDING_ARCHIVE_AUDIO"] == "false"
+    assert settings.meeting_recording_archive_audio is False
+    assert int(values["MEETING_AUDIO_RETENTION_DAYS"]) == 7
+    assert int(values["COMMAND_TRANSCRIPT_RETENTION_DAYS"]) == 30
+    assert values["RETENTION_MIGRATION_ENABLED"] == "false"
+    assert values["RETENTION_MIGRATION_DRY_RUN"] == "true"
     assert hasattr(settings, "voiceattack_registration_key")
 
 

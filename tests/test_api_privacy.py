@@ -83,7 +83,7 @@ async def test_session_accepts_same_local_origin() -> None:
                 headers={"Origin": "http://testserver"},
             )
         assert response.status_code == 200
-        assert response.json() == {"token": "expected-local-token"}
+        assert response.json()["token"] == "expected-local-token"
     finally:
         if previous_services is missing:
             del app.state.services

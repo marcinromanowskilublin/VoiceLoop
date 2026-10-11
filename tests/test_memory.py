@@ -67,6 +67,134 @@ async def test_command_transcript_is_persisted_with_word_metadata(tmp_path) -> N
     assert TranscriptEnvelopeV1.model_validate_json(row["transcript_json"]) == transcript
 
 
+async def test_new_private_rows_receive_ttl_but_explicit_memories_do_not(tmp_path) -> None:
+    store = MemoryStore(
+        tmp_path / "voice.db",
+        command_transcript_retention_days=30,
+        meeting_audio_retention_days=7,
+    )
+    await store.initialize()
+    transcript = TranscriptEnvelopeV1.from_text("Zapisz prywatne polecenie")
+    request = CommandRequest.from_transcript(transcript)
+    await store.create_command(request)
+    await store.add_message("user", "Prywatna rozmowa")
+    memory = await store.create_memory(
+        MemoryCreate(kind="note", content="Jawna pamięć bez TTL.")
+    )
+
+    with store._connect() as connection:
+        command = connection.execute(
+            "SELECT created_at, expires_at FROM commands WHERE request_id = ?",
+            (request.request_id,),
+        ).fetchone()
+        transcript_row = connection.execute(
+            "SELECT expires_at FROM command_transcripts WHERE request_id = ?",
+            (request.request_id,),
+        ).fetchone()
+        conversation = connection.execute(
+            "SELECT created_at, expires_at FROM conversation"
+        ).fetchone()
+        memory_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(memories)").fetchall()
+        }
+
+    assert command is not None and transcript_row is not None and conversation is not None
+    assert datetime.fromisoformat(command["expires_at"]) == (
+        datetime.fromisoformat(command["created_at"]) + timedelta(days=30)
+    )
+    assert transcript_row["expires_at"] == command["expires_at"]
+    assert datetime.fromisoformat(conversation["expires_at"]) == (
+        datetime.fromisoformat(conversation["created_at"]) + timedelta(days=30)
+    )
+    assert "expires_at" not in memory_columns
+    assert (await store.list_memories())[0].id == memory.id
+
+
+async def test_retention_prunes_only_explicitly_expired_new_rows(tmp_path) -> None:
+    audio_root = tmp_path / "meetings"
+    audio_root.mkdir()
+    managed_audio = audio_root / "chunk.wav"
+    managed_audio.write_bytes(b"audio")
+    external_audio = tmp_path / "external.wav"
+    external_audio.write_bytes(b"external")
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    session = await store.create_meeting_session(
+        session_id="retention-session",
+        started_at=now,
+        audio_dir=audio_root,
+    )
+    await store.save_meeting_audio_file(
+        session_id=session.session_id,
+        chunk_id="managed",
+        channel="input",
+        device_name="mic",
+        start_time=now,
+        end_time=now + timedelta(seconds=1),
+        source_path=managed_audio,
+        archived_path=managed_audio,
+    )
+    await store.save_meeting_audio_file(
+        session_id=session.session_id,
+        chunk_id="external",
+        channel="output",
+        device_name="speaker",
+        start_time=now,
+        end_time=now + timedelta(seconds=1),
+        source_path=external_audio,
+        archived_path=external_audio,
+    )
+    await store.add_message("user", "Nowy tekst z TTL")
+    await store.create_memory(MemoryCreate(kind="note", content="Bez TTL"))
+    legacy_created = (now - timedelta(days=365)).isoformat()
+    expired = (now - timedelta(seconds=1)).isoformat()
+    with store._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO conversation(role, content, created_at, expires_at)
+            VALUES ('user', 'legacy', ?, NULL)
+            """,
+            (legacy_created,),
+        )
+        connection.execute(
+            "UPDATE conversation SET expires_at = ? WHERE content = 'Nowy tekst z TTL'",
+            (expired,),
+        )
+        connection.execute(
+            "UPDATE meeting_audio_files SET expires_at = ?",
+            (expired,),
+        )
+
+    preview = await store.preview_legacy_retention_migration(
+        grace_days=0,
+        now=now,
+    )
+    report = await store.prune_expired_private_data(
+        managed_audio_root=audio_root,
+        now=now,
+    )
+
+    with store._connect() as connection:
+        conversations = connection.execute(
+            "SELECT content, expires_at FROM conversation"
+        ).fetchall()
+        audio_count = connection.execute(
+            "SELECT COUNT(*) FROM meeting_audio_files"
+        ).fetchone()[0]
+    assert preview["conversation"] == 1
+    assert [(row["content"], row["expires_at"]) for row in conversations] == [
+        ("legacy", None)
+    ]
+    assert audio_count == 0
+    assert report["meeting_audio"] == 2
+    assert report["audio_files_removed"] == 1
+    assert managed_audio.exists() is False
+    assert external_audio.exists() is True
+    assert [item.content for item in await store.list_memories()] == ["Bez TTL"]
+
+
 async def test_meeting_segment_emotions_are_persisted(tmp_path) -> None:
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
