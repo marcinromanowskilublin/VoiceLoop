@@ -10,4 +10,5 @@ qdrant-client
 SoundCard
 sounddevice
 uvicorn[standard]
+urllib3==2.8.0
 websockets

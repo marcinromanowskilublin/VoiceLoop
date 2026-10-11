@@ -20,6 +20,7 @@ from voiceloop.context.review import (
     question_is_deictic,
 )
 from voiceloop.context.schema import (
+    ContextEventV1,
     ContextItemV1,
     ContextPackV1,
     ContextScope,
@@ -48,7 +49,11 @@ async def test_document_ingest_skips_secrets_and_generated_dirs(tmp_path) -> Non
 
     assert report.stored_events == 1
     assert (report.skipped, report.skipped_secret) == (1, 1)
-    hits = await store.search_context_events(query="piątek", source="local_document")
+    hits = await store.search_context_events(
+        query="piątek",
+        source="local_document",
+        include_expired=True,
+    )
     assert len(hits) == 1
     assert "TOKEN" not in hits[0].text
     assert hits[0].metadata["vectorize"] is False
@@ -73,7 +78,11 @@ async def test_document_event_keeps_modification_time_and_structure(tmp_path) ->
     second = await ingestor.ingest(observed_at=datetime(2026, 9, 28, tzinfo=UTC))
 
     assert (first.stored_events, second.stored_events) == (1, 1)
-    hits = await store.search_context_events(query="termin", source="local_document")
+    hits = await store.search_context_events(
+        query="termin",
+        source="local_document",
+        include_expired=True,
+    )
     assert len(hits) == 1
     event = hits[0]
     assert event.started_at == modified_at
@@ -94,7 +103,9 @@ async def test_long_document_stores_digest_and_reads_full_text_on_demand(tmp_pat
     ingestor = DocumentTimelineIngestor(memory=store, roots=[root], digest_chars=500)
 
     await ingestor.ingest(observed_at=datetime(2026, 9, 21, tzinfo=UTC))
-    event = (await store.search_context_events(query="Dziennik"))[0]
+    event = (
+        await store.search_context_events(query="Dziennik", include_expired=True)
+    )[0]
     full_text = await ingestor.load_full_text(event)
 
     assert event.metadata["digest_truncated"] is True
@@ -116,7 +127,9 @@ async def test_full_read_refuses_a_reference_outside_the_roots(tmp_path) -> None
     await store.initialize()
     ingestor = DocumentTimelineIngestor(memory=store, roots=[root])
     await ingestor.ingest(observed_at=datetime(2026, 9, 21, tzinfo=UTC))
-    event = (await store.search_context_events(query="Notatka"))[0]
+    event = (
+        await store.search_context_events(query="Notatka", include_expired=True)
+    )[0]
     tampered = event.model_copy(
         update={
             "metadata": {
@@ -128,6 +141,59 @@ async def test_full_read_refuses_a_reference_outside_the_roots(tmp_path) -> None
 
     with pytest.raises(DocumentAccessError):
         await ingestor.load_full_text(tampered)
+
+
+@pytest.mark.asyncio
+async def test_document_ingest_refuses_file_symlink_escape(tmp_path) -> None:
+    root = tmp_path / "docs"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    target = outside / "private.md"
+    target.write_text("Treść spoza korzenia.", encoding="utf-8")
+    link = root / "public.md"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("Symlinki nie są dostępne na tej platformie.")
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+
+    report = await DocumentTimelineIngestor(memory=store, roots=[root]).ingest(
+        observed_at=datetime(2026, 9, 21, tzinfo=UTC)
+    )
+
+    assert report.stored_events == 0
+    assert report.skipped_unreadable == 1
+
+
+@pytest.mark.asyncio
+async def test_full_read_refuses_directory_symlink_escape(tmp_path) -> None:
+    root = tmp_path / "docs"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    target = outside / "private.md"
+    target.write_text("Treść spoza korzenia.", encoding="utf-8")
+    linked_directory = root / "linked"
+    try:
+        linked_directory.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlinki nie są dostępne na tej platformie.")
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    ingestor = DocumentTimelineIngestor(memory=store, roots=[root])
+    event = ContextEventV1.from_observation(
+        source="local_document",
+        source_id="tampered",
+        started_at=datetime(2026, 9, 21, tzinfo=UTC),
+        event_type="document",
+        text="bezpieczny digest",
+        metadata={"document_path": str(linked_directory / "private.md")},
+    )
+
+    with pytest.raises(DocumentAccessError):
+        await ingestor.load_full_text(event)
 
 
 @pytest.mark.asyncio
@@ -166,7 +232,11 @@ async def test_windows_projection_keeps_paths_out_of_event_text(tmp_path) -> Non
     )
 
     assert report.stored_events == 1
-    hits = await store.search_context_events(query="VoiceLoop", source="windows_context")
+    hits = await store.search_context_events(
+        query="VoiceLoop",
+        source="windows_context",
+        include_expired=True,
+    )
     assert len(hits) == 1
     event = hits[0]
     assert secret_path not in event.text

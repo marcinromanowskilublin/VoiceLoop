@@ -94,8 +94,8 @@ class DocumentTimelineIngestor:
         raw_path = str(event.metadata.get("document_path") or "")
         if not raw_path:
             raise DocumentAccessError("Zdarzenie nie ma odnośnika do dokumentu.")
-        path = Path(raw_path)
-        if not self._within_roots(path) or path.suffix.lower() not in self.allowed_suffixes:
+        path = self._safe_resolved_path(Path(raw_path))
+        if path is None or not self._allowed(path):
             raise DocumentAccessError("Odnośnik wskazuje poza dozwolone korzenie.")
         text = await asyncio.to_thread(self._read_text, path)
         if text is None:
@@ -128,12 +128,16 @@ class DocumentTimelineIngestor:
             return False
         return path.suffix.lower() in self.allowed_suffixes
 
-    def _within_roots(self, path: Path) -> bool:
+    def _safe_resolved_path(self, path: Path) -> Path | None:
         try:
-            resolved = path.resolve()
+            resolved = path.resolve(strict=True)
         except OSError:
-            return False
-        return any(resolved.is_relative_to(root) for root in self.roots)
+            return None
+        if not resolved.is_file():
+            return None
+        if not any(resolved.is_relative_to(root) for root in self.roots):
+            return None
+        return resolved
 
     def _read_text(self, path: Path) -> str | None:
         try:
@@ -151,11 +155,16 @@ class DocumentTimelineIngestor:
     ) -> tuple[ContextEventV1 | None, str]:
         """Return the event, or `None` with the reason the document was skipped."""
 
+        resolved = self._safe_resolved_path(path)
+        if resolved is None:
+            return None, "unreadable"
+        if not self._allowed(resolved):
+            return None, "secret"
         try:
-            stat = path.stat()
+            stat = resolved.stat()
         except OSError:
             return None, "unreadable"
-        text = self._read_text(path)
+        text = self._read_text(resolved)
         if text is None:
             return None, "unreadable"
         redacted, flags = _redact_document(text)
@@ -164,7 +173,6 @@ class DocumentTimelineIngestor:
             # secret may carry others in shapes the patterns do not cover.
             return None, "secret"
         digest, truncated = _digest(redacted, limit=self.digest_chars)
-        resolved = path.resolve()
         source_id = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
         # The timeline axis is when the document changed, not when we scanned it.
         # Scan time would move on every run and rewrite the event content hash.
@@ -174,7 +182,7 @@ class DocumentTimelineIngestor:
             source_id=source_id,
             started_at=min(modified_at, observed_at),
             event_type="document",
-            window_title=_document_title(redacted, fallback=path.name),
+            window_title=_document_title(redacted, fallback=resolved.name),
             text=digest,
             metadata={
                 "relative_name": path.name,

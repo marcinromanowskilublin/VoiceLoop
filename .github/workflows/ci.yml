@@ -45,5 +45,8 @@ jobs:
           ../scripts/holding-commands/server.py
           ../scripts/calibration-phrases/server.py
 
+      - name: Dependency audit
+        run: python -m pip_audit -r requirements.lock
+
       - name: Pytest
         run: python -m pytest -c pyproject.toml -q

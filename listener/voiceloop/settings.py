@@ -330,12 +330,28 @@ class Settings(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         token_path = self.data_dir / "voiceloop.token"
         if token_path.exists():
+            token_path.chmod(0o600)
             value = token_path.read_text(encoding="utf-8").strip()
             if value:
                 return value
 
         value = secrets.token_urlsafe(32)
-        token_path.write_text(value, encoding="utf-8")
+        try:
+            descriptor = os.open(
+                token_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            token_path.chmod(0o600)
+            existing = token_path.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+            token_path.unlink()
+            return self.ensure_local_token()
+        with os.fdopen(descriptor, "w", encoding="utf-8") as token_file:
+            token_file.write(value)
+        token_path.chmod(0o600)
         return value
 
 

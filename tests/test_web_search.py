@@ -1,5 +1,6 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from voiceloop.settings import Settings
@@ -325,3 +326,71 @@ async def test_inspect_endpoint_in_documentation_reports_match_and_access(tmp_pa
     assert report["documentation_access"]["availability"] == "web_and_download"
     assert report["documentation_access"]["web_count"] == 1
     assert report["documentation_access"]["download_count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://user:secret@example.com/docs",
+        "http://127.0.0.1/private",
+        "http://169.254.169.254/latest/meta-data",
+        "http://[::1]/private",
+    ],
+)
+async def test_document_inspection_rejects_unsafe_urls(tmp_path, url) -> None:
+    client = WebSearchClient(Settings(voiceloop_data_dir=str(tmp_path)))
+
+    with pytest.raises(WebSearchError):
+        await client._validate_inspection_url(url)
+
+
+@pytest.mark.asyncio
+async def test_document_inspection_validates_every_redirect(tmp_path) -> None:
+    client = WebSearchClient(Settings(voiceloop_data_dir=str(tmp_path)))
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            302,
+            headers={"Location": "http://127.0.0.1/private"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async_client = httpx.AsyncClient
+    client._resolve_public_addresses = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[
+            frozenset({"93.184.216.34"}),
+            WebSearchError("blocked redirect"),
+        ]
+    )
+
+    with patch(
+        "voiceloop.web_search.httpx.AsyncClient",
+        side_effect=lambda **kwargs: async_client(transport=transport, **kwargs),
+    ):
+        with pytest.raises(WebSearchError, match="blocked redirect"):
+            await client._fetch_text_for_inspection("https://docs.example/start")
+
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_document_inspection_rejects_oversized_response(tmp_path) -> None:
+    client = WebSearchClient(Settings(voiceloop_data_dir=str(tmp_path)))
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, content=b"x" * 1_000_001)
+    )
+    async_client = httpx.AsyncClient
+    client._resolve_public_addresses = AsyncMock(  # type: ignore[method-assign]
+        return_value=frozenset({"93.184.216.34"})
+    )
+
+    with patch(
+        "voiceloop.web_search.httpx.AsyncClient",
+        side_effect=lambda **kwargs: async_client(transport=transport, **kwargs),
+    ):
+        with pytest.raises(WebSearchError, match="limit rozmiaru"):
+            await client._fetch_text_for_inspection("https://docs.example/large")

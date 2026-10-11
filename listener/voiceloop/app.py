@@ -8,9 +8,10 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -568,6 +569,48 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+
+_LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testserver"})
+
+
+def _request_authority(value: str, *, scheme: str) -> tuple[str, int] | None:
+    """Return a normalized host/port pair, rejecting malformed authorities."""
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+    try:
+        parsed = urlsplit(candidate if "://" in candidate else f"//{candidate}")
+        hostname = (parsed.hostname or "").casefold().rstrip(".")
+        port = parsed.port
+    except ValueError:
+        return None
+    normalized_scheme = (parsed.scheme or scheme).casefold()
+    if not hostname or normalized_scheme not in {"http", "https"}:
+        return None
+    return hostname, port or (443 if normalized_scheme == "https" else 80)
+
+
+@app.middleware("http")
+async def enforce_local_browser_boundary(request: Request, call_next):
+    """Reject rebinding and cross-origin browser requests before route handling."""
+
+    host = _request_authority(
+        request.headers.get("host", ""),
+        scheme=request.url.scheme,
+    )
+    if host is None or host[0] not in _LOCAL_HTTP_HOSTS:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Invalid Host header"},
+        )
+    origin = request.headers.get("origin", "").strip()
+    if origin and _request_authority(origin, scheme=request.url.scheme) != host:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "Cross-origin access denied"},
+        )
+    return await call_next(request)
 
 
 def services_from(request: Request) -> Services:

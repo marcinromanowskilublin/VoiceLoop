@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 from voiceloop.settings import Settings
@@ -53,3 +55,16 @@ def test_env_example_matches_stabilization_defaults(tmp_path) -> None:
 
 def test_pytest_disables_settings_env_file() -> None:
     assert Settings.model_config.get("env_file") is None
+
+
+def test_local_token_file_is_private_on_create_and_reuse(tmp_path) -> None:
+    settings = Settings(voiceloop_data_dir=str(tmp_path))
+
+    token = settings.ensure_local_token()
+    token_path = tmp_path / "voiceloop.token"
+    token_path.chmod(0o644)
+    reused = settings.ensure_local_token()
+
+    assert reused == token
+    if os.name != "nt":
+        assert stat.S_IMODE(token_path.stat().st_mode) == 0o600

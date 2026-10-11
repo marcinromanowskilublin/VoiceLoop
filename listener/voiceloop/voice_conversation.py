@@ -571,7 +571,10 @@ class VoiceConversationCoordinator:
                     turn_id=turn_id,
                 )
                 return
-            LOGGER.info("Ignoring transcript outside conversation turn: %s", cleaned[:80])
+            LOGGER.info(
+                "Ignoring transcript outside conversation turn (chars=%d)",
+                len(cleaned),
+            )
             return
 
         control_phrase = (
