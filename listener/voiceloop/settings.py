@@ -473,6 +473,7 @@ def _read_existing_private_token_windows(token_path: Path) -> str:
     import win32file
     import win32security
 
+    file_flag_open_reparse_point = 0x00200000
     user_sid, dacl, _ = _windows_token_security()
     handle = win32file.CreateFile(
         str(token_path),
@@ -480,7 +481,7 @@ def _read_existing_private_token_windows(token_path: Path) -> str:
         0,
         None,
         win32con.OPEN_EXISTING,
-        win32con.FILE_FLAG_OPEN_REPARSE_POINT,
+        file_flag_open_reparse_point,
         None,
     )
     try:
@@ -497,7 +498,9 @@ def _read_existing_private_token_windows(token_path: Path) -> str:
             win32security.OWNER_SECURITY_INFORMATION,
         )
         owner_sid = security.GetSecurityDescriptorOwner()
-        if not win32security.EqualSid(owner_sid, user_sid):
+        if win32security.ConvertSidToStringSid(
+            owner_sid
+        ) != win32security.ConvertSidToStringSid(user_sid):
             raise RuntimeError("Local token file is owned by another user.")
         win32security.SetSecurityInfo(
             handle,

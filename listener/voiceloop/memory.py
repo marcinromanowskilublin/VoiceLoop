@@ -3420,6 +3420,8 @@ def _safe_unlink_managed_file_windows(
     import win32con
     import win32file
 
+    file_read_attributes = 0x00000080
+    file_flag_open_reparse_point = 0x00200000
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     handle = None
     try:
@@ -3437,7 +3439,7 @@ def _safe_unlink_managed_file_windows(
             return "unsafe"
         handle = win32file.CreateFile(
             str(path),
-            win32con.DELETE | win32con.FILE_READ_ATTRIBUTES,
+            win32con.DELETE | file_read_attributes,
             (
                 win32con.FILE_SHARE_READ
                 | win32con.FILE_SHARE_WRITE
@@ -3445,7 +3447,7 @@ def _safe_unlink_managed_file_windows(
             ),
             None,
             win32con.OPEN_EXISTING,
-            win32con.FILE_FLAG_OPEN_REPARSE_POINT,
+            file_flag_open_reparse_point,
             None,
         )
         information = win32file.GetFileInformationByHandle(handle)
@@ -3470,8 +3472,16 @@ def _safe_unlink_managed_file_windows(
             _fields_ = [("DeleteFile", wintypes.BOOL)]
 
         disposition = FileDispositionInfo(True)
-        if not ctypes.windll.kernel32.SetFileInformationByHandle(
-            int(handle),
+        set_file_information = ctypes.windll.kernel32.SetFileInformationByHandle
+        set_file_information.argtypes = (
+            wintypes.HANDLE,
+            wintypes.INT,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        )
+        set_file_information.restype = wintypes.BOOL
+        if not set_file_information(
+            wintypes.HANDLE(int(handle)),
             4,
             ctypes.byref(disposition),
             ctypes.sizeof(disposition),

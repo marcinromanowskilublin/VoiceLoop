@@ -123,4 +123,6 @@ def test_local_token_file_has_protected_current_user_only_dacl(tmp_path) -> None
 
     assert control & win32security.SE_DACL_PROTECTED
     assert dacl.GetAceCount() == 1
-    assert win32security.EqualSid(dacl.GetAce(0)[2], owner)
+    assert win32security.ConvertSidToStringSid(
+        dacl.GetAce(0)[2]
+    ) == win32security.ConvertSidToStringSid(owner)
