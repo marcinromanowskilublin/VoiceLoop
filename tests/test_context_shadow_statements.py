@@ -5,6 +5,7 @@ import pytest
 from voiceloop.context.shadow_statements import (
     AtomicClaimProposal,
     analyze_temporal_statement_shadow,
+    shadow_relevance_gate,
 )
 from voiceloop.memory import MemoryStore
 from voiceloop.models import CommandRequest
@@ -37,6 +38,10 @@ def test_compound_temporal_statement_is_a_prediction_candidate() -> None:
     assert analysis.query_plan().used_time_filter is True
     assert "claim_axis_not_available" in analysis.axis_insufficiency
     assert TEXT not in str(analysis.telemetry())
+
+
+def test_non_epistemic_context_stays_context_only() -> None:
+    assert shadow_relevance_gate(has_epistemic_content=False) == "context_only"
 
 
 @pytest.mark.parametrize(

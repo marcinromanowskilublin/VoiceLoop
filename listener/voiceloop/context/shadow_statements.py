@@ -107,8 +107,12 @@ def analyze_temporal_statement_shadow(
     # "Miesiąc temu" is approximate. A two-week interval avoids fake day precision.
     utterance_start = observed_utc - timedelta(days=37)
     utterance_end = observed_utc - timedelta(days=23)
-    investigate = any(
-        (comparative_question, conflict, decision_context, action_impact)
+    relevance_gate = shadow_relevance_gate(
+        has_epistemic_content=True,
+        comparative_question=comparative_question,
+        conflict=conflict,
+        decision_context=decision_context,
+        action_impact=action_impact,
     )
     approved = tuple(
         proposal
@@ -137,10 +141,25 @@ def analyze_temporal_statement_shadow(
             confidence=0.55,
         ),
         epistemic_role=epistemic_role,
-        relevance_gate="investigate" if investigate else "candidate",
+        relevance_gate=relevance_gate,
         approved_claims=approved,
         gap="" if approved else "compound_claim_requires_review",
     )
+
+
+def shadow_relevance_gate(
+    *,
+    has_epistemic_content: bool,
+    comparative_question: bool = False,
+    conflict: bool = False,
+    decision_context: bool = False,
+    action_impact: bool = False,
+) -> Literal["context_only", "candidate", "investigate"]:
+    if not has_epistemic_content:
+        return "context_only"
+    if any((comparative_question, conflict, decision_context, action_impact)):
+        return "investigate"
+    return "candidate"
 
 
 def comparative_shadow_question(text: str) -> bool:

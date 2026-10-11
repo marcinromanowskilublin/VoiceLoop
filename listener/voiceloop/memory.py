@@ -2683,30 +2683,32 @@ class MemoryStore:
             with self._connect() as connection:
                 audio_rows = connection.execute(
                     """
-                    SELECT archived_path FROM meeting_audio_files
+                    SELECT id, archived_path FROM meeting_audio_files
                     WHERE expires_at IS NOT NULL AND expires_at <= ?
                     """,
                     (cutoff,),
                 ).fetchall()
+                removed_audio_rows = 0
                 for row in audio_rows:
+                    delete_row = True
                     try:
                         path = Path(row["archived_path"]).resolve(strict=True)
                         if path.is_file() and path.is_relative_to(audio_root):
                             path.unlink()
                             removed_audio_files += 1
                     except FileNotFoundError:
-                        continue
+                        pass
                     except OSError:
                         failed_audio_files += 1
+                        delete_row = False
+                    if delete_row:
+                        removed_audio_rows += connection.execute(
+                            "DELETE FROM meeting_audio_files WHERE id = ?",
+                            (row["id"],),
+                        ).rowcount
 
                 counts = {
-                    "meeting_audio": connection.execute(
-                        """
-                        DELETE FROM meeting_audio_files
-                        WHERE expires_at IS NOT NULL AND expires_at <= ?
-                        """,
-                        (cutoff,),
-                    ).rowcount,
+                    "meeting_audio": removed_audio_rows,
                     "meeting_transcripts": connection.execute(
                         """
                         DELETE FROM meeting_transcript_segments

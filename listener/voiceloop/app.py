@@ -621,7 +621,7 @@ app = FastAPI(
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testserver"})
 
 
-def _request_authority(value: str, *, scheme: str) -> tuple[str, int] | None:
+def _request_authority(value: str, *, scheme: str) -> tuple[str, str, int] | None:
     """Return a normalized host/port pair, rejecting malformed authorities."""
 
     candidate = value.strip()
@@ -636,7 +636,11 @@ def _request_authority(value: str, *, scheme: str) -> tuple[str, int] | None:
     normalized_scheme = (parsed.scheme or scheme).casefold()
     if not hostname or normalized_scheme not in {"http", "https"}:
         return None
-    return hostname, port or (443 if normalized_scheme == "https" else 80)
+    return (
+        normalized_scheme,
+        hostname,
+        port or (443 if normalized_scheme == "https" else 80),
+    )
 
 
 @app.middleware("http")
@@ -647,7 +651,7 @@ async def enforce_local_browser_boundary(request: Request, call_next):
         request.headers.get("host", ""),
         scheme=request.url.scheme,
     )
-    if host is None or host[0] not in _LOCAL_HTTP_HOSTS:
+    if host is None or host[1] not in _LOCAL_HTTP_HOSTS:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "Invalid Host header"},

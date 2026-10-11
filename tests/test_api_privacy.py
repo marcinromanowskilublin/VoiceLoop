@@ -70,6 +70,22 @@ async def test_session_rejects_cross_origin_even_for_local_host() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_rejects_different_local_origin_port() -> None:
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/v1/session",
+            headers={"Origin": "http://testserver:9999"},
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_session_accepts_same_local_origin() -> None:
     missing = object()
     previous_services = getattr(app.state, "services", missing)

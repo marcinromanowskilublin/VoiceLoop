@@ -31,11 +31,12 @@ class FakeChannelCapture:
         return None
 
 
-async def _recorder(tmp_path, *, envelope=None):
+async def _recorder(tmp_path, *, envelope=None, archive_audio=False):
     settings = Settings(
         voiceloop_data_dir=str(tmp_path / "data"),
         meeting_recording_poll_seconds=60,
         meeting_recording_finalize_seconds=5,
+        meeting_recording_archive_audio=archive_audio,
     )
     memory = MemoryStore(settings.data_dir / "voice.db")
     await memory.initialize()
@@ -59,6 +60,12 @@ async def _cancel_poll(recorder: MeetingRecorder) -> None:
     if task is not None:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_raw_audio_archive_is_off_by_default(tmp_path) -> None:
+    recorder, _, _, _, _ = await _recorder(tmp_path)
+
+    assert recorder.archive_audio is False
 
 
 async def test_live_microphone_transcript_is_durable_and_labeled_as_user(tmp_path) -> None:
@@ -153,6 +160,7 @@ async def test_output_audio_is_archived_and_split_by_deepgram_speaker(tmp_path) 
     recorder, memory, _, transcriber, _ = await _recorder(
         tmp_path,
         envelope=envelope,
+        archive_audio=True,
     )
     screenpipe_root = tmp_path / "screenpipe" / "data"
     screenpipe_root.mkdir(parents=True)
