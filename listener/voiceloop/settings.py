@@ -474,6 +474,15 @@ def _read_existing_private_token_windows(token_path: Path) -> str:
     import win32security
 
     file_flag_open_reparse_point = 0x00200000
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    before = os.lstat(token_path)
+    attributes = int(getattr(before, "st_file_attributes", 0))
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or stat.S_ISLNK(before.st_mode)
+        or attributes & reparse_flag
+    ):
+        raise RuntimeError("Local token path must be a regular non-reparse file.")
     user_sid, dacl, _ = _windows_token_security()
     handle = win32file.CreateFile(
         str(token_path),
