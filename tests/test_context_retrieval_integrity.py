@@ -90,15 +90,25 @@ async def test_semantic_candidate_rejects_invalid_evidence(tmp_path, fault):
     elif fault == "deleted_episode":
         await store.tombstone_context_episode(episode.episode_id)
     elif fault == "expired_episode":
-        await store.upsert_context_episode(episode.model_copy(update={
-            "expires_at": datetime.now(UTC) - timedelta(seconds=1),
-        }))
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE context_episodes SET expires_at = ? WHERE episode_id = ?",
+                (
+                    (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+                    episode.episode_id,
+                ),
+            )
     elif fault == "deleted_source":
         await store.tombstone_context_event(event.event_id)
     elif fault == "expired_source":
-        await store.upsert_context_event(event.model_copy(update={
-            "expires_at": datetime.now(UTC) - timedelta(seconds=1),
-        }))
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE context_events SET expires_at = ? WHERE event_id = ?",
+                (
+                    (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+                    event.event_id,
+                ),
+            )
     elif fault == "missing_source":
         store.get_context_event = AsyncMock(return_value=None)
     elif fault == "changed_source":

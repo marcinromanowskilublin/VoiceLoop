@@ -169,6 +169,36 @@ async def test_retention_policy_effective_time_survives_restart(tmp_path) -> Non
     assert second.retention_policy_effective_at == effective_at
 
 
+async def test_context_upsert_preserves_legacy_null_until_content_changes(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    now = datetime.now(UTC)
+    legacy = ContextEventV1.from_observation(
+        source="local_document",
+        source_id="legacy",
+        started_at=now,
+        text="Treść historyczna.",
+    )
+    await store.upsert_context_event(legacy)
+    requested_expiry = now + timedelta(days=14)
+
+    unchanged = await store.upsert_context_event(
+        legacy.model_copy(update={"expires_at": requested_expiry})
+    )
+    changed = await store.upsert_context_event(
+        ContextEventV1.from_observation(
+            source=legacy.source,
+            source_id=legacy.source_id,
+            started_at=now,
+            text="Nowa treść po wdrożeniu.",
+            expires_at=requested_expiry,
+        )
+    )
+
+    assert unchanged.expires_at is None
+    assert changed.expires_at == requested_expiry
+
+
 async def test_retention_prunes_only_explicitly_expired_new_rows(tmp_path) -> None:
     audio_root = tmp_path / "meetings"
     audio_root.mkdir()
