@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from collections import OrderedDict
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from .capability_index import CapabilityIndex, CapabilityIndexError
@@ -1271,44 +1271,57 @@ class AssistantService:
             or self.qdrant is None
         ):
             return
-        from .context.retrieval import build_time_first_query
-        from .context.shadow_statements import (
-            analyze_temporal_statement_shadow,
-            comparative_shadow_question,
-        )
+        try:
+            from .context.retrieval import build_time_first_query
+            from .context.shadow_statements import (
+                analyze_temporal_statement_shadow,
+                comparative_shadow_question,
+            )
 
-        normalized = normalize_text(text)
-        statement = analyze_temporal_statement_shadow(
-            text,
-            request_id=request.request_id,
-            comparative_question=comparative_shadow_question(text),
-            conflict=any(
-                marker in normalized
-                for marker in ("sprzecz", "konflikt", "nie zgadza", "ale teraz")
-            ),
-            decision_context=any(
-                marker in normalized
-                for marker in ("decyz", "wybier", "ustalmy", "postanow")
-            ),
-            action_impact=any(
-                marker in normalized
-                for marker in ("mam zrobic", "wykonaj", "uruchom", "usun")
-            ),
-        )
-        plan = statement.query_plan() if statement is not None else build_time_first_query(text)
-        if not plan.used_time_filter:
+            normalized = normalize_text(text)
+            statement = analyze_temporal_statement_shadow(
+                text,
+                request_id=request.request_id,
+                now=datetime.now(UTC),
+                comparative_question=comparative_shadow_question(text),
+                conflict=any(
+                    marker in normalized
+                    for marker in ("sprzecz", "konflikt", "nie zgadza", "ale teraz")
+                ),
+                decision_context=any(
+                    marker in normalized
+                    for marker in ("decyz", "wybier", "ustalmy", "postanow")
+                ),
+                action_impact=any(
+                    marker in normalized
+                    for marker in ("mam zrobic", "wykonaj", "uruchom", "usun")
+                ),
+            )
+            plan = (
+                statement.query_plan()
+                if statement is not None
+                else build_time_first_query(text)
+            )
+            if not plan.used_time_filter:
+                return
+            opaque_id = hashlib.sha256(
+                request.request_id.encode("utf-8")
+            ).hexdigest()[:24]
+            task = asyncio.create_task(
+                self._run_context_cascade_shadow(
+                    request=request,
+                    text=text,
+                    plan=plan,
+                    statement=statement,
+                    opaque_id=opaque_id,
+                ),
+                name=f"context-cascade-shadow-{opaque_id}",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+        except Exception:
+            LOGGER.warning("Context cascade shadow scheduling failed")
             return
-        task = asyncio.create_task(
-            self._run_context_cascade_shadow(
-                request=request,
-                text=text,
-                plan=plan,
-                statement=statement,
-            ),
-            name=f"context-cascade-shadow-{request.request_id}",
-        )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
 
     async def _run_context_cascade_shadow(
         self,
@@ -1317,6 +1330,7 @@ class AssistantService:
         text: str,
         plan,
         statement,
+        opaque_id: str,
     ) -> None:
         from .context.retrieval import TimeFirstRetriever
 
@@ -1330,11 +1344,6 @@ class AssistantService:
             wave_size=self.context_cascade_shadow_wave_size,
             preferred_axes=(
                 tuple(statement.preferred_axes) if statement is not None else ()
-            ),
-            allowed_axes=(
-                tuple(statement.preferred_axes)
-                if statement is not None
-                else MEMORY_VECTOR_NAMES
             ),
         )
         try:
@@ -1352,14 +1361,14 @@ class AssistantService:
             trace = retriever.last_trace
             payload: dict[str, object] = {
                 "schema_version": "context-cascade-shadow-v1",
-                "request_id": request.request_id,
+                "request_id": opaque_id,
                 "mode": "shadow",
                 "bounded": True,
                 "stages": ["Czas", "FTS", "adaptive_vectors"],
                 "waves": [list(wave) for wave in trace.waves],
                 "axes_queried": list(trace.axes_queried),
                 "query_count": len(trace.axes_queried),
-                "qmax": self.context_cascade_shadow_qmax,
+                "qmax": retriever.qmax,
                 "stop_reason": trace.stop_reason,
                 "candidate_item_count": len(pack.items),
                 "verified_rejected": trace.verified_rejected,
@@ -1384,12 +1393,12 @@ class AssistantService:
                 "context.retrieval_cascade_shadow",
                 {
                     "schema_version": "context-cascade-shadow-v1",
-                    "request_id": request.request_id,
+                    "request_id": opaque_id,
                     "mode": "shadow",
                     "bounded": True,
                     "stages": ["Czas"],
                     "query_count": len(retriever.last_trace.axes_queried),
-                    "qmax": self.context_cascade_shadow_qmax,
+                    "qmax": retriever.qmax,
                     "stop_reason": "timeout",
                     "candidate_item_count": 0,
                     "duration_ms": round(
@@ -1398,8 +1407,11 @@ class AssistantService:
                     ),
                 },
             )
-        except Exception:
-            LOGGER.exception("Context cascade shadow failed")
+        except Exception as exc:
+            LOGGER.warning(
+                "Context cascade shadow failed (error_type=%s)",
+                type(exc).__name__,
+            )
 
     async def _vector_memories_for_request(self, request: CommandRequest) -> list[str]:
         if (

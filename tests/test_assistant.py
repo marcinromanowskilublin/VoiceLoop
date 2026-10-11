@@ -258,7 +258,7 @@ def test_compound_time_statement_runs_content_free_shadow_only(tmp_path) -> None
             context_cascade_shadow_enabled=True,
         )
         text = "a jeszcze miesiąc temu mówiliśmy, że będzie wspaniale"
-        request = CommandRequest(text=text)
+        request = CommandRequest(request_id="content-leak-123", text=text)
         await memory.create_command(request)
         events = assistant.events.subscribe()
         next_event = asyncio.create_task(anext(events))
@@ -271,16 +271,70 @@ def test_compound_time_statement_runs_content_free_shadow_only(tmp_path) -> None
         assert event["type"] == "context.retrieval_cascade_shadow"
         payload = event["payload"]
         assert payload["stages"][0] == "Czas"
-        assert payload["axes_queried"] == ["semantic", "topic"]
-        assert payload["query_count"] == 2
+        assert payload["waves"] == [
+            ["semantic", "topic"],
+            ["intent", "decision"],
+            ["person_context"],
+        ]
+        assert payload["axes_queried"] == [
+            "semantic",
+            "topic",
+            "intent",
+            "decision",
+            "person_context",
+        ]
+        assert payload["query_count"] == 5
+        assert payload["qmax"] == 5
         assert payload["statement"]["epistemic_role"] == "prediction"
         assert payload["statement"]["relevance_gate"] == "candidate"
         assert payload["statement"]["axis_insufficiency"] == [
             "claim_axis_not_available"
         ]
         assert text not in str(payload)
+        assert request.request_id not in str(payload)
         assert await memory.recent_messages() == []
         assert await memory.list_memories() == []
+        await assistant.close()
+
+    asyncio.run(scenario())
+
+
+def test_shadow_analysis_failure_has_no_live_side_effect(tmp_path, monkeypatch) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+    class QdrantStub:
+        enabled = True
+
+    def fail_analysis(*_args, **_kwargs):
+        raise RuntimeError("shadow-only failure")
+
+    monkeypatch.setattr(
+        "voiceloop.context.shadow_statements.analyze_temporal_statement_shadow",
+        fail_analysis,
+    )
+
+    async def scenario() -> None:
+        memory = MemoryStore(tmp_path / "voice.db")
+        await memory.initialize()
+        assistant = _assistant(
+            memory,
+            router=RouterStub(),
+            n8n=N8nStub(),
+            executor=ExecutorStub(memory),
+            tts=TTSStub(),
+            embeddings=EmbeddingsStub(),
+            qdrant=QdrantStub(),
+            context_cascade_shadow_enabled=True,
+        )
+        request = CommandRequest(text="Co ustaliliśmy wczoraj?")
+        before = await memory.create_command(request)
+
+        assistant._schedule_context_cascade_shadow(request, request.text or "")
+
+        after = await memory.get_command(request.request_id)
+        assert before == after
+        assert assistant._background_tasks == set()
         await assistant.close()
 
     asyncio.run(scenario())

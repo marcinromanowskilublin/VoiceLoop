@@ -190,7 +190,21 @@ async def test_meeting_recorder_and_screenpipe_share_timeline(tmp_path) -> None:
 
     assert (recorded.events, recorded.episodes) == (1, 1)
     assert (screenpipe.events, screenpipe.episodes) == (1, 1)
-    assert len(await store.search_context_episodes(query="timeline")) == 1
+    recorded_segments = await store.list_meeting_transcript_segments("session-1")
+    recorded_events = await store.search_context_events(
+        query="timeline",
+        source="meeting_recorder",
+        include_expired=True,
+    )
+    recorded_episodes = await store.search_context_episodes(
+        query="timeline",
+        source="meeting_recorder",
+        include_expired=True,
+    )
+    assert len(recorded_events) == 1
+    assert len(recorded_episodes) == 1
+    assert recorded_events[0].expires_at == recorded_segments[0].expires_at
+    assert recorded_episodes[0].expires_at == recorded_segments[0].expires_at
     assert len(await store.search_context_episodes(query="Qdrant")) == 1
 
 
@@ -332,7 +346,7 @@ async def test_shadow_cascade_uses_five_unique_axes_in_2_2_1_waves(tmp_path) -> 
         embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
         qdrant=qdrant,  # type: ignore[arg-type]
         scout_mode="cascade_2_2_1",
-        qmax=5,
+        qmax=6,
         wave_size=2,
     )
 
@@ -355,7 +369,57 @@ async def test_shadow_cascade_uses_five_unique_axes_in_2_2_1_waves(tmp_path) -> 
         "person_context",
     ]
     assert len(set(qdrant.axes)) == 5
+    assert retriever.qmax == 5
     assert retriever.last_trace.stop_reason == "axes_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_shadow_cascade_rejects_unbounded_query_before_embeddings(tmp_path) -> None:
+    class EmbeddingsStub:
+        enabled = True
+        called = False
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_queries(self, _documents):
+            self.called = True
+            raise AssertionError("unbounded cascade must not embed")
+
+    class QdrantStub:
+        enabled = True
+        called = False
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def search(self, **_kwargs):
+            self.called = True
+            raise AssertionError("unbounded cascade must not query Qdrant")
+
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    embeddings = EmbeddingsStub()
+    qdrant = QdrantStub()
+    retriever = TimeFirstRetriever(
+        memory=store,
+        embeddings=embeddings,  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        scout_mode="cascade_2_2_1",
+        qmax=6,
+        wave_size=2,
+    )
+
+    pack = await retriever.retrieve(
+        "Co ustaliliśmy?",
+        now=datetime(2026, 9, 20, 12, tzinfo=UTC),
+    )
+
+    assert pack.items == ()
+    assert retriever.last_trace.stop_reason == "unbounded_rejected"
+    assert retriever.last_trace.axes_queried == ()
+    assert embeddings.called is False
+    assert qdrant.called is False
 
 
 @pytest.mark.asyncio

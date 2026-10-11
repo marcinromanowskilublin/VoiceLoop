@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from datetime import UTC, datetime, timedelta
@@ -36,7 +37,7 @@ class TemporalStatementShadowV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raw_text: str = Field(min_length=1, max_length=8000)
-    provenance_request_id: str = Field(min_length=1, max_length=200)
+    provenance_request_id: str = Field(min_length=1, max_length=120)
     observed_at: datetime
     utterance_time: TemporalRoleV1
     content_time: TemporalRoleV1
@@ -63,7 +64,9 @@ class TemporalStatementShadowV1(BaseModel):
         """Return content-free fields safe for local shadow telemetry."""
 
         return {
-            "provenance_request_id": self.provenance_request_id,
+            "provenance_id": hashlib.sha256(
+                self.provenance_request_id.encode("utf-8")
+            ).hexdigest()[:24],
             "epistemic_role": self.epistemic_role,
             "relevance_gate": self.relevance_gate,
             "utterance_precision": self.utterance_time.precision,

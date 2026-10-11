@@ -131,7 +131,6 @@ class TimeFirstRetriever:
         qmax: int = 5,
         wave_size: int = 2,
         preferred_axes: tuple[str, ...] = (),
-        allowed_axes: tuple[str, ...] = MEMORY_VECTOR_NAMES,
     ) -> None:
         self.memory = memory
         self.screenpipe = screenpipe
@@ -143,9 +142,6 @@ class TimeFirstRetriever:
         self.wave_size = max(1, min(int(wave_size), 2))
         self.preferred_axes = tuple(
             axis for axis in preferred_axes if axis in MEMORY_VECTOR_NAMES
-        )
-        self.allowed_axes = tuple(
-            axis for axis in allowed_axes if axis in MEMORY_VECTOR_NAMES
         )
         self.last_trace = CascadeTrace()
 
@@ -160,6 +156,12 @@ class TimeFirstRetriever:
     ) -> ContextPackV1:
         plan = query_plan or build_time_first_query(query, now=now)
         self.last_trace = CascadeTrace(time_bounded=plan.used_time_filter)
+        if self.scout_mode == "cascade_2_2_1" and not _is_bounded_plan(plan):
+            self.last_trace = CascadeTrace(
+                time_bounded=False,
+                stop_reason="unbounded_rejected",
+            )
+            return ContextPackV1(question=query, session_id=session_id)
         safe_limit = max(1, min(int(limit), 30))
         episodes = await self.memory.search_context_episodes(
             query=plan.search_text,
@@ -304,7 +306,7 @@ class TimeFirstRetriever:
             *_reserve_axes_for(query),
             *MEMORY_VECTOR_NAMES,
         ):
-            if axis in self.allowed_axes and axis not in ordered:
+            if axis in MEMORY_VECTOR_NAMES and axis not in ordered:
                 ordered.append(axis)
         selected = ordered[: self.qmax]
         return tuple(
@@ -511,4 +513,17 @@ def _range_matches(start: datetime, end: datetime, plan: TimeFirstQueryPlan) -> 
     """Use the same interval-overlap semantics as SQL timeline retrieval."""
     return (plan.start is None or end >= plan.start) and (
         plan.end is None or start <= plan.end
+    )
+
+
+def _is_bounded_plan(plan: TimeFirstQueryPlan) -> bool:
+    return bool(
+        plan.used_time_filter
+        and plan.start is not None
+        and plan.end is not None
+        and plan.start.tzinfo is not None
+        and plan.start.utcoffset() is not None
+        and plan.end.tzinfo is not None
+        and plan.end.utcoffset() is not None
+        and plan.start <= plan.end
     )
