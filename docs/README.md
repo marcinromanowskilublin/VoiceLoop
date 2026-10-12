@@ -19,6 +19,9 @@ like current runtime behavior.
 - [Context Timeline V1](CONTEXT_TIMELINE_V1.md) — time-first local context,
   explicit adapters, SQL-verified semantic candidates, CLI operations and
   rollout limits. Includes legacy-index compatibility requirements.
+- [Cascade 2+2+1 and security boundary](KASKADA_BEZPIECZENSTWO.md) — shadow
+  measurer on the five existing axes, the HTTP, file, search and retention
+  boundaries, and the decisions only a person can make.
 - [Memory-axis navigation design](VECTOR_NAVIGATION_DESIGN.md) — agreed direction
   for a larger set of specialized axes, evidence requirements and stopping
   rules; separates future design from current code and human labeling duties.

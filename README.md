@@ -131,9 +131,13 @@ running; local configuration can override the defaults.
 - Situation State proposals in the production planning path.
 - Automatic Context Timeline ingest, foreground polling and quality-gated
   rollout.
+- Cascade 2+2+1 over the five existing memory axes
+  (`CONTEXT_CASCADE_SHADOW_ENABLED=false`). It measures beside the answer and
+  does not change it. Time stays in SQL. Contract:
+  [cascade and security boundary](docs/KASKADA_BEZPIECZENSTWO.md).
 - A larger set of specialized memory axes with explicit navigation and stopping
-  rules. This is a [design direction](docs/VECTOR_NAVIGATION_DESIGN.md), not the
-  current retrieval engine.
+  rules. This remains a [design direction](docs/VECTOR_NAVIGATION_DESIGN.md),
+  separate from the shadow measurer above.
 
 ## Why this is not just “an LLM with tools”
 
@@ -273,12 +277,69 @@ Checked in invariant `INV-12`, `tests/test_executor.py` and
 - CI mocks Windows UI Automation policy. A live desktop remains a separate
   manual verification.
 
+## Security boundary
+
+These checks run whether or not the cascade measurer is enabled. The full
+account, including what this version deliberately leaves open, is
+[Kaskada i bezpieczeństwo](docs/KASKADA_BEZPIECZENSTWO.md).
+
+- The HTTP boundary rejects a `Host` other than `127.0.0.1`, `::1` or
+  `localhost`, and rejects an `Origin` that does not match that host and port,
+  before any route runs.
+- `GET /api/v1/session` returns the token only to a loopback peer. Private
+  routes require `X-VoiceLoop-Token`. The token file is owned by the current
+  user, mode `0600` on POSIX, protected owner-only DACL on Windows.
+- Optional web search resolves every address before connecting and refuses
+  loopback, private, link-local, multicast and cloud-metadata addresses,
+  including redirects.
+- Timeline document reads resolve symlinks and stay inside the timeline
+  directory.
+- New meeting audio expires after 7 days and new command transcripts after 30
+  days, counted from server time. Rows without an expiry are not deleted.
+  Applying expiry to older rows is preview-only; a destructive migration is
+  rejected at startup.
+- Cascade telemetry stores a SHA-256 prefix, wave counts and a stop reason.
+  It does not store the query or the memories. A compound sentence such as
+  “a month ago we said it would be wonderful” is labeled as approximate
+  utterance time plus unknown content time. It does not become a timeline fact.
+
+## Work only a person can do
+
+The items below are decisions. Code does not complete them.
+
+1. **Calibrate uncertainty.** Name the points where the assistant must stop
+   and ask: missing time, two conflicting times, an axis below threshold, a
+   compound sentence without an approved claim, a high-impact action. For each
+   point the verdict is candidate, canonical value, or rejection. There is no
+   calibration store yet, so the cascade must not become the answer path.
+2. **Name the axes.** Approve or replace the display names: Time, Content,
+   Topic, Goal, Decision, Relation. Technical ids stay
+   `event_time`, `semantic`, `topic`, `intent`, `decision`,
+   `person_context`. There is no sixth “when” axis.
+3. **Retention of older rows.** New rows already receive an expiry. Older rows
+   without one stay. Read the preview counts before any future destructive
+   migration. This version refuses to delete them.
+4. **Turn the measurer on.** On your own machine, set
+   `CONTEXT_CASCADE_SHADOW_ENABLED=true` only when you want measurement. Leave
+   `CONTEXT_CASCADE_SHADOW_QMAX=5` and `CONTEXT_CASCADE_SHADOW_WAVE_SIZE=2`.
+   If an answer changes, turn the flag off.
+5. **Label a private gold set** before any discussion of switching the cascade
+   onto answers: hit, miss, stop reason, whether time was bounded.
+6. **Run local services.** Vectors need a loopback embedding endpoint and a
+   Qdrant that accepts private data. You start them and you decide whether
+   their text may leave the machine. Without them, SQLite and FTS are the
+   correct state.
+
+Order: 1 and 2 first, 3 as a separate consent, then 4 and 5 as measurement.
+Item 6 is required for a vector measurement, not for the assistant to run.
+
 ## Documentation map
 
 - [Current architecture](docs/ARCHITECTURE_CURRENT.md)
 - [Architecture invariants](docs/ARCHITECTURE_INVARIANTS.md)
 - [Context Timeline V1](docs/CONTEXT_TIMELINE_V1.md)
-- [Memory-axis navigation design — not implemented](docs/VECTOR_NAVIGATION_DESIGN.md)
+- [Cascade 2+2+1 and security boundary](docs/KASKADA_BEZPIECZENSTWO.md)
+- [Memory-axis navigation design — not the live engine](docs/VECTOR_NAVIGATION_DESIGN.md)
 - [Safe user corpus and evaluation](docs/SAFE_USER_CORPUS.md)
 - [Threshold Guard and runtime gates](docs/THRESHOLD_GUARD.md)
 - [Documentation index](docs/README.md)

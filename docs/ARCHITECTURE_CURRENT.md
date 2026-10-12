@@ -49,6 +49,7 @@ Jawny model sytuacji i Context Timeline istnieją jako osobne kontrakty.
 - Hume EVI: szkielet, domyślnie off.
 - `hybrid` w `voice_conversation.py` = barge-in / reuse strumienia Deepgram, **nie** retrieval.
 - Shadow Qdrant (`qdrant_memory_next_collection`) i kalibracja V2 (`routing_v2_calibration_mode=off`) — pomiar, nie sterowanie.
+- Kaskada 2+2+1 na pięciu istniejących osiach pamięci: `CONTEXT_CASCADE_SHADOW_ENABLED=false`. Mierzy obok odpowiedzi i nie zmienia `ContextPack`. Czas zostaje w SQL. Pełny opis granic i praca człowieka: [`KASKADA_BEZPIECZENSTWO.md`](KASKADA_BEZPIECZENSTWO.md).
 - `EvidenceItemV1` (`situation/evidence.py`) — kontrakt dowodu; nie jest commitment `EvidenceItem` i nie wiąże akcji.
 - `SituationStateV1` — ledger in-memory + `GET /api/v1/situation`. Planer nie czyta go jako intencji. LLM nie pisze. Brak tabeli SQL `situation`.
 - `StateProposal` (`situation/proposal.py`) — model może proponować (`propose_fact` + `evidence_refs`). Lokalne `StatePolicy` + `StateReducer` decydują i wołają `append_event(actor=local_code)`. **Nie** wpięte w planer / `assistant.py`. Tylko testy / przyszły shadow.
