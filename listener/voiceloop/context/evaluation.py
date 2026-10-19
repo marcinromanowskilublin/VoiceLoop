@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .dual_track import DualTrackRun, DualTrackVerdict
 from .schema import ContextPackV1
 
 
@@ -16,6 +18,20 @@ class ContextRetrievalEvalRecordV1(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     expected_source_ids: tuple[str, ...] = ()
     expected_axes: tuple[str, ...] = ()
+    observed_at: datetime | None = None
+    category: str = Field(default="general", min_length=1, max_length=80)
+    risk: Literal["low", "medium", "high"] = "low"
+    expected_verdict: DualTrackVerdict | None = None
+    expected_time_bounded: bool = True
+
+    @field_validator("observed_at")
+    @classmethod
+    def _aware_observed_at(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (
+            value.tzinfo is None or value.utcoffset() is None
+        ):
+            raise ValueError("observed_at must be timezone-aware")
+        return value
 
 
 class ContextRetrievalScoreV1(BaseModel):
@@ -136,6 +152,45 @@ class ContextShadowComparisonV1(BaseModel):
     candidate_abstention_not_worse: bool
 
 
+class ContextDualTrackExampleV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    example_id: str
+    category: str
+    risk: Literal["low", "medium", "high"]
+    verdict: DualTrackVerdict
+    expected_verdict: DualTrackVerdict | None = None
+    verdict_matches: bool | None = None
+    baseline_count: int = Field(ge=0)
+    cascade_count: int = Field(ge=0)
+    overlap_count: int = Field(ge=0)
+    baseline_stop_reason: str
+    cascade_stop_reason: str
+
+
+class ContextDualTrackReportV1(BaseModel):
+    """Decision-grade report that still cannot promote retrieval."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    sample_count: int = Field(ge=0)
+    k: int = Field(ge=1, le=100)
+    baseline: ContextRetrievalMetricsV1
+    cascade: ContextRetrievalMetricsV1
+    recall_delta: float
+    reciprocal_rank_delta: float
+    abstention_delta: float
+    provenance_delta: float
+    verdict_counts: dict[str, int]
+    labeled_verdict_count: int = Field(ge=0)
+    verdict_accuracy: float = Field(ge=0.0, le=1.0)
+    cascade_recall_not_worse: bool
+    cascade_abstention_not_worse: bool
+    promotion_allowed: Literal[False] = False
+    examples: tuple[ContextDualTrackExampleV1, ...]
+
+
 async def compare_context_retrieval_shadow(
     *,
     records: Sequence[ContextRetrievalEvalRecordV1],
@@ -174,6 +229,95 @@ async def compare_context_retrieval_shadow(
         ),
         candidate_recall_not_worse=recall_delta >= -1e-9,
         candidate_abstention_not_worse=abstention_delta >= -1e-9,
+    )
+
+
+DualTrackRetrieve = Callable[
+    [ContextRetrievalEvalRecordV1, int],
+    Awaitable[DualTrackRun],
+]
+
+
+async def evaluate_context_dual_track(
+    *,
+    records: Sequence[ContextRetrievalEvalRecordV1],
+    retrieve: DualTrackRetrieve,
+    k: int = 8,
+) -> ContextDualTrackReportV1:
+    safe_k = max(1, min(int(k), 100))
+    runs: dict[str, DualTrackRun] = {}
+    for record in records:
+        runs[record.example_id] = await retrieve(record, safe_k)
+
+    async def _baseline(record: ContextRetrievalEvalRecordV1, _limit: int):
+        return runs[record.example_id].baseline
+
+    async def _cascade(record: ContextRetrievalEvalRecordV1, _limit: int):
+        return runs[record.example_id].cascade
+
+    _, baseline_metrics = await evaluate_context_retrieval(
+        records=records,
+        retrieve=_baseline,
+        k=safe_k,
+    )
+    _, cascade_metrics = await evaluate_context_retrieval(
+        records=records,
+        retrieve=_cascade,
+        k=safe_k,
+    )
+    verdict_counts: dict[str, int] = {}
+    examples: list[ContextDualTrackExampleV1] = []
+    labeled_matches: list[bool] = []
+    for record in records:
+        trace = runs[record.example_id].trace
+        verdict_counts[trace.verdict] = verdict_counts.get(trace.verdict, 0) + 1
+        verdict_matches = (
+            trace.verdict == record.expected_verdict
+            if record.expected_verdict is not None
+            else None
+        )
+        if verdict_matches is not None:
+            labeled_matches.append(verdict_matches)
+        examples.append(
+            ContextDualTrackExampleV1(
+                example_id=record.example_id,
+                category=record.category,
+                risk=record.risk,
+                verdict=trace.verdict,
+                expected_verdict=record.expected_verdict,
+                verdict_matches=verdict_matches,
+                baseline_count=trace.baseline_count,
+                cascade_count=trace.cascade_count,
+                overlap_count=trace.overlap_count,
+                baseline_stop_reason=trace.baseline_stop_reason,
+                cascade_stop_reason=trace.cascade_stop_reason,
+            )
+        )
+    recall_delta = cascade_metrics.recall_at_k - baseline_metrics.recall_at_k
+    abstention_delta = (
+        cascade_metrics.abstention_accuracy - baseline_metrics.abstention_accuracy
+    )
+    return ContextDualTrackReportV1(
+        sample_count=len(records),
+        k=safe_k,
+        baseline=baseline_metrics,
+        cascade=cascade_metrics,
+        recall_delta=recall_delta,
+        reciprocal_rank_delta=(
+            cascade_metrics.mean_reciprocal_rank
+            - baseline_metrics.mean_reciprocal_rank
+        ),
+        abstention_delta=abstention_delta,
+        provenance_delta=(
+            cascade_metrics.provenance_coverage
+            - baseline_metrics.provenance_coverage
+        ),
+        verdict_counts=verdict_counts,
+        labeled_verdict_count=len(labeled_matches),
+        verdict_accuracy=_mean([1.0 if item else 0.0 for item in labeled_matches]),
+        cascade_recall_not_worse=recall_delta >= -1e-9,
+        cascade_abstention_not_worse=abstention_delta >= -1e-9,
+        examples=tuple(examples),
     )
 
 

@@ -1,12 +1,19 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from voiceloop.context.dual_track import (
+    DualTrackRun,
     DualTrackRunner,
+    DualTrackTraceV1,
     arbitrate_context_packs,
+)
+from voiceloop.context.evaluation import (
+    ContextRetrievalEvalRecordV1,
+    evaluate_context_dual_track,
 )
 from voiceloop.context.schema import (
     ContextEpisodeV1,
@@ -15,8 +22,10 @@ from voiceloop.context.schema import (
     ContextPackV1,
 )
 from voiceloop.memory import MemoryStore
+from voiceloop.corpus.storage import read_jsonl
 
 DAY = datetime(2026, 10, 18, 12, tzinfo=UTC)
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def item(source_id: str) -> ContextItemV1:
@@ -247,3 +256,75 @@ async def test_dual_track_timeout_reports_attempted_axes(tmp_path) -> None:
     assert len(result.trace.baseline_axes_attempted) == 5
     assert len(result.trace.cascade_axes_attempted) == 2
     assert result.trace.error_type == "TimeoutError"
+
+
+def test_synthetic_dual_track_gold_has_balanced_40_examples() -> None:
+    records = read_jsonl(
+        FIXTURES / "context-dual-track-gold-v1.jsonl",
+        ContextRetrievalEvalRecordV1,
+    )
+
+    assert len(records) == 40
+    assert {record.category for record in records} == {
+        "decision",
+        "topic",
+        "intent",
+        "person_context",
+        "general",
+        "negative",
+    }
+    assert all(record.observed_at is not None for record in records)
+    assert all(record.expected_time_bounded for record in records)
+    assert sum(record.risk == "high" for record in records) >= 8
+
+
+@pytest.mark.asyncio
+async def test_dual_track_report_compares_rrf_and_cascade_without_promotion() -> None:
+    records = [
+        ContextRetrievalEvalRecordV1(
+            example_id="positive",
+            query="Co ustaliliśmy wczoraj?",
+            expected_source_ids=("source-1",),
+            expected_verdict="agreement",
+        ),
+        ContextRetrievalEvalRecordV1(
+            example_id="negative",
+            query="Nieistniejący zapis z wczoraj",
+            expected_verdict="uncertain",
+        ),
+    ]
+
+    async def retrieve(record, _limit):
+        positive = record.example_id == "positive"
+        baseline = ContextPackV1(
+            question=record.query,
+            items=(item("source-1"),) if positive else (),
+        )
+        cascade = ContextPackV1(
+            question=record.query,
+            items=(item("source-1"),) if positive else (),
+        )
+        trace = DualTrackTraceV1(
+            trace_id=("1" if positive else "2") * 24,
+            created_at=DAY,
+            expires_at=DAY + timedelta(days=30),
+            bounded=True,
+            verdict="agreement" if positive else "uncertain",
+            reason="top_match" if positive else "no_candidates",
+            baseline_count=len(baseline.items),
+            cascade_count=len(cascade.items),
+            overlap_count=1 if positive else 0,
+            top_match=positive,
+        )
+        return DualTrackRun(baseline=baseline, cascade=cascade, trace=trace)
+
+    report = await evaluate_context_dual_track(
+        records=records,
+        retrieve=retrieve,
+    )
+
+    assert report.baseline.recall_at_k == 1.0
+    assert report.cascade.recall_at_k == 1.0
+    assert report.verdict_accuracy == 1.0
+    assert report.verdict_counts == {"agreement": 1, "uncertain": 1}
+    assert report.promotion_allowed is False

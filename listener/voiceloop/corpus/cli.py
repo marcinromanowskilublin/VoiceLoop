@@ -15,13 +15,13 @@ from ..actions import ActionRegistry
 from ..behavior_digest import LocalBehaviorDigestClient
 from ..capability_index import CapabilityIndex, CapabilityIndexError
 from ..context.documents import DocumentAccessError, DocumentTimelineIngestor
+from ..context.dual_track import DualTrackRunner
 from ..context.evaluation import (
     ContextRetrievalEvalRecordV1,
-    compare_context_retrieval_shadow,
+    evaluate_context_dual_track,
 )
 from ..context.lifecycle import ContextLifecycleService
 from ..context.projection import MemoryTimelineMigrator
-from ..context.retrieval import TimeFirstRetriever
 from ..context.vectorization import ContextEpisodeIndexError, ContextEpisodeIndexer
 from ..embeddings import (
     EmbeddingUnavailableError,
@@ -466,11 +466,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     context_report = subparsers.add_parser(
         "report-context-retrieval",
-        help="Porównaj sam FTS z pełną kaskadą na prywatnym zestawie gold.",
+        help="Porównaj RRF5 z kaskadą 2+2+1 na zestawie gold.",
     )
     context_report.add_argument("--gold", type=Path, required=True)
     context_report.add_argument("--database", type=Path)
     context_report.add_argument("--k", type=int, default=8)
+    context_report.add_argument(
+        "--eval-now",
+        type=datetime.fromisoformat,
+        help="Jawny czas ISO-8601 dla względnych zapytań bez observed_at.",
+    )
 
     local_parser = subparsers.add_parser(
         "validate-local-url",
@@ -1813,32 +1818,60 @@ async def _run_async(args: argparse.Namespace) -> int:
             timeout_seconds=settings.local_embeddings_timeout_seconds,
             enabled=settings.local_embeddings_enabled,
         )
-        qdrant = QdrantVectorStore(settings)
-        fts_only = TimeFirstRetriever(memory=memory)
-        cascade = TimeFirstRetriever(
+        episode_qdrant = QdrantVectorStore(
+            settings.model_copy(
+                update={
+                    "qdrant_collection": settings.qdrant_context_episode_collection,
+                }
+            )
+        )
+        runner = DualTrackRunner(
             memory=memory,
             embeddings=embeddings,
-            qdrant=qdrant,
+            qdrant=episode_qdrant,
+            max_inflight=1,
+            timeout_seconds=settings.context_dual_track_timeout_seconds,
+            trace_retention_days=settings.context_dual_track_trace_retention_days,
+            qmax=settings.context_cascade_shadow_qmax,
+            wave_size=settings.context_cascade_shadow_wave_size,
         )
+        eval_now = args.eval_now or datetime.now(UTC)
+        if eval_now.tzinfo is None or eval_now.utcoffset() is None:
+            raise ValueError("--eval-now musi zawierać strefę czasową.")
 
-        async def _fts(record: ContextRetrievalEvalRecordV1, limit: int):
-            return await fts_only.retrieve(record.query, limit=limit)
-
-        async def _cascade(record: ContextRetrievalEvalRecordV1, limit: int):
-            return await cascade.retrieve(record.query, limit=limit)
+        async def _dual_track(record: ContextRetrievalEvalRecordV1, limit: int):
+            return await runner.run(
+                record.query,
+                request_id=f"evaluation:{record.example_id}",
+                now=record.observed_at or eval_now,
+                limit=limit,
+                persist=False,
+            )
 
         try:
-            comparison = await compare_context_retrieval_shadow(
+            embeddings_health, qdrant_health = await asyncio.gather(
+                embeddings.health(),
+                episode_qdrant.health(),
+            )
+            report = await evaluate_context_dual_track(
                 records=records,
-                baseline=_fts,
-                candidate=_cascade,
+                retrieve=_dual_track,
                 k=args.k,
             )
         finally:
-            await qdrant.close()
-        payload = comparison.model_dump(mode="json")
-        payload["recall_switch_allowed"] = False
-        payload["semantic_scout_available"] = qdrant.enabled and embeddings.enabled
+            await episode_qdrant.close()
+        payload = report.model_dump(mode="json")
+        payload["provider_health"] = {
+            "embeddings": {
+                "ok": embeddings_health[0],
+                "detail": embeddings_health[1],
+            },
+            "episode_qdrant": {
+                "ok": qdrant_health[0],
+                "detail": qdrant_health[1],
+            },
+        }
+        payload["collection"] = settings.qdrant_context_episode_collection
         print(json.dumps(payload, ensure_ascii=False))
         return 0
     raise ValueError("Nieznana komenda.")
