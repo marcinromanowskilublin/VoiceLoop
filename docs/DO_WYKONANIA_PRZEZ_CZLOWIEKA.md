@@ -44,6 +44,6 @@ docelowego komputera.
 | 1. Indexer epizodów | zakończony | Kolekcja kandydacka ma osobną nazwę; indexer jest jawny, domyślnie dry-run, odrzuca kolekcję live i pomija niezmienione punkty. | Uruchomić dry-run na kopii danych, potem osobno zdecydować o `--apply`. |
 | 2. Runtime dual-track | zakończony | Baseline RRF5 i kaskada 2+2+1 biegną równolegle po wspólnej bramce czasu; arbiter ma trzy jawne werdykty; limit współbieżności odrzuca nadmiar zamiast tworzyć kolejkę; trace nie zawiera tekstu ani jawnych ID. Wynik jest ignorowany przez ścieżkę odpowiedzi. | Zatwierdzić później znaczenie werdyktów na prywatnym gold secie i budżet zasobów. |
 | 3. Raport i gold syntetyczny | zakończony | CLI porównuje rzeczywisty RRF5 z 2+2+1 na tej samej izolowanej kolekcji, raportuje metryki obu torów i zawsze zwraca `promotion_allowed=false`. Repo zawiera 40 zrównoważonych przykładów syntetycznych z jawnym czasem obserwacji. | Zastąpić kopię zbioru syntetycznego prywatnymi przykładami poza repo i ręcznie zatwierdzić etykiety. |
-| 4. Demonstrator read-only | oczekuje | — | — |
+| 4. Demonstrator read-only | zakończony | Chronione tokenem endpointy `GET` pokazują wyłącznie pokrycie indeksu, agregaty i content-free trace’y. Panel nie ma przycisku uruchamiającego pomiar, indeksowanie, zmianę flag ani akcję. | Operator powinien potwierdzić, że widok jest zrozumiały i nie sugeruje awansu prototypu do live recall. |
 | 5. Weryfikacja końcowa | oczekuje | — | — |
 

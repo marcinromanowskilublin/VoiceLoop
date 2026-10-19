@@ -221,6 +221,7 @@
     .trace-metric b { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
     .trace-metric span { display: block; margin-top: 3px; font-size: 13px; }
     .trace-meta { color: var(--muted); font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }
+    .prototype-badge { display: inline-flex; margin-bottom: 9px; padding: 4px 8px; border: 1px solid rgba(248, 211, 107, .45); border-radius: 999px; color: var(--warn); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
     .source-link { display: block; color: #b8d1ff; font-size: 13px; margin: 7px 0; overflow-wrap: anywhere; }
     #interim { min-height: 26px; color: var(--accent); font-style: italic; font-size: 14px; padding: 6px 4px 0; }
     .empty { color: var(--muted); font-size: 13px; }
@@ -470,6 +471,12 @@
         <p class="section-label">Observability</p>
         <h2>Last context turn</h2>
         <div id="turn-trace"><span class="empty">No measurements yet.</span></div>
+      </section>
+      <section class="card operator-card">
+        <span class="prototype-badge">PROTOTYPE / READ-ONLY</span>
+        <p class="section-label">Dual-track retrieval</p>
+        <h2>RRF5 vs cascade 2+2+1</h2>
+        <div id="dual-track"><span class="empty">No shadow measurements yet.</span></div>
       </section>
     </section>
 
@@ -891,6 +898,49 @@
       } catch (_) {}
     }
 
+    function renderDualTrack(status, traces) {
+      const root = $("dual-track");
+      const coverage = status.coverage || {};
+      const summary = status.summary || {};
+      const latest = (traces || [])[0];
+      const cards = document.createElement("div");
+      cards.className = "trace-summary";
+      const values = [
+        ["Mode", status.enabled ? "shadow enabled" : "shadow disabled"],
+        ["Episode index", `${coverage.indexed || 0} / ${coverage.total || 0}`],
+        ["Samples", String(summary.sample_count || 0)],
+        ["Verdicts", Object.entries(summary.verdict_counts || {}).map(([key, value]) => `${key} ${value}`).join(" · ") || "none"]
+      ];
+      for (const [label, value] of values) {
+        const card = document.createElement("div");
+        card.className = "trace-metric";
+        const title = document.createElement("b");
+        title.textContent = label;
+        const text = document.createElement("span");
+        text.textContent = value;
+        card.append(title, text);
+        cards.appendChild(card);
+      }
+      const meta = document.createElement("p");
+      meta.className = "trace-meta";
+      meta.textContent = latest
+        ? `latest ${latest.verdict} · baseline ${latest.baseline_count} · cascade ${latest.cascade_count} · ${latest.total_duration_ms} ms`
+        : `collection ${status.collection || "not configured"} · serving false`;
+      root.replaceChildren(cards, meta);
+    }
+
+    async function loadDualTrack() {
+      try {
+        const [status, traces] = await Promise.all([
+          api("/api/v1/context/dual-track/status"),
+          api("/api/v1/context/dual-track/traces?limit=20")
+        ]);
+        renderDualTrack(status, traces);
+      } catch (error) {
+        $("dual-track").textContent = "Dual-track unavailable: " + error.message;
+      }
+    }
+
     async function actOnTask(id, action) {
       await api(`/api/v1/commands/${encodeURIComponent(id)}/${action}`, { method: "POST" });
       await loadTasks();
@@ -1055,6 +1105,9 @@
       if (type === "conversation.trace") {
         renderTrace(payload);
       }
+      if (type === "context.retrieval_dual_track") {
+        loadDualTrack();
+      }
       if (type === "knowledge.search.completed") {
         renderSources(payload.sources || []);
       }
@@ -1144,7 +1197,7 @@
       $("meeting").onclick = toggleMeeting;
       $("listen").onclick = toggleListening;
       $("stop").onclick = stopAll;
-      $("refresh").onclick = () => Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities()]);
+      $("refresh").onclick = () => Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities(), loadDualTrack()]);
       $("remember").onclick = async () => {
         const content = $("memoryText").value.trim();
         if (!content) return;
@@ -1156,7 +1209,7 @@
         await loadMemories();
       };
       void connectEvents();
-      await Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities()]);
+      await Promise.all([loadHealth(), loadTasks(), loadMemories(), loadMeeting(), loadTraces(), loadCapabilities(), loadDualTrack()]);
       setInterval(loadHealth, 8000);
       addMessage(
         "system",

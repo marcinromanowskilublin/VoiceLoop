@@ -1118,6 +1118,33 @@ async def conversation_quality(
     return await services.telemetry.quality_report()
 
 
+@app.get("/api/v1/context/dual-track/status")
+async def context_dual_track_status(
+    services: Annotated[Services, Depends(require_token)],
+) -> dict[str, object]:
+    coverage, summary = await asyncio.gather(
+        services.memory.context_episode_vector_coverage(),
+        services.memory.context_dual_track_summary(),
+    )
+    return {
+        **services.dual_track.status(),
+        "enabled": services.settings.context_dual_track_enabled,
+        "coverage": coverage,
+        "summary": summary,
+    }
+
+
+@app.get(
+    "/api/v1/context/dual-track/traces",
+    response_model=list[DualTrackTraceV1],
+)
+async def context_dual_track_traces(
+    services: Annotated[Services, Depends(require_token)],
+    limit: int = Query(default=20, ge=1, le=200),
+) -> list[DualTrackTraceV1]:
+    return await services.memory.list_context_dual_track_traces(limit=limit)
+
+
 @app.post("/api/v1/commands", response_model=CommandAccepted)
 async def create_command(
     command: CommandRequest,

@@ -36,6 +36,16 @@ def test_panel_authenticates_private_event_stream() -> None:
     assert '"X-VoiceLoop-Token": state.token' in panel
 
 
+def test_panel_dual_track_demonstrator_is_read_only() -> None:
+    panel = (ROOT / "panel" / "index.html").read_text(encoding="utf-8")
+
+    assert "PROTOTYPE / READ-ONLY" in panel
+    assert 'api("/api/v1/context/dual-track/status")' in panel
+    assert 'api("/api/v1/context/dual-track/traces?limit=20")' in panel
+    assert 'api("/api/v1/context/dual-track/status", {' not in panel
+    assert 'api("/api/v1/context/dual-track/traces", {' not in panel
+
+
 def test_legacy_deepgram_entrypoints_are_retired() -> None:
     panel = (ROOT / "panel" / "deepgram.html").read_text(encoding="utf-8")
     listener = (ROOT / "listener" / "deepgram_listener.py").read_text(encoding="utf-8")

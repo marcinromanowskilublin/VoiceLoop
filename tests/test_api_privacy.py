@@ -12,6 +12,7 @@ from voiceloop.app import (
     _run_private_data_retention_worker,
     app,
 )
+from voiceloop.context.dual_track import DualTrackTraceV1
 from voiceloop.memory import MemoryStore
 from voiceloop.settings import Settings
 
@@ -31,7 +32,12 @@ async def test_health_and_events_require_local_token() -> None:
             transport=transport,
             base_url="http://localhost",
         ) as client:
-            for path in ("/api/v1/health", "/api/v1/events"):
+            for path in (
+                "/api/v1/health",
+                "/api/v1/events",
+                "/api/v1/context/dual-track/status",
+                "/api/v1/context/dual-track/traces",
+            ):
                 response = await client.get(path)
                 assert response.status_code == 401
 
@@ -40,6 +46,73 @@ async def test_health_and_events_require_local_token() -> None:
                     headers={"X-VoiceLoop-Token": "wrong-token"},
                 )
                 assert response.status_code == 401
+    finally:
+        if previous_services is missing:
+            del app.state.services
+        else:
+            app.state.services = previous_services
+
+
+@pytest.mark.asyncio
+async def test_dual_track_demonstrator_is_token_protected_and_read_only() -> None:
+    missing = object()
+    previous_services = getattr(app.state, "services", missing)
+    now = datetime.now(UTC)
+    trace = DualTrackTraceV1(
+        trace_id="a" * 24,
+        created_at=now,
+        expires_at=now + timedelta(days=30),
+        bounded=True,
+        verdict="agreement",
+        reason="top_match",
+        baseline_count=1,
+        cascade_count=1,
+        overlap_count=1,
+        top_match=True,
+    )
+    app.state.services = SimpleNamespace(
+        token="expected-local-token",
+        settings=SimpleNamespace(context_dual_track_enabled=True),
+        dual_track=SimpleNamespace(
+            status=lambda: {
+                "mode": "shadow",
+                "serving": False,
+                "collection": "voiceloop_context_episodes_v1",
+                "max_inflight": 1,
+                "inflight": 0,
+            }
+        ),
+        memory=SimpleNamespace(
+            context_episode_vector_coverage=AsyncMock(
+                return_value={"total": 2, "indexed": 1, "pending": 1}
+            ),
+            context_dual_track_summary=AsyncMock(
+                return_value={
+                    "sample_count": 1,
+                    "verdict_counts": {"agreement": 1},
+                }
+            ),
+            list_context_dual_track_traces=AsyncMock(return_value=[trace]),
+        ),
+    )
+    transport = httpx.ASGITransport(app=app)
+
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://localhost",
+            headers={"X-VoiceLoop-Token": "expected-local-token"},
+        ) as client:
+            status_response = await client.get("/api/v1/context/dual-track/status")
+            traces_response = await client.get("/api/v1/context/dual-track/traces")
+            write_response = await client.post("/api/v1/context/dual-track/status")
+
+        assert status_response.status_code == 200
+        assert status_response.json()["serving"] is False
+        assert status_response.json()["coverage"]["indexed"] == 1
+        assert traces_response.status_code == 200
+        assert traces_response.json()[0]["verdict"] == "agreement"
+        assert write_response.status_code == 405
     finally:
         if previous_services is missing:
             del app.state.services
