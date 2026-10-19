@@ -96,6 +96,7 @@ def _assistant(
     vector_context_limit: int = 0,
     context_cascade_shadow_enabled: bool = False,
     context_cascade_shadow_qmax: int = 5,
+    dual_track_runner=None,
 ) -> AssistantService:
     return AssistantService(
         memory=memory,
@@ -114,6 +115,7 @@ def _assistant(
         routing_v2=routing_v2,
         context_cascade_shadow_enabled=context_cascade_shadow_enabled,
         context_cascade_shadow_qmax=context_cascade_shadow_qmax,
+        dual_track_runner=dual_track_runner,
     )
 
 
@@ -338,6 +340,51 @@ def test_shadow_analysis_failure_has_no_live_side_effect(tmp_path, monkeypatch) 
         after = await memory.get_command(request.request_id)
         assert before == after
         assert assistant._background_tasks == set()
+        await assistant.close()
+
+    asyncio.run(scenario())
+
+
+def test_dual_track_result_cannot_change_live_plan(tmp_path) -> None:
+    class TraceStub:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return {
+                "trace_id": "0" * 24,
+                "verdict": "conflict",
+                "reason": "disjoint_results",
+            }
+
+    class DualTrackStub:
+        def __init__(self) -> None:
+            self.requests: list[str] = []
+
+        async def run(self, text, **_kwargs):
+            self.requests.append(text)
+            return SimpleNamespace(trace=TraceStub())
+
+    async def scenario() -> None:
+        memory = MemoryStore(tmp_path / "voice.db")
+        await memory.initialize()
+        runner = DualTrackStub()
+        assistant = _assistant(
+            memory,
+            router=RouterStub(),
+            n8n=N8nStub(),
+            executor=ExecutorStub(memory),
+            tts=TTSStub(),
+            dual_track_runner=runner,
+        )
+        request = CommandRequest(text="Co ustaliliśmy wczoraj?")
+
+        accepted = await assistant.handle(request)
+        if assistant._background_tasks:
+            await asyncio.gather(*assistant._background_tasks)
+
+        assert accepted.plan is not None
+        assert accepted.plan.response_text == "odpowiedz-1"
+        assert accepted.plan.steps == []
+        assert runner.requests == [request.text]
         await assistant.close()
 
     asyncio.run(scenario())

@@ -42,7 +42,7 @@ docelowego komputera.
 |---|---|---|---|
 | 0. Projekt i granice | zakończony | Osobna kolekcja, dual-track shadow, deterministyczny arbiter i read-only UI są granicą implementacji. | Zatwierdzić później prywatne kryteria jakości; nie są zgadywane w kodzie. |
 | 1. Indexer epizodów | zakończony | Kolekcja kandydacka ma osobną nazwę; indexer jest jawny, domyślnie dry-run, odrzuca kolekcję live i pomija niezmienione punkty. | Uruchomić dry-run na kopii danych, potem osobno zdecydować o `--apply`. |
-| 2. Runtime dual-track | oczekuje | — | — |
+| 2. Runtime dual-track | zakończony | Baseline RRF5 i kaskada 2+2+1 biegną równolegle po wspólnej bramce czasu; arbiter ma trzy jawne werdykty; limit współbieżności odrzuca nadmiar zamiast tworzyć kolejkę; trace nie zawiera tekstu ani jawnych ID. Wynik jest ignorowany przez ścieżkę odpowiedzi. | Zatwierdzić później znaczenie werdyktów na prywatnym gold secie i budżet zasobów. |
 | 3. Raport i gold syntetyczny | oczekuje | — | — |
 | 4. Demonstrator read-only | oczekuje | — | — |
 | 5. Weryfikacja końcowa | oczekuje | — | — |

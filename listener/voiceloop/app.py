@@ -21,6 +21,8 @@ from .assistant import AssistantService
 from .behavior_digest import LocalBehaviorDigestClient
 from .capability_index import CapabilityIndex, CapabilityIndexError
 from .conversation_telemetry import ConversationTelemetry
+from .context.dual_track import DualTrackRunner, DualTrackTraceV1
+from .context.vectorization import validate_episode_collection_isolation
 from .corpus.candidates import (
     CandidateDecisionError,
     MemoryCandidateStore,
@@ -104,6 +106,8 @@ class Services:
     embeddings: OpenAICompatibleEmbeddingClient
     qdrant: QdrantVectorStore
     qdrant_shadow: QdrantVectorStore | None
+    context_episode_qdrant: QdrantVectorStore
+    dual_track: DualTrackRunner
     manual_memory: ManualMemoryService
     behavior_digester: LocalBehaviorDigestClient
     screenpipe_vector_memory: ScreenpipeVectorMemoryWorker
@@ -204,6 +208,12 @@ async def _run_private_data_retention_worker(
                             dry_run=settings.private_data_prune_dry_run,
                         )
                     )
+                vector_report["context_episodes"] = (
+                    await services.context_episode_qdrant.prune_expired(
+                        now=moment,
+                        dry_run=settings.private_data_prune_dry_run,
+                    )
+                )
             services.retention.consecutive_failures = 0
             services.retention.last_error_type = None
             services.retention.last_success_at = moment.isoformat()
@@ -308,6 +318,27 @@ def build_services(settings: Settings) -> Services:
         enabled=settings.local_embeddings_enabled,
     )
     qdrant = QdrantVectorStore(settings)
+    validate_episode_collection_isolation(
+        primary_collection=settings.qdrant_collection,
+        episode_collection=settings.qdrant_context_episode_collection,
+    )
+    context_episode_qdrant = QdrantVectorStore(
+        settings.model_copy(
+            update={
+                "qdrant_collection": settings.qdrant_context_episode_collection,
+            }
+        )
+    )
+    dual_track = DualTrackRunner(
+        memory=memory,
+        embeddings=embeddings,
+        qdrant=context_episode_qdrant,
+        max_inflight=settings.context_dual_track_max_inflight,
+        timeout_seconds=settings.context_dual_track_timeout_seconds,
+        trace_retention_days=settings.context_dual_track_trace_retention_days,
+        qmax=settings.context_cascade_shadow_qmax,
+        wave_size=settings.context_cascade_shadow_wave_size,
+    )
     qdrant_shadow = None
     next_memory_collection = (settings.qdrant_memory_next_collection or "").strip()
     if next_memory_collection and next_memory_collection != settings.qdrant_collection:
@@ -457,6 +488,9 @@ def build_services(settings: Settings) -> Services:
         context_cascade_shadow_timeout_seconds=(
             settings.context_cascade_shadow_timeout_seconds
         ),
+        dual_track_runner=(
+            dual_track if settings.context_dual_track_enabled else None
+        ),
     )
     assistant.configure_stt_threshold(settings.stt_min_action_confidence)
     assistant.configure_speaker_gate(
@@ -576,6 +610,8 @@ def build_services(settings: Settings) -> Services:
         embeddings=embeddings,
         qdrant=qdrant,
         qdrant_shadow=qdrant_shadow,
+        context_episode_qdrant=context_episode_qdrant,
+        dual_track=dual_track,
         manual_memory=manual_memory,
         behavior_digester=behavior_digester,
         screenpipe_vector_memory=screenpipe_vector_memory,
@@ -728,6 +764,7 @@ async def lifespan(app: FastAPI):
         await services.capability_index.close()
         if services.qdrant_shadow is not None:
             await services.qdrant_shadow.close()
+        await services.context_episode_qdrant.close()
         await services.qdrant.close()
 
 
@@ -871,6 +908,11 @@ async def health(
         if services.settings.corpus_enabled
         else asyncio.sleep(0, result=(False, "wyłączony"))
     )
+    dual_track_health = (
+        services.context_episode_qdrant.health()
+        if services.settings.context_dual_track_enabled
+        else asyncio.sleep(0, result=(False, "prototyp wyłączony"))
+    )
     (
         (lm_ok, lm_detail),
         (cloud_ok, cloud_detail),
@@ -882,6 +924,7 @@ async def health(
         (screenpipe_ok, screenpipe_detail),
         (web_search_ok, web_search_detail),
         (corpus_ok, corpus_detail),
+        (dual_track_ok, dual_track_detail),
     ) = await asyncio.gather(
         services.local_planner.health(),
         cloud_health,
@@ -893,6 +936,7 @@ async def health(
         services.screenpipe.health(),
         services.web_search.health(),
         corpus_health,
+        dual_track_health,
     )
     dg_ok, dg_detail = services.deepgram.health()
     conversation_ok, conversation_detail = services.conversation.health()
@@ -953,6 +997,18 @@ async def health(
         "qdrant": HealthComponent(
             status="ok" if qdrant_ok else "stopped",
             detail=qdrant_detail,
+        ),
+        "context_dual_track": HealthComponent(
+            status=(
+                "ok"
+                if dual_track_ok
+                else (
+                    "error"
+                    if services.settings.context_dual_track_enabled
+                    else "stopped"
+                )
+            ),
+            detail=dual_track_detail,
         ),
         "capability_embeddings": HealthComponent(
             status="ok" if capability_index_ok else "stopped",

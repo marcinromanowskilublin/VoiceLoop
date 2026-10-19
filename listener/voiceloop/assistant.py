@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .capability_index import CapabilityIndex, CapabilityIndexError
 from .context import ContextAssembler
+from .context.dual_track import DualTrackRunner
 from .context.review import live_screen_item, question_is_deictic
 from .conversation_telemetry import ConversationTelemetry
 from .embeddings import EmbeddingUnavailableError, OpenAICompatibleEmbeddingClient
@@ -142,6 +143,7 @@ class AssistantService:
         context_cascade_shadow_qmax: int = 5,
         context_cascade_shadow_wave_size: int = 2,
         context_cascade_shadow_timeout_seconds: float = 5.0,
+        dual_track_runner: DualTrackRunner | None = None,
     ) -> None:
         self.memory = memory
         self.events = events
@@ -175,6 +177,7 @@ class AssistantService:
             0.1,
             min(float(context_cascade_shadow_timeout_seconds), 30.0),
         )
+        self.dual_track_runner = dual_track_runner
         self.context_assembler = ContextAssembler()
         self._latest_tool_observations: list[dict[str, object]] = []
         self.action_definitions = action_definitions
@@ -748,6 +751,7 @@ class AssistantService:
             knowledge_coro,
         )
         self._schedule_context_cascade_shadow(request, text)
+        self._schedule_context_dual_track(request, text)
         tool_observations = (
             list(knowledge_lookup.observations)
             if knowledge_lookup is not None
@@ -1323,6 +1327,58 @@ class AssistantService:
             LOGGER.warning("Context cascade shadow scheduling failed")
             return
 
+    def _schedule_context_dual_track(
+        self,
+        request: CommandRequest,
+        text: str,
+    ) -> None:
+        runner = self.dual_track_runner
+        if runner is None or not text.strip():
+            return
+        try:
+            from .context.retrieval import build_time_first_query
+
+            if not build_time_first_query(text).used_time_filter:
+                return
+            opaque_id = hashlib.sha256(
+                request.request_id.encode("utf-8")
+            ).hexdigest()[:24]
+            task = asyncio.create_task(
+                self._run_context_dual_track(
+                    runner,
+                    request=request,
+                    text=text,
+                ),
+                name=f"context-dual-track-{opaque_id}",
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+        except Exception:
+            LOGGER.warning("Context dual-track scheduling failed")
+
+    async def _run_context_dual_track(
+        self,
+        runner: DualTrackRunner,
+        *,
+        request: CommandRequest,
+        text: str,
+    ) -> None:
+        try:
+            result = await runner.run(
+                text,
+                request_id=request.request_id,
+                limit=min(8, self.vector_context_limit or 8),
+            )
+            await self.events.publish(
+                "context.retrieval_dual_track",
+                result.trace.model_dump(mode="json"),
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "Context dual-track failed (error_type=%s)",
+                type(exc).__name__,
+            )
+
     async def _run_context_cascade_shadow(
         self,
         *,
@@ -1366,8 +1422,9 @@ class AssistantService:
                 "bounded": True,
                 "stages": ["Czas", "FTS", "adaptive_vectors"],
                 "waves": [list(wave) for wave in trace.waves],
+                "axes_attempted": list(trace.axes_attempted),
                 "axes_queried": list(trace.axes_queried),
-                "query_count": len(trace.axes_queried),
+                "query_count": len(trace.axes_attempted),
                 "qmax": retriever.qmax,
                 "stop_reason": trace.stop_reason,
                 "candidate_item_count": len(pack.items),
@@ -1397,7 +1454,7 @@ class AssistantService:
                     "mode": "shadow",
                     "bounded": True,
                     "stages": ["Czas"],
-                    "query_count": len(retriever.last_trace.axes_queried),
+                    "query_count": len(retriever.last_trace.axes_attempted),
                     "qmax": retriever.qmax,
                     "stop_reason": "timeout",
                     "candidate_item_count": 0,

@@ -260,6 +260,35 @@ class MemoryStore:
                         expires_at TEXT NOT NULL
                     );
 
+                    CREATE TABLE IF NOT EXISTS context_dual_track_traces (
+                        trace_id TEXT PRIMARY KEY,
+                        schema_version INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        bounded INTEGER NOT NULL,
+                        verdict TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        baseline_count INTEGER NOT NULL,
+                        cascade_count INTEGER NOT NULL,
+                        overlap_count INTEGER NOT NULL,
+                        top_match INTEGER NOT NULL,
+                        baseline_result_ids_json TEXT NOT NULL DEFAULT '[]',
+                        cascade_result_ids_json TEXT NOT NULL DEFAULT '[]',
+                        baseline_axes_attempted_json TEXT NOT NULL DEFAULT '[]',
+                        baseline_axes_queried_json TEXT NOT NULL DEFAULT '[]',
+                        cascade_axes_attempted_json TEXT NOT NULL DEFAULT '[]',
+                        cascade_axes_queried_json TEXT NOT NULL DEFAULT '[]',
+                        cascade_waves_json TEXT NOT NULL DEFAULT '[]',
+                        baseline_stop_reason TEXT NOT NULL,
+                        cascade_stop_reason TEXT NOT NULL,
+                        baseline_verified_rejected INTEGER NOT NULL DEFAULT 0,
+                        cascade_verified_rejected INTEGER NOT NULL DEFAULT 0,
+                        baseline_duration_ms REAL NOT NULL DEFAULT 0,
+                        cascade_duration_ms REAL NOT NULL DEFAULT 0,
+                        total_duration_ms REAL NOT NULL DEFAULT 0,
+                        error_type TEXT
+                    );
+
                     CREATE TABLE IF NOT EXISTS memories (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         kind TEXT NOT NULL,
@@ -468,6 +497,10 @@ class MemoryStore:
                         ON conversation(created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_context_cascade_shadow_expires
                         ON context_cascade_shadow_telemetry(expires_at);
+                    CREATE INDEX IF NOT EXISTS idx_context_dual_track_created
+                        ON context_dual_track_traces(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_dual_track_expires
+                        ON context_dual_track_traces(expires_at);
                     CREATE INDEX IF NOT EXISTS idx_memories_kind
                         ON memories(kind, created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_screenpipe_transcripts_created
@@ -2045,6 +2078,193 @@ class MemoryStore:
 
         await asyncio.to_thread(_save)
 
+    async def save_context_dual_track_trace(self, trace: Any) -> None:
+        """Persist only the content-free dual-track contract."""
+
+        payload = trace.model_dump(mode="json")
+
+        def dump(value: object) -> str:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+        def _save() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO context_dual_track_traces(
+                        trace_id, schema_version, created_at, expires_at,
+                        bounded, verdict, reason,
+                        baseline_count, cascade_count, overlap_count, top_match,
+                        baseline_result_ids_json, cascade_result_ids_json,
+                        baseline_axes_attempted_json, baseline_axes_queried_json,
+                        cascade_axes_attempted_json, cascade_axes_queried_json,
+                        cascade_waves_json,
+                        baseline_stop_reason, cascade_stop_reason,
+                        baseline_verified_rejected, cascade_verified_rejected,
+                        baseline_duration_ms, cascade_duration_ms,
+                        total_duration_ms, error_type
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    (
+                        payload["trace_id"],
+                        payload["schema_version"],
+                        payload["created_at"],
+                        payload["expires_at"],
+                        int(payload["bounded"]),
+                        payload["verdict"],
+                        payload["reason"],
+                        payload["baseline_count"],
+                        payload["cascade_count"],
+                        payload["overlap_count"],
+                        int(payload["top_match"]),
+                        dump(payload["baseline_result_ids"]),
+                        dump(payload["cascade_result_ids"]),
+                        dump(payload["baseline_axes_attempted"]),
+                        dump(payload["baseline_axes_queried"]),
+                        dump(payload["cascade_axes_attempted"]),
+                        dump(payload["cascade_axes_queried"]),
+                        dump(payload["cascade_waves"]),
+                        payload["baseline_stop_reason"],
+                        payload["cascade_stop_reason"],
+                        payload["baseline_verified_rejected"],
+                        payload["cascade_verified_rejected"],
+                        payload["baseline_duration_ms"],
+                        payload["cascade_duration_ms"],
+                        payload["total_duration_ms"],
+                        payload["error_type"],
+                    ),
+                )
+
+        await asyncio.to_thread(_save)
+
+    async def list_context_dual_track_traces(
+        self,
+        *,
+        limit: int = 20,
+    ) -> list[Any]:
+        from .context.dual_track import DualTrackTraceV1
+
+        safe_limit = max(1, min(int(limit), 200))
+
+        def _list() -> list[sqlite3.Row]:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM context_dual_track_traces
+                    WHERE expires_at > ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (_now_iso(), safe_limit),
+                ).fetchall()
+
+        rows = await asyncio.to_thread(_list)
+        traces: list[DualTrackTraceV1] = []
+        for row in rows:
+            traces.append(
+                DualTrackTraceV1.model_validate(
+                    {
+                        "trace_id": row["trace_id"],
+                        "schema_version": row["schema_version"],
+                        "created_at": row["created_at"],
+                        "expires_at": row["expires_at"],
+                        "bounded": bool(row["bounded"]),
+                        "verdict": row["verdict"],
+                        "reason": row["reason"],
+                        "baseline_count": row["baseline_count"],
+                        "cascade_count": row["cascade_count"],
+                        "overlap_count": row["overlap_count"],
+                        "top_match": bool(row["top_match"]),
+                        "baseline_result_ids": json.loads(
+                            row["baseline_result_ids_json"]
+                        ),
+                        "cascade_result_ids": json.loads(
+                            row["cascade_result_ids_json"]
+                        ),
+                        "baseline_axes_attempted": json.loads(
+                            row["baseline_axes_attempted_json"]
+                        ),
+                        "baseline_axes_queried": json.loads(
+                            row["baseline_axes_queried_json"]
+                        ),
+                        "cascade_axes_attempted": json.loads(
+                            row["cascade_axes_attempted_json"]
+                        ),
+                        "cascade_axes_queried": json.loads(
+                            row["cascade_axes_queried_json"]
+                        ),
+                        "cascade_waves": json.loads(row["cascade_waves_json"]),
+                        "baseline_stop_reason": row["baseline_stop_reason"],
+                        "cascade_stop_reason": row["cascade_stop_reason"],
+                        "baseline_verified_rejected": row[
+                            "baseline_verified_rejected"
+                        ],
+                        "cascade_verified_rejected": row[
+                            "cascade_verified_rejected"
+                        ],
+                        "baseline_duration_ms": row["baseline_duration_ms"],
+                        "cascade_duration_ms": row["cascade_duration_ms"],
+                        "total_duration_ms": row["total_duration_ms"],
+                        "error_type": row["error_type"],
+                    }
+                )
+            )
+        return traces
+
+    async def context_dual_track_summary(self) -> dict[str, object]:
+        """Aggregate only counters and durations for the read-only UI."""
+
+        def _summary() -> dict[str, object]:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT verdict, COUNT(*) AS count
+                    FROM context_dual_track_traces
+                    WHERE expires_at > ?
+                    GROUP BY verdict
+                    """,
+                    (_now_iso(),),
+                ).fetchall()
+                aggregate = connection.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS sample_count,
+                        AVG(baseline_duration_ms) AS baseline_avg_ms,
+                        AVG(cascade_duration_ms) AS cascade_avg_ms,
+                        AVG(total_duration_ms) AS total_avg_ms,
+                        SUM(CASE WHEN reason = 'timeout' THEN 1 ELSE 0 END)
+                            AS timeout_count,
+                        MAX(created_at) AS latest_at
+                    FROM context_dual_track_traces
+                    WHERE expires_at > ?
+                    """,
+                    (_now_iso(),),
+                ).fetchone()
+            return {
+                "sample_count": int(aggregate["sample_count"] or 0),
+                "verdict_counts": {
+                    row["verdict"]: int(row["count"]) for row in rows
+                },
+                "baseline_avg_ms": round(
+                    float(aggregate["baseline_avg_ms"] or 0.0),
+                    3,
+                ),
+                "cascade_avg_ms": round(
+                    float(aggregate["cascade_avg_ms"] or 0.0),
+                    3,
+                ),
+                "total_avg_ms": round(
+                    float(aggregate["total_avg_ms"] or 0.0),
+                    3,
+                ),
+                "timeout_count": int(aggregate["timeout_count"] or 0),
+                "latest_at": aggregate["latest_at"],
+            }
+
+        return await asyncio.to_thread(_summary)
+
     async def create_memory(self, item: MemoryCreate) -> MemoryItem:
         now = _now_iso()
 
@@ -2970,6 +3190,10 @@ class MemoryStore:
                         "SELECT COUNT(*) FROM context_cascade_shadow_telemetry "
                         "WHERE expires_at <= ?"
                     ),
+                    "dual_track_traces": (
+                        "SELECT COUNT(*) FROM context_dual_track_traces "
+                        "WHERE expires_at <= ?"
+                    ),
                     "command_events": (
                         "SELECT COUNT(*) FROM command_events "
                         "WHERE expires_at IS NOT NULL AND expires_at <= ?"
@@ -3078,6 +3302,13 @@ class MemoryStore:
                     "cascade_shadow_telemetry": connection.execute(
                         """
                         DELETE FROM context_cascade_shadow_telemetry
+                        WHERE expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "dual_track_traces": connection.execute(
+                        """
+                        DELETE FROM context_dual_track_traces
                         WHERE expires_at <= ?
                         """,
                         (cutoff,),

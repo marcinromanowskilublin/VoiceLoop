@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..memory_vectorization import MEMORY_VECTOR_NAMES, memory_query_documents
+from ..memory_vectorization import (
+    MEMORY_VECTOR_NAMES,
+    memory_query_documents,
+    memory_query_weights,
+)
 from .schema import (
     ContextEventV1,
     ContextItemV1,
@@ -64,6 +68,7 @@ class CascadeTrace:
     time_stage: str = "Czas"
     time_bounded: bool = False
     waves: tuple[tuple[str, ...], ...] = ()
+    axes_attempted: tuple[str, ...] = ()
     axes_queried: tuple[str, ...] = ()
     stop_reason: str = "not_started"
     candidate_count: int = 0
@@ -127,7 +132,7 @@ class TimeFirstRetriever:
         embeddings: OpenAICompatibleEmbeddingClient | None = None,
         qdrant: QdrantVectorStore | None = None,
         min_exact_evidence: int = 2,
-        scout_mode: Literal["sequential", "cascade_2_2_1"] = "sequential",
+        scout_mode: Literal["sequential", "rrf5", "cascade_2_2_1"] = "sequential",
         qmax: int = 5,
         wave_size: int = 2,
         preferred_axes: tuple[str, ...] = (),
@@ -156,7 +161,7 @@ class TimeFirstRetriever:
     ) -> ContextPackV1:
         plan = query_plan or build_time_first_query(query, now=now)
         self.last_trace = CascadeTrace(time_bounded=plan.used_time_filter)
-        if self.scout_mode == "cascade_2_2_1" and not _is_bounded_plan(plan):
+        if self.scout_mode in {"rrf5", "cascade_2_2_1"} and not _is_bounded_plan(plan):
             self.last_trace = CascadeTrace(
                 time_bounded=False,
                 stop_reason="unbounded_rejected",
@@ -229,6 +234,41 @@ class TimeFirstRetriever:
             sources=source_counts,
         )
 
+    async def retrieve_vector_candidates(
+        self,
+        query: str,
+        *,
+        query_plan: TimeFirstQueryPlan,
+        limit: int = 8,
+    ) -> ContextPackV1:
+        """Run only the vector track after a shared, already-bounded time gate."""
+
+        self.last_trace = CascadeTrace(time_bounded=query_plan.used_time_filter)
+        if self.scout_mode in {"rrf5", "cascade_2_2_1"} and not _is_bounded_plan(
+            query_plan
+        ):
+            self.last_trace = CascadeTrace(
+                time_bounded=False,
+                stop_reason="unbounded_rejected",
+            )
+            return ContextPackV1(question=query)
+        safe_limit = max(1, min(int(limit), 30))
+        items = await self._semantic_scout(
+            query,
+            plan=query_plan,
+            existing=[],
+            limit=safe_limit,
+        )
+        selected = tuple(items[:safe_limit])
+        source_counts: dict[str, int] = {}
+        for item in selected:
+            source_counts[item.source] = source_counts.get(item.source, 0) + 1
+        return ContextPackV1(
+            question=query,
+            items=selected,
+            sources=source_counts,
+        )
+
     async def _semantic_scout(
         self,
         query: str,
@@ -246,7 +286,7 @@ class TimeFirstRetriever:
             or not self.embeddings.accepts_private_text()
             or not self.qdrant.accepts_private_data()
         ):
-            if self.scout_mode == "cascade_2_2_1":
+            if self.scout_mode in {"rrf5", "cascade_2_2_1"}:
                 self.last_trace = CascadeTrace(
                     time_bounded=plan.used_time_filter,
                     stop_reason="provider_unavailable",
@@ -256,6 +296,14 @@ class TimeFirstRetriever:
         from ..qdrant_memory import QdrantMemoryError
 
         query_documents = memory_query_documents(query[:2000])
+        if self.scout_mode == "rrf5":
+            return await self._rrf5_scout(
+                query_documents,
+                query=query,
+                plan=plan,
+                existing=existing,
+                limit=limit,
+            )
         if self.scout_mode == "cascade_2_2_1":
             return await self._cascade_scout(
                 query_documents,
@@ -298,6 +346,75 @@ class TimeFirstRetriever:
             return []
         return results
 
+    async def _rrf5_scout(
+        self,
+        query_documents: dict[str, str],
+        *,
+        query: str,
+        plan: TimeFirstQueryPlan,
+        existing: list[ContextItemV1],
+        limit: int,
+    ) -> list[ContextItemV1]:
+        from ..embeddings import EmbeddingUnavailableError
+        from ..qdrant_memory import QdrantMemoryError
+
+        axes = tuple(
+            axis for axis in MEMORY_VECTOR_NAMES if query_documents.get(axis)
+        )
+        self.last_trace = CascadeTrace(
+            time_bounded=plan.used_time_filter,
+            waves=(axes,) if axes else (),
+            axes_attempted=axes,
+            stop_reason="in_progress",
+        )
+        results: list[ContextItemV1] = []
+        rejected = 0
+        seen = {item.content_hash for item in existing}
+        stop_reason = "rrf_complete"
+        try:
+            vectors = await self.embeddings.embed_queries(
+                [query_documents[axis] for axis in axes]
+            )
+            if len(vectors) != len(axes):
+                stop_reason = "embedding_count_mismatch"
+            else:
+                hits = await self.qdrant.search(
+                    query_vectors=dict(zip(axes, vectors, strict=True)),
+                    vector_names=axes,
+                    query_weights=memory_query_weights(query),
+                    limit=min(30, max(10, limit * 3)),
+                    min_score=0.0,
+                )
+                for hit in hits:
+                    item = await self._verified_episode_item(
+                        hit,
+                        plan=plan,
+                        axis="rrf5",
+                    )
+                    if item is None:
+                        rejected += 1
+                        continue
+                    if item.content_hash in seen:
+                        continue
+                    seen.add(item.content_hash)
+                    results.append(item)
+                    if len(results) >= limit:
+                        stop_reason = "limit_reached"
+                        break
+        except (EmbeddingUnavailableError, QdrantMemoryError):
+            stop_reason = "provider_unavailable"
+            results = []
+        self.last_trace = CascadeTrace(
+            time_bounded=plan.used_time_filter,
+            waves=(axes,) if axes else (),
+            axes_attempted=axes,
+            axes_queried=axes if stop_reason not in {"provider_unavailable"} else (),
+            stop_reason=stop_reason,
+            candidate_count=len(results),
+            verified_rejected=rejected,
+        )
+        return results
+
     def _cascade_waves_for(self, query: str) -> tuple[tuple[str, ...], ...]:
         ordered: list[str] = []
         for axis in (
@@ -329,6 +446,7 @@ class TimeFirstRetriever:
         waves = self._cascade_waves_for(query)
         results: list[ContextItemV1] = []
         seen = {item.content_hash for item in existing}
+        attempted: list[str] = []
         queried: list[str] = []
         completed_waves: list[tuple[str, ...]] = []
         rejected = 0
@@ -340,6 +458,16 @@ class TimeFirstRetriever:
                 )
                 if not active_axes:
                     continue
+                attempted.extend(active_axes)
+                self.last_trace = CascadeTrace(
+                    time_bounded=plan.used_time_filter,
+                    waves=(*tuple(completed_waves), active_axes),
+                    axes_attempted=tuple(attempted),
+                    axes_queried=tuple(queried),
+                    stop_reason="in_progress",
+                    candidate_count=len(results),
+                    verified_rejected=rejected,
+                )
                 documents = [query_documents[axis] for axis in active_axes]
                 vectors = await self.embeddings.embed_queries(documents)
                 if len(vectors) != len(active_axes):
@@ -386,6 +514,7 @@ class TimeFirstRetriever:
         self.last_trace = CascadeTrace(
             time_bounded=plan.used_time_filter,
             waves=tuple(completed_waves),
+            axes_attempted=tuple(attempted),
             axes_queried=tuple(queried),
             stop_reason=stop_reason,
             candidate_count=len(results),
