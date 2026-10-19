@@ -1,9 +1,9 @@
 # Kaskada 2+2+1 i granica bezpieczeństwa
 
-Stan na 12 października 2026. Opisuje kod w commicie `d7ae31b`
-(`cursor/secure-cascade-shadow-fce7`). Źródłem prawdy pozostaje
-`listener/voiceloop/`. Ten dokument mówi, co ten kod robi, czego nie robi
-i które decyzje należą wyłącznie do człowieka.
+Stan na 19 października 2026. Źródłem prawdy pozostaje
+`listener/voiceloop/`. Ten dokument opisuje pierwotny miernik shadow oraz
+granice wspólne z izolowanym prototypem dual-track. Pełny kontrakt prototypu:
+[`DUAL_TRACK_CASCADE_PROTOTYPE.md`](DUAL_TRACK_CASCADE_PROTOTYPE.md).
 
 ## Co jest wdrożone
 
@@ -37,10 +37,11 @@ oś wskazaną przez klasę zapytania. Druga fala bierze niewykorzystane osie.
 2+2+1 daje pięć zapytań, nie sześć. Brak szóstej osi „kiedy”: czas jest już
 rozstrzygnięty w SQL, zanim poleci pierwsze zapytanie wektorowe.
 
-Miernik zatrzymuje się wcześniej, gdy SQL potwierdził pochodzenie i wynik
-ma pokrycie co najmniej dwóch osi albo wynik decyzji jest w całości pokryty.
-Wynik miernika nie wchodzi do odpowiedzi, nie zmienia `ContextPack` i nie
-wykonuje akcji.
+Pierwotny miernik zatrzymuje się według liczby zaakceptowanych pozycji. Nie
+jest to gwarancja pokrycia dwóch osi ani kompletności decyzji. Prototyp
+dual-track dodaje obok niego porównanie z RRF5 i deterministyczny werdykt,
+ale nadal nie wybiera wyniku do odpowiedzi. Żaden z tych torów nie zmienia
+`ContextPack` i nie wykonuje akcji.
 
 ## Bezpieczeństwo
 
@@ -120,20 +121,20 @@ akcji i nie dopisuje wydarzenia do osi czasu.
 ### Czego ta wersja nie zamyka
 
 - Szerszy indeks pamięci, `context_timeline_v1`, nadal jest eksperymentem.
-  Miernik kaskady czyta zwykłą kolekcję pamięci.
+  Pierwotny miernik kaskady czyta zwykłą kolekcję pamięci. Prototyp dual-track
+  czyta wyłącznie izolowaną kolekcję epizodów.
 - Pięć osi nadal może być zapytanych naraz na ścieżce odpowiedzi.
-- Brak magazynu kalibracji. Kod nie pamięta jeszcze werdyktów człowieka
-  i nie zamienia ich w kanoniczną wartość.
+- Trwałe werdykty dual-track są pomiarem algorytmu, nie werdyktem człowieka
+  i nie stają się kanoniczną wartością.
 - Formy czasu inne niż „miesiąc temu” plus predykcja albo opinia nie są
   rozpoznawane.
 - Włączenie cienia na maszynie z Qdrant zwiększa liczbę zapytań obok
   odpowiedzi. Dlatego domyślnie jest wyłączony.
 
-Testy tych granic są w `tests/test_app.py`, `tests/test_web_search.py`,
-`tests/test_context_phase3.py`, `tests/test_memory_retention.py`,
-`tests/test_context_retrieval.py` i `tests/test_assistant.py`.
-Na Windows CI, run `38144275761`, ten commit ma Ruff czysty, `pip-audit`
-czysty i 976 testów zaliczonych.
+Testy tych granic są w `tests/test_api_privacy.py`, `tests/test_web_search.py`,
+`tests/test_context_phase3.py`, `tests/test_memory.py`,
+`tests/test_context_retrieval_integrity.py`, `tests/test_context_dual_track.py`
+i `tests/test_assistant.py`.
 
 ## Praca człowieka
 
@@ -160,11 +161,11 @@ wyłączona albo pozostaje tylko propozycją.
    najstarsza data. Ta wersja świadomie odmawia kasowania wstecz.
 
 4. **Włączenie miernika.** Na własnej maszynie, gdy chcesz pomiar, ustaw
-   `CONTEXT_CASCADE_SHADOW_ENABLED=true`. Zostaw
+   `CONTEXT_DUAL_TRACK_ENABLED=true` dla izolowanego porównania. Zostaw
    `CONTEXT_CASCADE_SHADOW_QMAX=5` i
-   `CONTEXT_CASCADE_SHADOW_WAVE_SIZE=2`. Miernik ma pisać tylko zdarzenia
-   i liczniki. Jeśli odpowiedź asystenta się zmieni, wyłącz flagę: to błąd,
-   nie oczekiwany efekt.
+   `CONTEXT_CASCADE_SHADOW_WAVE_SIZE=2`. Miernik ma pisać tylko zredagowane
+   zdarzenia, liczniki i content-free trace’y z TTL. Jeśli odpowiedź asystenta
+   się zmieni, wyłącz flagę: to błąd, nie oczekiwany efekt.
 
 5. **Prywatny zbiór wzorcowy.** Zanim kaskada w ogóle wejdzie w rozmowę
    o przełączeniu na odpowiedzi, oznacz własne pytania: trafienie, pudło,

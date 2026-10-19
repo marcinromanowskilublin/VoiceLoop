@@ -109,8 +109,8 @@ Screenpipe / MeetingRecorder / Win32
   -> SQLite context_events + FTS5
   -> grupowanie czasowe
   -> ContextEpisodeV1 + FTS5
-  -> opcjonalny ContextEpisodeVectorizer
-  -> Qdrant: semantic + tylko niepuste osie rezerwowe
+  -> jawny ContextEpisodeIndexer
+  -> izolowany Qdrant: semantic + tylko niepuste osie rezerwowe
 ```
 
 Nie wektoryzujemy klatek OCR, nazw programów, HWND ani surowych ścieżek.
@@ -120,10 +120,12 @@ Domyślnie epizod dostaje `semantic`. `decision`, `intent`, `person_context` i
 Ten schemat opisuje składane, jawnie wywoływane adaptery, nie jeden uruchomiony
 pipeline. `ContextEpisodeVectorizer.index_episode()` nie jest wywoływany
 automatycznie przez aplikację ani przez komendy ingestu dokumentów/migracji.
-Przy przekazanym `MemoryStore` zapisuje hashe odczytanych zdarzeń w
-`source_event_hashes`; brakujące źródło spowoduje późniejsze odrzucenie
-kandydata przez scout. Nie utworzono kolejki indeksowania ani migracji starych
-wektorów przy starcie. Starszy worker pamięci Screenpipe jest osobną ścieżką.
+Jawna komenda `index-context-episodes` opakowuje go w idempotentny indexer i
+zapisuje wyłącznie do `QDRANT_CONTEXT_EPISODE_COLLECTION`. Przy przekazanym
+`MemoryStore` zapisuje hashe odczytanych zdarzeń w `source_event_hashes`;
+brakujące źródło spowoduje późniejsze odrzucenie kandydata przez scout. Nie ma
+kolejki indeksowania ani migracji przy starcie. Starszy worker pamięci
+Screenpipe pozostaje osobną ścieżką i kolekcją.
 
 ## Przepływ odczytu
 
@@ -218,11 +220,16 @@ CONTEXT_TIMELINE_AUTO_TTL_DAYS=14
 CONTEXT_TIMELINE_WINDOWS_PROJECTION_ENABLED=false
 CONTEXT_TIMELINE_DEICTIC_SCREEN_ENABLED=false
 CONTEXT_TIMELINE_COMMITMENT_REVIEW_ENABLED=false
+QDRANT_CONTEXT_EPISODE_COLLECTION=voiceloop_context_episodes_v1
+CONTEXT_DUAL_TRACK_ENABLED=false
+CONTEXT_DUAL_TRACK_MAX_INFLIGHT=1
+CONTEXT_DUAL_TRACK_TIMEOUT_SECONDS=5
+CONTEXT_DUAL_TRACK_TRACE_RETENTION_DAYS=30
 ```
 
-Parametry nie włączają background ingestu ani samplera foreground. Trzy nowe
-flagi też zostają wyłączone: projekcja projektów Windows, zrzut ekranu dla
-pytań deiktycznych oraz zapis review zobowiązań.
+Parametry nie włączają background ingestu ani samplera foreground. Projekcja
+projektów Windows, zrzut ekranu dla pytań deiktycznych, zapis review zobowiązań
+i dual-track pozostają domyślnie wyłączone.
 
 ## Ewaluacja
 
@@ -236,6 +243,10 @@ pytań deiktycznych oraz zapis review zobowiązań.
 
 Publiczne repo zawiera harness i testy syntetyczne. Prywatne pytania, nazwy osób
 i realne treści Screenpipe nie należą do repo.
+
+`evaluate_context_dual_track()` porównuje ten sam bounded query na RRF5 oraz
+2+2+1. Raport dodaje rozkład `agreement` / `conflict` / `uncertain`, metryki
+obu torów i delty. Nie ma kodu, który na podstawie raportu zmienia flagę.
 
 ## Failure semantics
 
@@ -263,6 +274,8 @@ cd listener
 .venv\Scripts\python -m voiceloop.corpus migrate-memories-to-timeline
 .venv\Scripts\python -m voiceloop.corpus prune-context-timeline        # dry-run
 .venv\Scripts\python -m voiceloop.corpus prune-context-timeline --apply
+.venv\Scripts\python -m voiceloop.corpus index-context-episodes        # dry-run
+.venv\Scripts\python -m voiceloop.corpus index-context-episodes --apply
 .venv\Scripts\python -m voiceloop.corpus report-context-retrieval --gold GOLD.jsonl
 ```
 
@@ -270,19 +283,18 @@ Komendy działają na bazie runtime, nie na korpusie, więc nie mają
 `--data-root`; ścieżkę bazy wskazuje `--database`. Ingest dokumentów raportuje
 przyczyny pominięcia: plik z sekretem jest odrzucany w całości, bo jedno
 dopasowanie wzorca sugeruje kolejne w formach, których wzorce nie obejmują.
-`report-context-retrieval` porównuje lokalny FTS z FTS + embeddingami/Qdrant
-na prywatnym zestawie gold. Ta komenda nie podłącza klienta Screenpipe,
-więc nie mierzy jego historycznego fallbacku. Zawsze zwraca
-`recall_switch_allowed: false` — przełączenie pozostaje decyzją operatora.
-Pole `semantic_scout_available` raportuje włączone komponenty, nie wynik
-testu ich zdrowia ani wykonania embeddingu.
+`report-context-retrieval` porównuje RRF5 z 2+2+1 na izolowanej kolekcji
+epizodów. Ta komenda nie podłącza klienta Screenpipe i nie mierzy FTS.
+Raportuje zdrowie providerów i zawsze zwraca `promotion_allowed: false` —
+przełączenie pozostaje poza zakresem prototypu.
 
 | Komenda | Skutek |
 |---|---|
 | `ingest-context-documents` | czyta wskazane korzenie i zapisuje zdarzenia SQL/FTS; bez wektoryzacji |
 | `migrate-memories-to-timeline` | kopiuje jawne pamięci do zdarzeń/epizodów SQL; bez usuwania oryginałów i bez wektoryzacji |
 | `prune-context-timeline` | domyślnie liczy wygasłe wpisy; `--apply` wykonuje retencję Qdrant/SQL/FTS |
-| `report-context-retrieval` | czyta wskazany gold set, odpytuje retrieval i wypisuje JSON; nie zmienia flag ani nie indeksuje |
+| `index-context-episodes` | domyślnie liczy epizody; `--apply` idempotentnie zapisuje izolowaną kolekcję |
+| `report-context-retrieval` | czyta wskazany gold set, równolegle odpytuje RRF5 i 2+2+1 i wypisuje JSON; nie zmienia flag ani nie indeksuje |
 
 Wszystkie komendy inicjalizują schemat wskazanej bazy. Także raport lub
 dry-run może więc utworzyć brakujące tabele; nie należy traktować ich jako
@@ -296,13 +308,16 @@ cd listener
   ..\tests\test_context_foundation.py `
   ..\tests\test_context_phase2.py `
   ..\tests\test_context_phase3.py `
+  ..\tests\test_context_dual_track.py `
+  ..\tests\test_context_dual_track_cli.py `
   ..\tests\test_context_retrieval_integrity.py
 .venv\Scripts\python -m ruff check voiceloop ..\tests
 ```
 
 Testy obejmują idempotencję, FTS, timeline, epizody, paginację Screenpipe,
 scoping sesji, dry-run retencji, fail-closed Qdrant, encje z review gate, oba
-magazyny spotkań, foreground, selektywne wektory, lazy reserve axis oraz metryki.
+magazyny spotkań, foreground, selektywne wektory, lazy reserve axis, izolowany
+indexer, arbiter, limit współbieżności, trwałe trace’y oraz metryki.
 Testy integralności obejmują także stare/brakujące źródła, tożsamość i wersje
 epizodów, usunięcia, TTL, przedziały czasu, rozdzielenie rankingu od confidence
 oraz brak przejścia do wyszukiwania bez czasu po pustym wyniku.

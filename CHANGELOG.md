@@ -15,6 +15,11 @@ All notable public changes to VoiceLoop are documented here.
   roots when the full text is read on demand.
 - Local CLI commands for document ingest, memory migration, timeline pruning
   and the private retrieval comparison report.
+- Opt-in dual-track retrieval prototype with an isolated episode collection,
+  explicit idempotent indexer, parallel RRF5/2+2+1 comparison, conservative
+  arbiter, expiring content-free traces and a token-protected read-only panel.
+- Forty-example synthetic dual-track gold set and a real CLI report that
+  executes both vector tracks while keeping promotion disabled.
 
 ### Fixed
 
@@ -44,6 +49,9 @@ All notable public changes to VoiceLoop are documented here.
 - Explicit episode indexing records source-event hashes when SQLite is supplied.
   Legacy points without canonical references and source versions are excluded
   from time-first semantic recall; no automatic migration is performed.
+- Episode indexing is isolated from the serving collection. The dual-track
+  runtime rejects unbounded queries and overload instead of queueing work; its
+  result cannot enter the serving `ContextPack`.
 - README and architecture docs distinguish planner/default recall from opt-in
   time-first retrieval, document adapter write effects and indexing limits,
   and record the larger memory-axis navigation design as future work.

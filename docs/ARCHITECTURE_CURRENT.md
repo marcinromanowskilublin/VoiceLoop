@@ -223,12 +223,18 @@ zgodną tożsamość i hash, żywe źródła ze zgodnymi wersjami oraz pasujący
 czasu. Treść i czas pochodzą z SQL; ranking zostaje w `retrieval_score`,
 nie w `confidence`.
 
-Kolekcja pamięci nadal może zawierać starsze typy wpisów. Scout odpytuje tę
-samą kolekcję, ale pomija punkty bez kanonicznego epizodu i hashy źródeł.
-`ContextEpisodeVectorizer` jest jawnym API; nie ma automatycznego wywołania
-przy starcie. Dotychczasowy planer nadal odpytuje pięć osi. Liczba trafień
-nadal steruje zatrzymaniem scouta; nie wdrożono jeszcze polityki rangi pytań.
-Żadna tabela kontekstu nie steruje executorem.
+Kolekcja pamięci nadal może zawierać starsze typy wpisów. Produkcyjny planner
+i recall pozostają bez zmian. Jawny `ContextEpisodeIndexer` zapisuje epizody
+do oddzielnej kolekcji `voiceloop_context_episodes_v1`; przy starcie nie działa
+indexer, backfill ani worker.
+
+Domyślnie wyłączony `DualTrackRunner` bierze wyłącznie bounded query i na tej
+izolowanej kolekcji uruchamia równolegle RRF5 oraz kaskadę 2+2+1. Oba wyniki
+przechodzą ten sam SQL/hash/TTL/range gate. Deterministyczny arbiter zapisuje
+`agreement`, `conflict` albo `uncertain` do content-free trace’u z TTL.
+Werdykt nie jest czytany przez planner, `ActionRegistry` ani executor. Panel
+ma tylko chronione tokenem endpointy `GET`. Żadna tabela kontekstu nie steruje
+executorem.
 
 Capabilities **nie** wchodzą do A/B/C. Osobna kolekcja, osobny RRF (normalizacja do stałego zestawu osi capability — inny wariant niż pamięć; nie scalać helperów).
 

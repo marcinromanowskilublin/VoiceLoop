@@ -22,6 +22,11 @@ like current runtime behavior.
 - [Cascade 2+2+1 and security boundary](KASKADA_BEZPIECZENSTWO.md) — shadow
   measurer on the five existing axes, the HTTP, file, search and retention
   boundaries, and the decisions only a person can make.
+- [Dual-track cascade prototype](DUAL_TRACK_CASCADE_PROTOTYPE.md) — isolated
+  episode collection, explicit idempotent indexer, parallel RRF5/2+2+1,
+  deterministic arbiter, content-free traces and read-only demonstrator.
+- [Manual human contribution](DO_WYKONANIA_PRZEZ_CZLOWIEKA.md) — decisions,
+  private labeling and operator steps that cannot be completed by code.
 - [Memory-axis navigation design](VECTOR_NAVIGATION_DESIGN.md) — agreed direction
   for a larger set of specialized axes, evidence requirements and stopping
   rules; separates future design from current code and human labeling duties.

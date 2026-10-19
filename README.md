@@ -135,6 +135,11 @@ running; local configuration can override the defaults.
   (`CONTEXT_CASCADE_SHADOW_ENABLED=false`). It measures beside the answer and
   does not change it. Time stays in SQL. Contract:
   [cascade and security boundary](docs/KASKADA_BEZPIECZENSTWO.md).
+- Dual-track cascade prototype (`CONTEXT_DUAL_TRACK_ENABLED=false`): an
+  isolated episode collection, explicit idempotent indexer, parallel RRF5 and
+  2+2+1, conservative arbiter, expiring content-free traces and a read-only
+  panel. It never selects serving context. Contract:
+  [dual-track prototype](docs/DUAL_TRACK_CASCADE_PROTOTYPE.md).
 - A larger set of specialized memory axes with explicit navigation and stopping
   rules. This remains a [design direction](docs/VECTOR_NAVIGATION_DESIGN.md),
   separate from the shadow measurer above.
@@ -214,8 +219,8 @@ Checked in `tests/test_qdrant_memory.py`, `tests/test_threshold_guard.py`,
 `tests/test_context_phase3.py` and `tests/test_context_retrieval_integrity.py`.
 
 The local `voiceloop.corpus` CLI provides explicit operator commands for
-document ingest, memory migration, timeline pruning and retrieval comparison.
-They are not background jobs. See the
+document ingest, memory migration, timeline pruning, isolated episode indexing
+and dual-track retrieval comparison. They are not background jobs. See the
 [operation contracts](docs/CONTEXT_TIMELINE_V1.md) for write effects and
 rollout limits.
 
@@ -332,6 +337,8 @@ The items below are decisions. Code does not complete them.
 
 Order: 1 and 2 first, 3 as a separate consent, then 4 and 5 as measurement.
 Item 6 is required for a vector measurement, not for the assistant to run.
+The live checklist is maintained in
+[`docs/DO_WYKONANIA_PRZEZ_CZLOWIEKA.md`](docs/DO_WYKONANIA_PRZEZ_CZLOWIEKA.md).
 
 ## Documentation map
 
@@ -339,6 +346,8 @@ Item 6 is required for a vector measurement, not for the assistant to run.
 - [Architecture invariants](docs/ARCHITECTURE_INVARIANTS.md)
 - [Context Timeline V1](docs/CONTEXT_TIMELINE_V1.md)
 - [Cascade 2+2+1 and security boundary](docs/KASKADA_BEZPIECZENSTWO.md)
+- [Dual-track cascade prototype](docs/DUAL_TRACK_CASCADE_PROTOTYPE.md)
+- [Manual human contribution](docs/DO_WYKONANIA_PRZEZ_CZLOWIEKA.md)
 - [Memory-axis navigation design — not the live engine](docs/VECTOR_NAVIGATION_DESIGN.md)
 - [Safe user corpus and evaluation](docs/SAFE_USER_CORPUS.md)
 - [Threshold Guard and runtime gates](docs/THRESHOLD_GUARD.md)
