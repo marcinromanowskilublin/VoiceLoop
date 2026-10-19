@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="450" viewBox="0 0 1280 450" role="img" aria-labelledby="title desc">
+  <title id="title">Separation of bounded, approximate, and missing time in VoiceLoop</title>
+  <desc id="desc">A bounded recognized time becomes a canonical UTC SQL interval and may enter the dual-track measurement. Approximate time remains an explicitly uncertain temporal role for review. A query without a time bound is rejected by the dual-track prototype while the existing response path remains unchanged.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset="1" stop-color="#141827"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0 0L0 6L9 3Z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#020617" flood-opacity=".45"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="450" rx="28" fill="url(#bg)"/>
+  <text x="52" y="58" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="28" font-weight="700">Time is a gate, not another vector</text>
+  <text x="52" y="88" fill="#94a3b8" font-family="Inter,Segoe UI,sans-serif" font-size="16">VoiceLoop keeps known, approximate, and missing time as different states.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="52" y="164" width="202" height="118" rx="22" fill="#17233b" stroke="#7dd3fc"/>
+    <text x="78" y="202" fill="#7dd3fc" font-family="Inter,Segoe UI,sans-serif" font-size="14" font-weight="700">INPUT STATEMENT</text>
+    <text x="78" y="236" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="19" font-weight="700">Time parser</text>
+    <text x="78" y="260" fill="#cbd5e1" font-family="Inter,Segoe UI,sans-serif" font-size="14">local observation time</text>
+
+    <rect x="330" y="112" width="248" height="96" rx="20" fill="#0f2926" stroke="#34d399"/>
+    <text x="356" y="148" fill="#6ee7b7" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">BOUNDED TIME</text>
+    <text x="356" y="178" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="17">today | yesterday | last N days</text>
+
+    <rect x="330" y="232" width="248" height="96" rx="20" fill="#302716" stroke="#fbbf24"/>
+    <text x="356" y="268" fill="#fcd34d" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">APPROXIMATE TIME</text>
+    <text x="356" y="298" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="17">relation + confidence + gap</text>
+
+    <rect x="650" y="90" width="252" height="140" rx="22" fill="#10253a" stroke="#0ea5e9"/>
+    <text x="676" y="130" fill="#7dd3fc" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">CANONICAL SQL WINDOW</text>
+    <text x="676" y="166" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="20" font-weight="700">UTC start to end</text>
+    <text x="676" y="194" fill="#cbd5e1" font-family="Inter,Segoe UI,sans-serif" font-size="14">eligible for RRF5 / 2+2+1</text>
+
+    <rect x="650" y="254" width="252" height="140" rx="22" fill="#2a2130" stroke="#fbbf24"/>
+    <text x="676" y="294" fill="#fde68a" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">UNCERTAIN TEMPORAL ROLE</text>
+    <text x="676" y="330" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="20" font-weight="700">Local telemetry / review</text>
+    <text x="676" y="358" fill="#cbd5e1" font-family="Inter,Segoe UI,sans-serif" font-size="14">not promoted to a fact</text>
+
+    <rect x="972" y="90" width="254" height="140" rx="22" fill="#0f2926" stroke="#34d399"/>
+    <text x="998" y="130" fill="#6ee7b7" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">MEASURED PATH</text>
+    <text x="998" y="166" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="20" font-weight="700">Dual-track comparison</text>
+    <text x="998" y="194" fill="#cbd5e1" font-family="Inter,Segoe UI,sans-serif" font-size="14">SQL verifies every candidate</text>
+
+    <rect x="972" y="254" width="254" height="140" rx="22" fill="#311b25" stroke="#fb7185"/>
+    <text x="998" y="294" fill="#fda4af" font-family="Inter,Segoe UI,sans-serif" font-size="15" font-weight="700">NO SAFE BOUND</text>
+    <text x="998" y="330" fill="#f8fafc" font-family="Inter,Segoe UI,sans-serif" font-size="20" font-weight="700">Dual-track rejected</text>
+    <text x="998" y="358" fill="#cbd5e1" font-family="Inter,Segoe UI,sans-serif" font-size="14">existing response path unchanged</text>
+  </g>
+
+  <g fill="none" stroke="#94a3b8" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M254 206C286 206 292 160 320 160"/>
+    <path d="M254 240C286 240 292 280 320 280"/>
+    <path d="M578 160H640"/>
+    <path d="M578 280H640"/>
+    <path d="M902 160H962"/>
+    <path d="M902 324H962"/>
+  </g>
+
+  <text x="52" y="416" fill="#94a3b8" font-family="Inter,Segoe UI,sans-serif" font-size="14">Missing time follows the lower safety lane: no unbounded vector experiment, no invented timestamp.</text>
+</svg>

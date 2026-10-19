@@ -36,6 +36,16 @@ docelowego komputera.
 - [ ] Zatwierdzić plan canary, rollback i operatora odpowiedzialnego za wyłączenie.
 - [ ] Osobno zlecić zmianę ścieżki odpowiedzi; ten prototyp jej nie zawiera.
 
+## Ręczny przegląd komunikacji publicznej
+
+- [ ] Obejrzeć trzy diagramy README na GitHubie w jasnym i ciemnym motywie.
+- [ ] Potwierdzić, że etykiety osi i werdyktów są zrozumiałe dla odbiorcy.
+- [ ] Potwierdzić, że README nie sugeruje produkcji, automatycznego awansu ani
+  stuprocentowej trafności.
+- [ ] Zweryfikować z czytnikiem ekranu sens alt textów i kolejność nagłówków.
+- [ ] Zdecydować, czy publicznie pokazywać zrzut panelu obok diagramów
+  architektury; kod nie rozstrzyga tej decyzji komunikacyjnej.
+
 ## Dziennik etapów
 
 | Etap | Stan | Co zweryfikowano | Pozostały wkład człowieka |
@@ -46,4 +56,5 @@ docelowego komputera.
 | 3. Raport i gold syntetyczny | zakończony | CLI porównuje rzeczywisty RRF5 z 2+2+1 na tej samej izolowanej kolekcji, raportuje metryki obu torów i zawsze zwraca `promotion_allowed=false`. Repo zawiera 40 zrównoważonych przykładów syntetycznych z jawnym czasem obserwacji. | Zastąpić kopię zbioru syntetycznego prywatnymi przykładami poza repo i ręcznie zatwierdzić etykiety. |
 | 4. Demonstrator read-only | zakończony | Chronione tokenem endpointy `GET` pokazują wyłącznie pokrycie indeksu, agregaty i content-free trace’y. Panel nie ma przycisku uruchamiającego pomiar, indeksowanie, zmianę flag ani akcję. | Operator powinien potwierdzić, że widok jest zrozumiały i nie sugeruje awansu prototypu do live recall. |
 | 5. Weryfikacja końcowa | zakończony | Pełny Linux suite: 1005 zaliczonych, 3 pominięte; Ruff czysty; pełny przypięty lock i lokalny venv bez znanych podatności. Niezależny review nie znalazł P0, a wskazane P1 naprawiono i objęto regresjami. | Nadal potrzebne są prywatne etykiety, pomiar na docelowym Windows oraz jawna decyzja operatora o uruchomieniu shadow. |
+| 6. README i diagramy | zakończony | Repo przedstawia VoiceLoop jako local-first context layer; głos jest jednym z adapterów; trzy SVG opisują prawdziwe granice dual-track i czasu. | Wykonać ręczny przegląd renderowania, dostępności i publicznych sformułowań powyżej. |
 

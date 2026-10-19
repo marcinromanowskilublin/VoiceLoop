@@ -1,36 +1,64 @@
 # VoiceLoop
 
-**A local-first context workspace for work spread across too many tools.**
-
-Work already creates enough context: windows, meetings, documents, messages,
-decisions and local history. VoiceLoop turns those scattered signals into one
-bounded, source-aware view of what matters now.
-
-It is not another chatbot or another inbox. It is a context layer that sits
-beside existing software, reduces noise and keeps the current situation,
-evidence and next action visible.
+**A local-first context layer for work spread across documents, meetings,
+windows, messages and local history.**
 
 [![VoiceLoop CI](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/marcinromanowskilublin/VoiceLoop/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-brightgreen.svg)](LICENSE)
 [![Version: 0.3.0](https://img.shields.io/badge/version-0.3.0-6e8fb3.svg)](CHANGELOG.md)
 
-![VoiceLoop turns scattered signals into a source-aware working view](docs/img/voiceloop-context-workspace.svg)
+![Local documents, meetings, windows, text and optional voice pass through canonical SQL time into parallel RRF5 and 2+2+1 retrieval, then a shadow arbiter records an evidence comparison](docs/img/voiceloop-dual-track-flow.svg)
 
-## What the user gets
+![The deterministic shadow arbiter records agreement, conflict or uncertain without promoting either retrieval track or authorizing an action](docs/img/voiceloop-arbiter-outcomes.svg)
 
-The main interface is organized around the work, not the model:
+![VoiceLoop keeps bounded canonical time separate from approximate or missing time, and rejects unbounded dual-track measurement](docs/img/voiceloop-time-certainty.svg)
 
-- **Current thread** — the situation in progress, without replaying every input.
-- **Context stack** — relevant people, decisions, sources and stable facts.
-- **Visible evidence** — retrieved material remains linked to its origin.
-- **Controlled next actions** — proposals pass local policy and confirmation
-  before execution.
+## Context first
 
-Voice, text, meetings, active windows and documents can all be inputs. None of
-them defines the product; the value is the context VoiceLoop creates between
-them.
+VoiceLoop is not another chatbot and it is not primarily a voice assistant. It
+sits beside existing software and turns scattered local signals into bounded,
+source-aware context:
 
-![VoiceLoop light context workspace showing the current thread and context stack](docs/img/voiceloop-panel.png)
+- **SQLite is canonical** for content, time, source identity and retention.
+- **Qdrant is derived** and ranks candidates; it does not become the source of
+  truth.
+- **Context remains evidence**, not executable intent.
+- **Experimental retrieval stays shadow-only** until private quality and
+  latency gates are approved by a person.
+
+The working view is organized around the situation in progress: relevant
+evidence, people, decisions and next steps remain linked to their origin.
+
+### Inputs are adapters
+
+| Source | Adapter role | Default boundary |
+|---|---|---|
+| Documents | explicit digest and timeline ingest | configured local roots |
+| Meetings | timestamped transcript events and episodes | local SQLite; retention applies |
+| Windows and apps | foreground and project context | Windows-first, opt-in projections |
+| Text | direct questions and operator commands | loopback API with local token |
+| Voice | optional STT or VoiceAttack input adapter | not required by the context core |
+| Screenpipe | optional historical desktop evidence | local, gated and off where documented |
+
+No single adapter defines the product. Voice can submit the same bounded input
+as text, but the durable value is the context layer built between sources.
+
+![VoiceLoop context workspace showing the current thread, linked evidence and context stack](docs/img/voiceloop-panel.png)
+
+## What exists today
+
+- A FastAPI core and local panel protected by a loopback token.
+- Canonical SQLite events, episodes, exact time filters and FTS.
+- Optional local named-vector retrieval with SQL/hash/TTL verification.
+- Explicit ingest, migration, retention and evaluation commands.
+- A default-off dual-track prototype that compares five-axis RRF with a 2+2+1
+  cascade in an isolated collection.
+- Controlled action proposals behind local schemas, risk policy and
+  confirmation. Retrieved context cannot grant authority.
+
+VoiceLoop remains a Windows-first engineering project with opt-in integrations.
+The committed synthetic evaluation set verifies contracts, not private-data
+quality, production readiness or 100% retrieval accuracy.
 
 ## Windows-first, software-agnostic
 
@@ -38,9 +66,6 @@ VoiceLoop is designed first for Windows and works across the software already
 used in a workflow: browsers, communication tools, office apps, local files and
 line-of-business systems. Integrations are explicit adapters, so adopting the
 context layer does not require replacing the underlying software.
-
-VoiceLoop is currently being rolled out with a partner as the context UI for an
-existing operational workflow.
 
 ## Safety Model
 
@@ -88,12 +113,14 @@ Verify the core from `listener/` (the same scope as CI):
 
 ## Architecture At A Glance
 
-![VoiceLoop active request flow from input through local policy and executor](docs/img/voiceloop-system-architecture.svg)
+![VoiceLoop context layer connecting local sources to a bounded source-aware working view](docs/img/voiceloop-context-workspace.svg)
 
-The production path is deliberately narrow: hard guards and Router V1 run
-before the LLM path, bounded context is supplied only as untrusted evidence, and
-local policy gates every executable step. Routing V2, commitment analysis and
-Situation State remain shadow or read-only paths by default.
+The context path is deliberately layered: local adapters create canonical
+SQLite records, derived indexes rank candidates, SQL verifies time and
+provenance, and only bounded evidence reaches a working view. If a request also
+proposes an action, a separate local policy and executor boundary applies.
+Routing V2, commitment analysis, Situation State and dual-track retrieval remain
+shadow or read-only paths by default.
 
 Canonical details:
 [`docs/ARCHITECTURE_CURRENT.md`](docs/ARCHITECTURE_CURRENT.md).
@@ -104,18 +131,18 @@ The categories below describe implementation and default settings. They do not
 certify that a particular installation has its microphone, models or services
 running; local configuration can override the defaults.
 
-### Implemented core path
+### Implemented local context core
 
+- Canonical SQLite state for memories, timeline events, episodes, transcripts
+  and source-aware provenance.
+- Time-bounded SQL/FTS retrieval and bounded Context Pack assembly.
+- Optional local Qdrant and Screenpipe clients behind explicit privacy gates.
 - FastAPI core, local panel and token-protected private endpoints.
-- Deterministic STOP, Router V1, typed model proposals and one executor queue.
-- Local action registry, argument schemas, risk policy and confirmation.
-- Session-scoped conversation history and bounded Context Pack assembly.
-- SQLite operational state with optional local Qdrant and Screenpipe clients.
+- A separate controlled-action boundary with deterministic STOP, typed
+  proposals, local schemas, risk policy, confirmation and one executor queue.
 
 ### Opt-in
 
-- Notepad voice lane with focus binding, confirmation and read-back
-  verification.
 - Context Timeline recall (`CONTEXT_TIMELINE_RECALL_ENABLED=false` by default).
 - Explicit document ingest and SQL-memory migration into the timeline, plus
   retention and retrieval-comparison commands.
@@ -123,6 +150,8 @@ running; local configuration can override the defaults.
   “on this screen”, and commitment review rows. Their runtime flags default to
   `false`; review rows do not accept commitments or authorize actions.
 - Screenpipe vector memory, Qdrant and external voice/model providers.
+- Optional voice adapters, including Deepgram, VoiceAttack and the narrow
+  Notepad voice lane with focus binding and read-back verification.
 
 ### Shadow or experimental
 
@@ -144,7 +173,7 @@ running; local configuration can override the defaults.
   rules. This remains a [design direction](docs/VECTOR_NAVIGATION_DESIGN.md),
   separate from the shadow measurer above.
 
-## Why this is not just “an LLM with tools”
+## Context safety is code, not a prompt
 
 The hard boundaries are code contracts backed by tests.
 

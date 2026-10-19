@@ -46,6 +46,63 @@ def test_panel_dual_track_demonstrator_is_read_only() -> None:
     assert 'api("/api/v1/context/dual-track/traces", {' not in panel
 
 
+def test_context_layer_readme_diagrams_are_accessible_svg() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    diagrams = (
+        "voiceloop-dual-track-flow.svg",
+        "voiceloop-arbiter-outcomes.svg",
+        "voiceloop-time-certainty.svg",
+    )
+    first_section = readme.index("## Context first")
+
+    for name in diagrams:
+        relative = f"docs/img/{name}"
+        image = ROOT / relative
+        root = ET.parse(image).getroot()
+        namespace = {"svg": "http://www.w3.org/2000/svg"}
+        title = root.find("svg:title", namespace)
+        description = root.find("svg:desc", namespace)
+        markdown = re.search(
+            rf"!\[([^\]]+)\]\({re.escape(relative)}\)",
+            readme,
+        )
+
+        assert root.attrib["role"] == "img"
+        assert title is not None and len(title.text or "") >= 20
+        assert description is not None and len(description.text or "") >= 80
+        assert markdown is not None and len(markdown.group(1)) >= 60
+        assert readme.index(relative) < first_section
+
+
+def test_context_layer_readme_treats_voice_as_one_adapter() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    introduction = readme[: readme.index("## Safety Model")]
+    normalized = " ".join(introduction.split())
+
+    assert "A local-first context layer" in normalized
+    assert "not primarily a voice assistant" in normalized
+    assert "| Voice | optional STT or VoiceAttack input adapter |" in introduction
+    assert "Voice can submit the same bounded input as text" in normalized
+    assert "100% retrieval accuracy" in normalized
+
+
+def test_updated_documentation_has_no_missing_local_links() -> None:
+    documents = (
+        ROOT / "README.md",
+        ROOT / "docs" / "README.md",
+        ROOT / "docs" / "DO_WYKONANIA_PRZEZ_CZLOWIEKA.md",
+    )
+    for document in documents:
+        source = document.read_text(encoding="utf-8")
+        for raw_target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", source):
+            target = raw_target.split("#", 1)[0].strip()
+            if not target or "://" in target or target.startswith("mailto:"):
+                continue
+            assert (document.parent / target).resolve().exists(), (
+                f"{document.relative_to(ROOT)} -> {raw_target}"
+            )
+
+
 def test_legacy_deepgram_entrypoints_are_retired() -> None:
     panel = (ROOT / "panel" / "deepgram.html").read_text(encoding="utf-8")
     listener = (ROOT / "listener" / "deepgram_listener.py").read_text(encoding="utf-8")

@@ -8,7 +8,8 @@ like current runtime behavior.
 
 ## Start here
 
-- [Repository README](../README.md) — product overview, live demo and quick start.
+- [Repository README](../README.md) — context-layer overview, truthful system
+  diagrams, current status and quick start.
 - [Current architecture](ARCHITECTURE_CURRENT.md) — active, experimental and
   planned components mapped to code.
 - [Architecture invariants](ARCHITECTURE_INVARIANTS.md) — safety boundaries
@@ -47,6 +48,12 @@ These contracts exist in code but do not grant execution authority.
 
 ## Visual reference
 
+- [Local context dual-track flow](img/voiceloop-dual-track-flow.svg) — local
+  adapters, canonical SQL time, parallel retrieval and shadow evidence.
+- [Arbiter outcomes](img/voiceloop-arbiter-outcomes.svg) — deterministic
+  agreement, conflict and uncertain behavior.
+- [Time certainty boundary](img/voiceloop-time-certainty.svg) — bounded,
+  approximate and missing time remain distinct states.
 - [Context workspace — user view](img/voiceloop-context-workspace.svg)
 - [Live context workspace](img/voiceloop-panel.png)
 - [System architecture](img/voiceloop-system-architecture.svg)
