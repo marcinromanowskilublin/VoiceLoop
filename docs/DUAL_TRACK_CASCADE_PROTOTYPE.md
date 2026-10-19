@@ -1,6 +1,6 @@
 # Prototyp dual-track: RRF5 kontra kaskada 2+2+1
 
-**Status:** eksperyment shadow, domyślnie wyłączony.  
+**Status:** eksperyment shadow, domyślnie wyłączony.
 **Granica:** wynik nigdy nie zmienia odpowiedzi, planu, akcji ani potwierdzenia.
 
 Prototyp odpowiada na jedno pytanie techniczne: czy ograniczona kaskada odzyskuje
@@ -152,4 +152,3 @@ limit współbieżności, trwałość i brak treści trace’u, integralność S
 Testy nie dowodzą jakości prywatnych danych ani wydajności docelowego Windows.
 Kroki wymagające człowieka są prowadzone osobno w
 [`DO_WYKONANIA_PRZEZ_CZLOWIEKA.md`](DO_WYKONANIA_PRZEZ_CZLOWIEKA.md).
-
