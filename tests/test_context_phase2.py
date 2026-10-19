@@ -27,7 +27,11 @@ from voiceloop.context.schema import (
     ContextTrust,
     stable_episode_id,
 )
-from voiceloop.context.vectorization import ContextEpisodeVectorizer
+from voiceloop.context.vectorization import (
+    ContextEpisodeIndexError,
+    ContextEpisodeIndexer,
+    ContextEpisodeVectorizer,
+)
 from voiceloop.memory import MemoryStore
 
 
@@ -516,3 +520,94 @@ async def test_episode_vectorizer_indexes_only_nonempty_axes(tmp_path) -> None:
     stored = await store.get_context_episode(episode.episode_id)
     assert stored is not None
     assert stored.vector_spaces == ("semantic", "decision")
+
+
+@pytest.mark.asyncio
+async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_documents(self, documents):
+            return [[1.0, float(index)] for index, _ in enumerate(documents)]
+
+    class QdrantStub:
+        enabled = True
+        collection_name = "voiceloop_context_episodes_v1"
+
+        def __init__(self) -> None:
+            self.points: dict[tuple[str, str], str] = {}
+            self.upsert_count = 0
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def collection_exists(self) -> bool:
+            return bool(self.points)
+
+        async def has_memory(self, *, source, source_id, content_hash):
+            return self.points.get((source, source_id)) == content_hash
+
+        async def upsert_memory(self, *, source, source_id, content_hash, **_kwargs):
+            self.points[(source, source_id)] = content_hash
+            self.upsert_count += 1
+
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    event = ContextEventV1.from_observation(
+        source="test",
+        source_id="event-1",
+        started_at=datetime(2026, 9, 19, tzinfo=UTC),
+        text="Kanoniczne źródło.",
+    )
+    await store.upsert_context_event(event)
+    episode = ContextEpisodeV1(
+        episode_id=stable_episode_id("timeline", "episode-index"),
+        source="timeline",
+        source_id="episode-index",
+        started_at=datetime(2026, 9, 19, tzinfo=UTC),
+        ended_at=datetime(2026, 9, 19, 1, tzinfo=UTC),
+        title="Indeks",
+        summary="Ustalono izolowaną kolekcję.",
+        source_event_ids=(event.event_id,),
+        metadata={"decision": "Kolekcja epizodów jest osobna."},
+    )
+    await store.upsert_context_episode(episode)
+    qdrant = QdrantStub()
+    indexer = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+
+    preview = await indexer.index(dry_run=True)
+    first = await indexer.index(dry_run=False)
+    second = await indexer.index(dry_run=False)
+
+    assert preview.would_index == 1
+    assert qdrant.upsert_count == 1
+    assert first.indexed == 1
+    assert second.already_indexed == 1
+    assert await store.context_episode_vector_coverage() == {
+        "total": 1,
+        "indexed": 1,
+        "pending": 0,
+    }
+
+
+def test_episode_indexer_rejects_primary_collection(tmp_path) -> None:
+    qdrant = type(
+        "QdrantStub",
+        (),
+        {"collection_name": "voiceloop_memory"},
+    )()
+    with pytest.raises(ContextEpisodeIndexError):
+        ContextEpisodeIndexer(
+            memory=MemoryStore(tmp_path / "voice.db"),
+            embeddings=object(),  # type: ignore[arg-type]
+            qdrant=qdrant,  # type: ignore[arg-type]
+            primary_collection="voiceloop_memory",
+        )

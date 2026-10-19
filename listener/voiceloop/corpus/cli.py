@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from ..context.evaluation import (
 from ..context.lifecycle import ContextLifecycleService
 from ..context.projection import MemoryTimelineMigrator
 from ..context.retrieval import TimeFirstRetriever
+from ..context.vectorization import ContextEpisodeIndexError, ContextEpisodeIndexer
 from ..embeddings import (
     EmbeddingUnavailableError,
     OpenAICompatibleEmbeddingClient,
@@ -449,6 +451,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Wykonaj kaskadę Qdrant → tombstone → FTS zamiast dry-run.",
     )
 
+    context_index = subparsers.add_parser(
+        "index-context-episodes",
+        help="Indeksuj kanoniczne epizody w izolowanej kolekcji. Domyślnie dry-run.",
+    )
+    context_index.add_argument("--database", type=Path)
+    context_index.add_argument("--limit", type=int, default=200)
+    context_index.add_argument("--offset", type=int, default=0)
+    context_index.add_argument(
+        "--apply",
+        action="store_true",
+        help="Wykonaj idempotentne zapisy do izolowanej kolekcji epizodów.",
+    )
+
     context_report = subparsers.add_parser(
         "report-context-retrieval",
         help="Porównaj sam FTS z pełną kaskadą na prywatnym zestawie gold.",
@@ -480,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
     except (
         CandidateDecisionError,
         CapabilityIndexError,
+        ContextEpisodeIndexError,
         DocumentAccessError,
         EmbeddingUnavailableError,
         DeepgramFileError,
@@ -1752,6 +1768,37 @@ async def _run_async(args: argparse.Namespace) -> int:
                 ensure_ascii=False,
             )
         )
+        return 0
+    if args.command == "index-context-episodes":
+        memory = await _context_memory_store(args, settings)
+        embeddings = OpenAICompatibleEmbeddingClient(
+            base_url=(settings.local_embeddings_base_url or settings.lm_studio_base_url),
+            api_key=(settings.local_embeddings_api_key or settings.lm_studio_api_key),
+            model=settings.local_embeddings_model,
+            timeout_seconds=settings.local_embeddings_timeout_seconds,
+            enabled=settings.local_embeddings_enabled,
+        )
+        episode_qdrant = QdrantVectorStore(
+            settings.model_copy(
+                update={
+                    "qdrant_collection": settings.qdrant_context_episode_collection,
+                }
+            )
+        )
+        try:
+            report = await ContextEpisodeIndexer(
+                memory=memory,
+                embeddings=embeddings,
+                qdrant=episode_qdrant,
+                primary_collection=settings.qdrant_collection,
+            ).index(
+                limit=args.limit,
+                offset=args.offset,
+                dry_run=not args.apply,
+            )
+        finally:
+            await episode_qdrant.close()
+        print(json.dumps(asdict(report), ensure_ascii=False))
         return 0
     if args.command == "report-context-retrieval":
         gold_path = args.gold.resolve()

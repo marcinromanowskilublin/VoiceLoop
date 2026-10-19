@@ -87,6 +87,18 @@ class QdrantVectorStore:
             return False
         return True
 
+    async def collection_exists(self) -> bool:
+        """Check collection presence without treating an outage as an empty store."""
+
+        if not self.enabled:
+            return False
+        try:
+            return bool(await self.client.collection_exists(self.collection_name))
+        except Exception as exc:
+            raise QdrantUnavailableError(
+                f"Nie udało się sprawdzić kolekcji Qdrant: {type(exc).__name__}"
+            ) from exc
+
     async def close(self) -> None:
         await self.client.close()
 

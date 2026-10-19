@@ -1131,6 +1131,72 @@ class MemoryStore:
         rows = await asyncio.to_thread(_search)
         return [self._context_episode_from_row(row) for row in rows]
 
+    async def list_context_episodes(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        include_expired: bool = False,
+    ) -> list[ContextEpisodeV1]:
+        """List canonical episodes deterministically for explicit indexing."""
+
+        safe_limit = max(1, min(int(limit), 5000))
+        safe_offset = max(0, min(int(offset), 1_000_000))
+
+        def _list() -> list[sqlite3.Row]:
+            conditions = ["deleted_at IS NULL"]
+            parameters: list[Any] = []
+            if not include_expired:
+                conditions.append("(expires_at IS NULL OR expires_at > ?)")
+                parameters.append(_now_iso())
+            parameters.extend((safe_limit, safe_offset))
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM context_episodes
+                    WHERE """
+                    + " AND ".join(conditions)
+                    + """
+                    ORDER BY episode_id ASC
+                    LIMIT ? OFFSET ?
+                    """,
+                    parameters,
+                ).fetchall()
+
+        rows = await asyncio.to_thread(_list)
+        return [self._context_episode_from_row(row) for row in rows]
+
+    async def context_episode_vector_coverage(self) -> dict[str, int]:
+        """Return content-free SQL counters for the read-only demonstrator."""
+
+        def _coverage() -> dict[str, int]:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS total,
+                        SUM(
+                            CASE
+                                WHEN vector_spaces_json <> '[]' THEN 1
+                                ELSE 0
+                            END
+                        ) AS indexed
+                    FROM context_episodes
+                    WHERE deleted_at IS NULL
+                      AND (expires_at IS NULL OR expires_at > ?)
+                    """,
+                    (_now_iso(),),
+                ).fetchone()
+            total = int(row["total"] or 0)
+            indexed = int(row["indexed"] or 0)
+            return {
+                "total": total,
+                "indexed": indexed,
+                "pending": max(0, total - indexed),
+            }
+
+        return await asyncio.to_thread(_coverage)
+
     async def tombstone_context_episode(
         self,
         episode_id: str,

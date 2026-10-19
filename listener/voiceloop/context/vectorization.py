@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from ..embeddings import OpenAICompatibleEmbeddingClient
 from ..memory import MemoryStore
@@ -17,6 +18,36 @@ class EpisodeVectorizationResult:
     episode_id: str
     vector_spaces: tuple[str, ...]
     indexed: bool
+    reason: str = "indexed"
+
+
+@dataclass(frozen=True)
+class EpisodeIndexingReport:
+    collection: str
+    considered: int
+    indexed: int
+    already_indexed: int
+    would_index: int
+    dry_run: bool
+
+
+class ContextEpisodeIndexError(RuntimeError):
+    pass
+
+
+def validate_episode_collection_isolation(
+    *,
+    primary_collection: str,
+    episode_collection: str,
+) -> None:
+    primary = primary_collection.strip()
+    candidate = episode_collection.strip()
+    if not candidate:
+        raise ContextEpisodeIndexError("Nazwa kolekcji epizodów nie może być pusta.")
+    if candidate == primary:
+        raise ContextEpisodeIndexError(
+            "Kolekcja epizodów musi być oddzielona od aktywnej kolekcji pamięci."
+        )
 
 
 class ContextEpisodeVectorizer:
@@ -55,6 +86,7 @@ class ContextEpisodeVectorizer:
                 episode_id=episode.episode_id,
                 vector_spaces=(),
                 indexed=False,
+                reason="provider_unavailable",
             )
         documents = memory_vector_documents(
             summary=episode.summary,
@@ -117,3 +149,96 @@ class ContextEpisodeVectorizer:
             vector_spaces=vector_names,
             indexed=True,
         )
+
+
+class ContextEpisodeIndexer:
+    """Explicit, idempotent indexer for the isolated episode collection."""
+
+    def __init__(
+        self,
+        *,
+        memory: MemoryStore,
+        embeddings: OpenAICompatibleEmbeddingClient,
+        qdrant: QdrantVectorStore,
+        primary_collection: str,
+    ) -> None:
+        validate_episode_collection_isolation(
+            primary_collection=primary_collection,
+            episode_collection=qdrant.collection_name,
+        )
+        self.memory = memory
+        self.qdrant = qdrant
+        self.vectorizer = ContextEpisodeVectorizer(
+            embeddings=embeddings,
+            qdrant=qdrant,
+            memory=memory,
+        )
+
+    async def index(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        dry_run: bool = True,
+    ) -> EpisodeIndexingReport:
+        episodes = await self.memory.list_context_episodes(
+            limit=limit,
+            offset=offset,
+        )
+        if dry_run:
+            return EpisodeIndexingReport(
+                collection=self.qdrant.collection_name,
+                considered=len(episodes),
+                indexed=0,
+                already_indexed=0,
+                would_index=len(episodes),
+                dry_run=True,
+            )
+        if not self.vectorizer.available():
+            raise ContextEpisodeIndexError(
+                "Indexer wymaga lokalnych embeddingów i lokalnego Qdrant."
+            )
+
+        collection_ready = await self.qdrant.collection_exists()
+        indexed = 0
+        already_indexed = 0
+        for episode in episodes:
+            if collection_ready and await self.qdrant.has_memory(
+                source=episode.source,
+                source_id=episode.source_id,
+                content_hash=episode.content_hash,
+            ):
+                already_indexed += 1
+                continue
+            result = await self.vectorizer.index_episode(
+                episode,
+                topic=_metadata_text(episode.metadata.get("topic")),
+                intent=_metadata_text(episode.metadata.get("intent")),
+                decision=_metadata_text(episode.metadata.get("decision")),
+                person_context=_metadata_text(
+                    episode.metadata.get("person_context")
+                    or episode.metadata.get("people")
+                ),
+            )
+            if not result.indexed:
+                raise ContextEpisodeIndexError(
+                    f"Nie udało się zindeksować epizodu: {result.reason}."
+                )
+            collection_ready = True
+            indexed += 1
+        return EpisodeIndexingReport(
+            collection=self.qdrant.collection_name,
+            considered=len(episodes),
+            indexed=indexed,
+            already_indexed=already_indexed,
+            would_index=0,
+            dry_run=False,
+        )
+
+
+def _metadata_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list | tuple | set):
+        return ", ".join(str(item).strip() for item in value if str(item).strip())
+    return ""

@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_api_key: SecretStr | None = None
     qdrant_collection: str = "voiceloop_memory"
+    qdrant_context_episode_collection: str = "voiceloop_context_episodes_v1"
     qdrant_capability_collection: str = "voiceloop_capabilities_v1"
     qdrant_memory_next_collection: str | None = None
     qdrant_capability_next_collection: str | None = None
@@ -194,6 +195,10 @@ class Settings(BaseSettings):
     context_cascade_shadow_qmax: int = 5
     context_cascade_shadow_wave_size: int = 2
     context_cascade_shadow_timeout_seconds: float = 5.0
+    context_dual_track_enabled: bool = False
+    context_dual_track_max_inflight: int = 1
+    context_dual_track_timeout_seconds: float = 5.0
+    context_dual_track_trace_retention_days: int = 30
     windows_context_enabled: bool = True
     windows_context_roots: str = ""
     windows_context_reconcile_seconds: int = 120
