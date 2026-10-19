@@ -371,6 +371,7 @@ class TimeFirstRetriever:
         rejected = 0
         seen = {item.content_hash for item in existing}
         stop_reason = "rrf_complete"
+        queried: tuple[str, ...] = ()
         try:
             vectors = await self.embeddings.embed_queries(
                 [query_documents[axis] for axis in axes]
@@ -385,6 +386,7 @@ class TimeFirstRetriever:
                     limit=min(30, max(10, limit * 3)),
                     min_score=0.0,
                 )
+                queried = axes
                 for hit in hits:
                     item = await self._verified_episode_item(
                         hit,
@@ -408,7 +410,7 @@ class TimeFirstRetriever:
             time_bounded=plan.used_time_filter,
             waves=(axes,) if axes else (),
             axes_attempted=axes,
-            axes_queried=axes if stop_reason not in {"provider_unavailable"} else (),
+            axes_queried=queried,
             stop_reason=stop_reason,
             candidate_count=len(results),
             verified_rejected=rejected,

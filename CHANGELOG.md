@@ -58,6 +58,10 @@ All notable public changes to VoiceLoop are documented here.
 
 ### Verification
 
+- Dual-track prototype checkpoint: Linux full suite `1005 passed, 3 skipped`;
+  Ruff passed; `pip-audit` found no known vulnerabilities in the complete
+  pinned lock. This still does not establish private-data quality or target
+  Windows latency.
 - Code checkpoint `bf26abe`: local full suite `916 passed, 1 skipped`; Ruff passed.
   This does not establish live audio, provider availability or private recall quality.
 

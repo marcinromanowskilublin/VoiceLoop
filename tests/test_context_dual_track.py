@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,9 +20,11 @@ from voiceloop.context.schema import (
     ContextEventV1,
     ContextItemV1,
     ContextPackV1,
+    ContextScope,
+    ContextTrust,
 )
-from voiceloop.memory import MemoryStore
 from voiceloop.corpus.storage import read_jsonl
+from voiceloop.memory import MemoryStore
 
 DAY = datetime(2026, 10, 18, 12, tzinfo=UTC)
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,7 +34,9 @@ def item(source_id: str) -> ContextItemV1:
     return ContextItemV1(
         source="synthetic",
         source_id=source_id,
+        scope=ContextScope.EPISODIC,
         content=f"synthetic {source_id}",
+        trust=ContextTrust.DERIVED,
     )
 
 
@@ -65,6 +69,25 @@ def test_dual_track_arbiter_is_deterministic(
 
     assert decision.verdict == verdict
     assert decision.reason == reason
+
+
+def test_dual_track_arbiter_conflicts_on_different_canonical_versions() -> None:
+    baseline_item = item("same-source")
+    cascade_item = ContextItemV1(
+        source=baseline_item.source,
+        source_id=baseline_item.source_id,
+        scope=ContextScope.EPISODIC,
+        content="inna wersja kanoniczna",
+        trust=ContextTrust.DERIVED,
+    )
+
+    decision = arbitrate_context_packs(
+        ContextPackV1(question="synthetic", items=(baseline_item,)),
+        ContextPackV1(question="synthetic", items=(cascade_item,)),
+    )
+
+    assert decision.verdict == "conflict"
+    assert decision.reason == "disjoint_results"
 
 
 async def seeded_store(tmp_path):
@@ -172,6 +195,34 @@ async def test_dual_track_runs_parallel_tracks_and_persists_content_free_trace(
 
 
 @pytest.mark.asyncio
+async def test_dual_track_keeps_local_timezone_for_relative_day(tmp_path) -> None:
+    store, hits = await seeded_store(tmp_path)
+    runner = DualTrackRunner(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=QdrantStub(hits),  # type: ignore[arg-type]
+    )
+    local_midnight = datetime(
+        2026,
+        10,
+        19,
+        0,
+        30,
+        tzinfo=timezone(timedelta(hours=2)),
+    )
+
+    result = await runner.run(
+        "Co ustaliliśmy wczoraj?",
+        request_id="local-timezone",
+        now=local_midnight,
+    )
+
+    assert result.trace.verdict == "agreement"
+    assert result.baseline.items
+    assert result.cascade.items
+
+
+@pytest.mark.asyncio
 async def test_dual_track_rejects_unbounded_query_without_providers(tmp_path) -> None:
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
@@ -258,6 +309,43 @@ async def test_dual_track_timeout_reports_attempted_axes(tmp_path) -> None:
     assert result.trace.error_type == "TimeoutError"
 
 
+@pytest.mark.asyncio
+async def test_dual_track_timeout_preserves_completed_track_and_cancels_other(
+    tmp_path,
+) -> None:
+    store, hits = await seeded_store(tmp_path)
+    cascade_cancelled = asyncio.Event()
+
+    class PartialEmbeddings(EmbeddingsStub):
+        async def embed_queries(self, documents):
+            if len(documents) == 5:
+                return await super().embed_queries(documents)
+            try:
+                await asyncio.sleep(1)
+            finally:
+                cascade_cancelled.set()
+            return await super().embed_queries(documents)
+
+    runner = DualTrackRunner(
+        memory=store,
+        embeddings=PartialEmbeddings(),  # type: ignore[arg-type]
+        qdrant=QdrantStub(hits),  # type: ignore[arg-type]
+        timeout_seconds=0.1,
+    )
+
+    result = await runner.run(
+        "Co ustaliliśmy wczoraj?",
+        request_id="partial-timeout",
+        now=DAY + timedelta(days=1),
+    )
+
+    assert result.trace.reason == "timeout"
+    assert result.trace.baseline_count == 2
+    assert result.trace.cascade_count == 0
+    assert cascade_cancelled.is_set()
+    assert runner.inflight == 0
+
+
 def test_synthetic_dual_track_gold_has_balanced_40_examples() -> None:
     records = read_jsonl(
         FIXTURES / "context-dual-track-gold-v1.jsonl",
@@ -276,6 +364,14 @@ def test_synthetic_dual_track_gold_has_balanced_40_examples() -> None:
     assert all(record.observed_at is not None for record in records)
     assert all(record.expected_time_bounded for record in records)
     assert sum(record.risk == "high" for record in records) >= 8
+    assert {
+        verdict: sum(record.expected_verdict == verdict for record in records)
+        for verdict in ("agreement", "conflict", "uncertain")
+    } == {
+        "agreement": 24,
+        "conflict": 8,
+        "uncertain": 8,
+    }
 
 
 @pytest.mark.asyncio
@@ -326,5 +422,7 @@ async def test_dual_track_report_compares_rrf_and_cascade_without_promotion() ->
     assert report.baseline.recall_at_k == 1.0
     assert report.cascade.recall_at_k == 1.0
     assert report.verdict_accuracy == 1.0
+    assert report.time_boundary_accuracy == 1.0
+    assert report.time_boundary_all_match is True
     assert report.verdict_counts == {"agreement": 1, "uncertain": 1}
     assert report.promotion_allowed is False

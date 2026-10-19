@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -177,11 +177,12 @@ def audit_voiceattack_actions(
             errors.append(f"Komenda {command_phrases!r} nie używa bezpiecznego Launch.")
         context = str(action.findtext("Context") or "")
         script_path = Path(context)
-        repo_script_path = SCRIPTS_DIR / script_path.name
+        script_name = PureWindowsPath(context).name
+        repo_script_path = SCRIPTS_DIR / script_name
         if not script_path.is_file() and not repo_script_path.is_file():
             errors.append(f"Brak skryptu profilu: {context}")
-        if script_path.name:
-            profile_scripts.add(script_path.name)
+        if script_name:
+            profile_scripts.add(script_name)
 
     normalised_profile_phrases = [_normalise_phrase(item) for item in profile_phrases]
     if len(normalised_profile_phrases) != len(set(normalised_profile_phrases)):

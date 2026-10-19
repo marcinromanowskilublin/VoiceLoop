@@ -907,7 +907,8 @@
       cards.className = "trace-summary";
       const values = [
         ["Mode", status.enabled ? "shadow enabled" : "shadow disabled"],
-        ["Episode index", `${coverage.indexed || 0} / ${coverage.total || 0}`],
+        ["Episode collection", `${coverage.collection_points ?? "unavailable"} / ${coverage.total || 0}`],
+        ["SQL marks", `${coverage.sql_marked || 0} · ${coverage.consistent ? "consistent" : "check required"}`],
         ["Samples", String(summary.sample_count || 0)],
         ["Verdicts", Object.entries(summary.verdict_counts || {}).map(([key, value]) => `${key} ${value}`).join(" · ") || "none"]
       ];

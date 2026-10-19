@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from ..embeddings import OpenAICompatibleEmbeddingClient
@@ -80,6 +83,8 @@ class ContextEpisodeVectorizer:
         intent: str = "",
         decision: str = "",
         person_context: str = "",
+        source_event_hashes: dict[str, str] | None = None,
+        vector_index_hash: str | None = None,
     ) -> EpisodeVectorizationResult:
         if not self.available():
             return EpisodeVectorizationResult(
@@ -102,12 +107,17 @@ class ContextEpisodeVectorizer:
         )
         if len(vectors) != len(vector_names):
             raise RuntimeError("embedding count mismatch for context episode")
-        source_event_hashes = {}
-        if self.memory is not None:
+        resolved_source_hashes = dict(source_event_hashes or {})
+        if source_event_hashes is None and self.memory is not None:
             for event_id in episode.source_event_ids:
                 event = await self.memory.get_context_event(event_id)
                 if event is not None:
-                    source_event_hashes[event_id] = event.content_hash
+                    resolved_source_hashes[event_id] = event.content_hash
+        resolved_index_hash = vector_index_hash or _vector_index_hash(
+            episode=episode,
+            documents=documents,
+            source_event_hashes=resolved_source_hashes,
+        )
         await self.qdrant.upsert_memory(
             source=episode.source,
             source_id=episode.source_id,
@@ -117,7 +127,8 @@ class ContextEpisodeVectorizer:
             metadata={
                 **episode.metadata,
                 "episode_id": episode.episode_id,
-                "source_event_hashes": source_event_hashes,
+                "source_event_hashes": resolved_source_hashes,
+                "vector_index_hash": resolved_index_hash,
                 "started_at": episode.started_at.isoformat(),
                 "ended_at": episode.ended_at.isoformat(),
                 "time": episode.started_at.isoformat(),
@@ -203,22 +214,39 @@ class ContextEpisodeIndexer:
         indexed = 0
         already_indexed = 0
         for episode in episodes:
+            aspects = {
+                "topic": _metadata_text(episode.metadata.get("topic")),
+                "intent": _metadata_text(episode.metadata.get("intent")),
+                "decision": _metadata_text(episode.metadata.get("decision")),
+                "person_context": _metadata_text(
+                    episode.metadata.get("person_context")
+                    or episode.metadata.get("people")
+                ),
+            }
+            source_event_hashes = await self._complete_source_hashes(episode)
+            documents = memory_vector_documents(
+                summary=episode.summary,
+                redact=True,
+                **aspects,
+            )
+            vector_index_hash = _vector_index_hash(
+                episode=episode,
+                documents=documents,
+                source_event_hashes=source_event_hashes,
+            )
             if collection_ready and await self.qdrant.has_memory(
                 source=episode.source,
                 source_id=episode.source_id,
                 content_hash=episode.content_hash,
+                metadata_match={"vector_index_hash": vector_index_hash},
             ):
                 already_indexed += 1
                 continue
             result = await self.vectorizer.index_episode(
                 episode,
-                topic=_metadata_text(episode.metadata.get("topic")),
-                intent=_metadata_text(episode.metadata.get("intent")),
-                decision=_metadata_text(episode.metadata.get("decision")),
-                person_context=_metadata_text(
-                    episode.metadata.get("person_context")
-                    or episode.metadata.get("people")
-                ),
+                **aspects,
+                source_event_hashes=source_event_hashes,
+                vector_index_hash=vector_index_hash,
             )
             if not result.indexed:
                 raise ContextEpisodeIndexError(
@@ -235,6 +263,25 @@ class ContextEpisodeIndexer:
             dry_run=False,
         )
 
+    async def _complete_source_hashes(
+        self,
+        episode: ContextEpisodeV1,
+    ) -> dict[str, str]:
+        now = datetime.now(UTC)
+        source_hashes: dict[str, str] = {}
+        for event_id in episode.source_event_ids:
+            event = await self.memory.get_context_event(event_id)
+            if (
+                event is None
+                or event.deleted_at is not None
+                or (event.expires_at is not None and event.expires_at <= now)
+            ):
+                raise ContextEpisodeIndexError(
+                    f"Epizod {episode.episode_id} ma brakujące lub nieaktywne źródło."
+                )
+            source_hashes[event_id] = event.content_hash
+        return source_hashes
+
 
 def _metadata_text(value: Any) -> str:
     if isinstance(value, str):
@@ -242,3 +289,25 @@ def _metadata_text(value: Any) -> str:
     if isinstance(value, list | tuple | set):
         return ", ".join(str(item).strip() for item in value if str(item).strip())
     return ""
+
+
+def _vector_index_hash(
+    *,
+    episode: ContextEpisodeV1,
+    documents: dict[str, str],
+    source_event_hashes: dict[str, str],
+) -> str:
+    payload = {
+        "schema": MEMORY_DOCUMENT_SCHEMA_VERSION,
+        "episode_content_hash": episode.content_hash,
+        "expires_at": episode.expires_at.isoformat() if episode.expires_at else None,
+        "documents": documents,
+        "source_event_hashes": source_event_hashes,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()

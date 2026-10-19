@@ -22,7 +22,7 @@ from ..context.evaluation import (
 )
 from ..context.lifecycle import ContextLifecycleService
 from ..context.projection import MemoryTimelineMigrator
-from ..context.vectorization import ContextEpisodeIndexError, ContextEpisodeIndexer
+from ..context.vectorization import ContextEpisodeIndexer, ContextEpisodeIndexError
 from ..embeddings import (
     EmbeddingUnavailableError,
     OpenAICompatibleEmbeddingClient,
@@ -1753,7 +1753,15 @@ async def _run_async(args: argparse.Namespace) -> int:
         qdrant = None
         if args.apply:
             require_loopback_url(settings.qdrant_url)
-            qdrant = QdrantVectorStore(settings)
+            qdrant = QdrantVectorStore(
+                settings.model_copy(
+                    update={
+                        "qdrant_collection": (
+                            settings.qdrant_context_episode_collection
+                        ),
+                    }
+                )
+            )
         try:
             report = await ContextLifecycleService(
                 memory=memory,

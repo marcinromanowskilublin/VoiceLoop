@@ -523,6 +523,8 @@ class AssistantService:
                     }
                 )
         accepted = await self._submit_plan(request, plan)
+        if not plan.steps:
+            self._schedule_context_dual_track(request, input_text)
         if plan.intent == "task" and plan.steps:
             self._remember_action_summary(plan)
         return accepted
@@ -751,7 +753,6 @@ class AssistantService:
             knowledge_coro,
         )
         self._schedule_context_cascade_shadow(request, text)
-        self._schedule_context_dual_track(request, text)
         tool_observations = (
             list(knowledge_lookup.observations)
             if knowledge_lookup is not None

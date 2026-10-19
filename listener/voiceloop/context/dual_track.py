@@ -164,9 +164,12 @@ class DualTrackRunner:
         persist: bool = True,
     ) -> DualTrackRun:
         started = time.perf_counter()
-        created_at = (now or datetime.now(UTC)).astimezone(UTC)
+        observed_at = now or datetime.now().astimezone()
+        if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        created_at = observed_at.astimezone(UTC)
         trace_id = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:24]
-        plan = build_time_first_query(query, now=created_at)
+        plan = build_time_first_query(query, now=observed_at)
         empty = ContextPackV1(question=query)
         if not plan.used_time_filter:
             trace = self._trace(
@@ -239,25 +242,47 @@ class DualTrackRunner:
 
         error_type: str | None = None
         reason_override: str | None = None
+        baseline = empty
+        cascade = empty
+        tasks = {
+            "baseline": asyncio.create_task(
+                measured("baseline", baseline_retriever)
+            ),
+            "cascade": asyncio.create_task(
+                measured("cascade", cascade_retriever)
+            ),
+        }
         try:
-            baseline, cascade = await asyncio.wait_for(
-                asyncio.gather(
-                    measured("baseline", baseline_retriever),
-                    measured("cascade", cascade_retriever),
-                ),
+            _, pending = await asyncio.wait(
+                set(tasks.values()),
                 timeout=self.timeout_seconds,
             )
-        except TimeoutError:
-            baseline = empty
-            cascade = empty
-            error_type = "TimeoutError"
-            reason_override = "timeout"
-        except Exception as exc:
-            baseline = empty
-            cascade = empty
-            error_type = type(exc).__name__
-            reason_override = "track_error"
+            if pending:
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                error_type = "TimeoutError"
+                reason_override = "timeout"
+            errors: list[str] = []
+            for name, task in tasks.items():
+                if task.cancelled():
+                    continue
+                exception = task.exception()
+                if exception is not None:
+                    errors.append(type(exception).__name__)
+                    continue
+                if name == "baseline":
+                    baseline = task.result()
+                else:
+                    cascade = task.result()
+            if errors and reason_override is None:
+                error_type = errors[0]
+                reason_override = "track_error"
         finally:
+            for task in tasks.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
             await self._leave()
 
         decision = arbitrate_context_packs(baseline, cascade)
@@ -343,7 +368,9 @@ class DualTrackRunner:
 
 
 def _canonical_item_ids(items: tuple[ContextItemV1, ...]) -> tuple[str, ...]:
-    return tuple(f"{item.source}:{item.source_id}" for item in items)
+    return tuple(
+        f"{item.source}:{item.source_id}:{item.content_hash}" for item in items
+    )
 
 
 def _opaque_item_ids(
@@ -352,7 +379,10 @@ def _opaque_item_ids(
 ) -> tuple[str, ...]:
     return tuple(
         hashlib.sha256(
-            f"{trace_id}:{item.source}:{item.source_id}".encode("utf-8")
+            (
+                f"{trace_id}:{item.source}:{item.source_id}:"
+                f"{item.content_hash}"
+            ).encode()
         ).hexdigest()[:24]
         for item in items
     )

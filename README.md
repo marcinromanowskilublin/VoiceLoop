@@ -277,6 +277,8 @@ Checked in invariant `INV-12`, `tests/test_executor.py` and
 - Live STT, live Qdrant, a real Explorer window or the user’s microphone.
 - That Routing V2 is ready for live execution.
 - That Context Timeline meets a private production quality gate.
+- That the dual-track prototype meets a private quality or target-Windows
+  latency gate; its 40 committed examples are synthetic contract fixtures.
 - That commitments or Situation State steer behavior; tests currently ensure
   that they do not.
 - CI mocks Windows UI Automation policy. A live desktop remains a separate

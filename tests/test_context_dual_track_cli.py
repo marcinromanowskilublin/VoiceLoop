@@ -4,7 +4,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from voiceloop.context.dual_track import DualTrackRun, DualTrackTraceV1
-from voiceloop.context.schema import ContextItemV1, ContextPackV1
+from voiceloop.context.schema import (
+    ContextItemV1,
+    ContextPackV1,
+    ContextScope,
+    ContextTrust,
+)
 from voiceloop.corpus import cli
 
 
@@ -72,7 +77,9 @@ async def test_report_context_retrieval_runs_real_dual_track_contract(
                     ContextItemV1(
                         source="synthetic",
                         source_id="source-1",
+                            scope=ContextScope.EPISODIC,
                         content="Syntetyczny wynik.",
+                            trust=ContextTrust.DERIVED,
                         selection_reason="semantic_scout:rrf5",
                     ),
                 )
@@ -125,3 +132,54 @@ async def test_report_context_retrieval_runs_real_dual_track_contract(
     assert payload["verdict_accuracy"] == 1.0
     assert payload["promotion_allowed"] is False
     assert payload["provider_health"]["embeddings"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_context_prune_apply_targets_isolated_episode_collection(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    collections: list[str] = []
+
+    class QdrantStub:
+        def __init__(self, settings) -> None:
+            collections.append(settings.qdrant_collection)
+
+        async def close(self):
+            return None
+
+    class LifecycleStub:
+        def __init__(self, *, memory, qdrant) -> None:
+            assert memory is not None
+            assert qdrant is not None
+
+        async def prune_expired(self, *, dry_run):
+            assert dry_run is False
+            return type(
+                "Report",
+                (),
+                {
+                    "events": 0,
+                    "episodes": 0,
+                    "qdrant_deleted": 0,
+                    "dry_run": False,
+                },
+            )()
+
+    monkeypatch.setattr(cli, "QdrantVectorStore", QdrantStub)
+    monkeypatch.setattr(cli, "ContextLifecycleService", LifecycleStub)
+    args = cli.build_parser().parse_args(
+        [
+            "prune-context-timeline",
+            "--database",
+            str(tmp_path / "voice.db"),
+            "--apply",
+        ]
+    )
+
+    code = await cli._run_async(args)
+    capsys.readouterr()
+
+    assert code == 0
+    assert collections == ["voiceloop_context_episodes_v1"]

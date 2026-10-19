@@ -594,6 +594,19 @@ def test_inv10_planner_still_cannot_write_situation_state() -> None:
     assert list(SituationActor) == [SituationActor.LOCAL_CODE]
 
 
+def test_dual_track_prototype_has_no_write_or_execution_route() -> None:
+    app_source = (VOICELOOP_ROOT / "app.py").read_text(encoding="utf-8")
+    actions_source = (VOICELOOP_ROOT / "actions.py").read_text(encoding="utf-8")
+    executor_source = (VOICELOOP_ROOT / "executor.py").read_text(encoding="utf-8")
+
+    assert '@app.get("/api/v1/context/dual-track/status"' in app_source
+    assert '"/api/v1/context/dual-track/traces"' in app_source
+    assert '@app.post("/api/v1/context/dual-track' not in app_source
+    assert '@app.put("/api/v1/context/dual-track' not in app_source
+    assert "DualTrackRunner" not in actions_source
+    assert "DualTrackRunner" not in executor_source
+
+
 # --- INV-11 -----------------------------------------------------------------
 
 

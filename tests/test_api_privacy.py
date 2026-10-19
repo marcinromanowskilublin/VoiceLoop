@@ -82,9 +82,17 @@ async def test_dual_track_demonstrator_is_token_protected_and_read_only() -> Non
                 "inflight": 0,
             }
         ),
+        context_episode_qdrant=SimpleNamespace(
+            count_points=AsyncMock(return_value=1),
+        ),
         memory=SimpleNamespace(
             context_episode_vector_coverage=AsyncMock(
-                return_value={"total": 2, "indexed": 1, "pending": 1}
+                return_value={
+                    "total": 2,
+                    "indexed": 1,
+                    "sql_marked": 1,
+                    "pending": 1,
+                }
             ),
             context_dual_track_summary=AsyncMock(
                 return_value={
@@ -110,6 +118,8 @@ async def test_dual_track_demonstrator_is_token_protected_and_read_only() -> Non
         assert status_response.status_code == 200
         assert status_response.json()["serving"] is False
         assert status_response.json()["coverage"]["indexed"] == 1
+        assert status_response.json()["coverage"]["collection_points"] == 1
+        assert status_response.json()["coverage"]["consistent"] is True
         assert traces_response.status_code == 200
         assert traces_response.json()[0]["verdict"] == "agreement"
         assert write_response.status_code == 405

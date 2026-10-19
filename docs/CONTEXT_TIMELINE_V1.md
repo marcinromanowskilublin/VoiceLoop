@@ -292,7 +292,7 @@ przełączenie pozostaje poza zakresem prototypu.
 |---|---|
 | `ingest-context-documents` | czyta wskazane korzenie i zapisuje zdarzenia SQL/FTS; bez wektoryzacji |
 | `migrate-memories-to-timeline` | kopiuje jawne pamięci do zdarzeń/epizodów SQL; bez usuwania oryginałów i bez wektoryzacji |
-| `prune-context-timeline` | domyślnie liczy wygasłe wpisy; `--apply` wykonuje retencję Qdrant/SQL/FTS |
+| `prune-context-timeline` | domyślnie liczy wygasłe wpisy; `--apply` usuwa najpierw punkt z izolowanej kolekcji epizodów, potem tombstone SQL/FTS |
 | `index-context-episodes` | domyślnie liczy epizody; `--apply` idempotentnie zapisuje izolowaną kolekcję |
 | `report-context-retrieval` | czyta wskazany gold set, równolegle odpytuje RRF5 i 2+2+1 i wypisuje JSON; nie zmienia flag ani nie indeksuje |
 
@@ -322,9 +322,10 @@ Testy integralności obejmują także stare/brakujące źródła, tożsamość i
 epizodów, usunięcia, TTL, przedziały czasu, rozdzielenie rankingu od confidence
 oraz brak przejścia do wyszukiwania bez czasu po pustym wyniku.
 
-Punkt kontrolny kodu `bf26abe`: lokalny pełny zestaw **916 passed, 1 skipped**,
-Ruff poprawny. To wynik testów kodu, nie test mikrofonu, pełnego stosu usług
-czy prywatnej jakości pamięci.
+Punkt kontrolny prototypu dual-track: lokalny pełny zestaw
+**1005 passed, 3 skipped**, Ruff poprawny, pełny przypięty lock bez znanych
+podatności. To wynik testów kodu, nie test mikrofonu, pełnego stosu usług,
+wydajności Windows czy prywatnej jakości pamięci.
 
 ## Jawne adaptery
 

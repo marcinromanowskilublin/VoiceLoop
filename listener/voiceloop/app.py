@@ -20,9 +20,9 @@ from .actions import ActionRegistry
 from .assistant import AssistantService
 from .behavior_digest import LocalBehaviorDigestClient
 from .capability_index import CapabilityIndex, CapabilityIndexError
-from .conversation_telemetry import ConversationTelemetry
 from .context.dual_track import DualTrackRunner, DualTrackTraceV1
 from .context.vectorization import validate_episode_collection_isolation
+from .conversation_telemetry import ConversationTelemetry
 from .corpus.candidates import (
     CandidateDecisionError,
     MemoryCandidateStore,
@@ -208,12 +208,17 @@ async def _run_private_data_retention_worker(
                             dry_run=settings.private_data_prune_dry_run,
                         )
                     )
-                vector_report["context_episodes"] = (
-                    await services.context_episode_qdrant.prune_expired(
-                        now=moment,
-                        dry_run=settings.private_data_prune_dry_run,
+                episode_qdrant = getattr(services, "context_episode_qdrant", None)
+                if (
+                    episode_qdrant is not None
+                    and await episode_qdrant.collection_exists()
+                ):
+                    vector_report["context_episodes"] = (
+                        await episode_qdrant.prune_expired(
+                            now=moment,
+                            dry_run=settings.private_data_prune_dry_run,
+                        )
                     )
-                )
             services.retention.consecutive_failures = 0
             services.retention.last_error_type = None
             services.retention.last_success_at = moment.isoformat()
@@ -1126,11 +1131,29 @@ async def context_dual_track_status(
         services.memory.context_episode_vector_coverage(),
         services.memory.context_dual_track_summary(),
     )
+    collection_error: str | None = None
+    try:
+        collection_points: int | None = (
+            await services.context_episode_qdrant.count_points()
+        )
+    except QdrantMemoryError as exc:
+        collection_points = None
+        collection_error = type(exc).__name__
+    coverage = {
+        **coverage,
+        "collection_points": collection_points,
+        "consistent": (
+            collection_points == coverage["sql_marked"]
+            if collection_points is not None
+            else False
+        ),
+    }
     return {
         **services.dual_track.status(),
         "enabled": services.settings.context_dual_track_enabled,
         "coverage": coverage,
         "summary": summary,
+        "collection_error": collection_error,
     }
 
 

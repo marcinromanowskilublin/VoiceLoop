@@ -28,8 +28,8 @@ from voiceloop.context.schema import (
     stable_episode_id,
 )
 from voiceloop.context.vectorization import (
-    ContextEpisodeIndexError,
     ContextEpisodeIndexer,
+    ContextEpisodeIndexError,
     ContextEpisodeVectorizer,
 )
 from voiceloop.memory import MemoryStore
@@ -547,11 +547,30 @@ async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> 
         async def collection_exists(self) -> bool:
             return bool(self.points)
 
-        async def has_memory(self, *, source, source_id, content_hash):
-            return self.points.get((source, source_id)) == content_hash
+        async def has_memory(
+            self,
+            *,
+            source,
+            source_id,
+            content_hash,
+            metadata_match,
+        ):
+            point = self.points.get((source, source_id))
+            return point == (content_hash, metadata_match["vector_index_hash"])
 
-        async def upsert_memory(self, *, source, source_id, content_hash, **_kwargs):
-            self.points[(source, source_id)] = content_hash
+        async def upsert_memory(
+            self,
+            *,
+            source,
+            source_id,
+            content_hash,
+            metadata,
+            **_kwargs,
+        ):
+            self.points[(source, source_id)] = (
+                content_hash,
+                metadata["vector_index_hash"],
+            )
             self.upsert_count += 1
 
     store = MemoryStore(tmp_path / "voice.db")
@@ -586,14 +605,25 @@ async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> 
     preview = await indexer.index(dry_run=True)
     first = await indexer.index(dry_run=False)
     second = await indexer.index(dry_run=False)
+    await store.upsert_context_event(
+        ContextEventV1.from_observation(
+            source="test",
+            source_id="event-1",
+            started_at=datetime(2026, 9, 19, tzinfo=UTC),
+            text="Zmienione kanoniczne źródło.",
+        )
+    )
+    after_source_change = await indexer.index(dry_run=False)
 
     assert preview.would_index == 1
-    assert qdrant.upsert_count == 1
+    assert qdrant.upsert_count == 2
     assert first.indexed == 1
     assert second.already_indexed == 1
+    assert after_source_change.indexed == 1
     assert await store.context_episode_vector_coverage() == {
         "total": 1,
         "indexed": 1,
+        "sql_marked": 1,
         "pending": 0,
     }
 

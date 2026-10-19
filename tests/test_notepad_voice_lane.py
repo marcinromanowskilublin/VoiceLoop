@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -115,6 +116,38 @@ def test_text_target_prefers_focus_over_cursor(tmp_path, monkeypatch) -> None:
         PROCESS_QUERY_INFORMATION=1,
         PROCESS_VM_READ=2,
         GetCursorPos=lambda: (_ for _ in ()).throw(AssertionError("cursor")),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "win32gui",
+        SimpleNamespace(
+            GetForegroundWindow=win32.GetForegroundWindow,
+            GetWindowText=win32.GetWindowText,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "win32process",
+        SimpleNamespace(
+            GetWindowThreadProcessId=win32.GetWindowThreadProcessId,
+            GetModuleFileNameEx=win32.GetModuleFileNameEx,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "win32api",
+        SimpleNamespace(
+            OpenProcess=win32.OpenProcess,
+            CloseHandle=win32.CloseHandle,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "win32con",
+        SimpleNamespace(
+            PROCESS_QUERY_INFORMATION=1,
+            PROCESS_VM_READ=2,
+        ),
     )
     monkeypatch.setattr("win32gui.GetForegroundWindow", win32.GetForegroundWindow)
     monkeypatch.setattr("win32gui.GetWindowText", win32.GetWindowText)

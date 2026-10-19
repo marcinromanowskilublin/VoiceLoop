@@ -92,6 +92,21 @@ def test_qdrant_private_data_requires_loopback_endpoint(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_qdrant_count_points_is_exact_and_read_only(tmp_path) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        count=AsyncMock(return_value=SimpleNamespace(count=7)),
+    )
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,  # type: ignore[arg-type]
+    )
+
+    assert await store.count_points() == 7
+    assert client.count.await_args.kwargs["exact"] is True
+
+
+@pytest.mark.asyncio
 async def test_qdrant_ensures_payload_indexes_on_existing_collection(tmp_path) -> None:
     vectors = {name: SimpleNamespace(size=3) for name in VECTOR_NAMES}
     client = SimpleNamespace(

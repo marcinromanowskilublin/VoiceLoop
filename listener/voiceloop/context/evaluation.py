@@ -161,6 +161,9 @@ class ContextDualTrackExampleV1(BaseModel):
     verdict: DualTrackVerdict
     expected_verdict: DualTrackVerdict | None = None
     verdict_matches: bool | None = None
+    time_bounded: bool
+    expected_time_bounded: bool
+    time_boundary_matches: bool
     baseline_count: int = Field(ge=0)
     cascade_count: int = Field(ge=0)
     overlap_count: int = Field(ge=0)
@@ -185,6 +188,8 @@ class ContextDualTrackReportV1(BaseModel):
     verdict_counts: dict[str, int]
     labeled_verdict_count: int = Field(ge=0)
     verdict_accuracy: float = Field(ge=0.0, le=1.0)
+    time_boundary_accuracy: float = Field(ge=0.0, le=1.0)
+    time_boundary_all_match: bool
     cascade_recall_not_worse: bool
     cascade_abstention_not_worse: bool
     promotion_allowed: Literal[False] = False
@@ -268,6 +273,7 @@ async def evaluate_context_dual_track(
     verdict_counts: dict[str, int] = {}
     examples: list[ContextDualTrackExampleV1] = []
     labeled_matches: list[bool] = []
+    time_boundary_matches: list[bool] = []
     for record in records:
         trace = runs[record.example_id].trace
         verdict_counts[trace.verdict] = verdict_counts.get(trace.verdict, 0) + 1
@@ -278,6 +284,8 @@ async def evaluate_context_dual_track(
         )
         if verdict_matches is not None:
             labeled_matches.append(verdict_matches)
+        time_boundary_match = trace.bounded == record.expected_time_bounded
+        time_boundary_matches.append(time_boundary_match)
         examples.append(
             ContextDualTrackExampleV1(
                 example_id=record.example_id,
@@ -286,6 +294,9 @@ async def evaluate_context_dual_track(
                 verdict=trace.verdict,
                 expected_verdict=record.expected_verdict,
                 verdict_matches=verdict_matches,
+                time_bounded=trace.bounded,
+                expected_time_bounded=record.expected_time_bounded,
+                time_boundary_matches=time_boundary_match,
                 baseline_count=trace.baseline_count,
                 cascade_count=trace.cascade_count,
                 overlap_count=trace.overlap_count,
@@ -315,6 +326,10 @@ async def evaluate_context_dual_track(
         verdict_counts=verdict_counts,
         labeled_verdict_count=len(labeled_matches),
         verdict_accuracy=_mean([1.0 if item else 0.0 for item in labeled_matches]),
+        time_boundary_accuracy=_mean(
+            [1.0 if item else 0.0 for item in time_boundary_matches]
+        ),
+        time_boundary_all_match=all(time_boundary_matches),
         cascade_recall_not_worse=recall_delta >= -1e-9,
         cascade_abstention_not_worse=abstention_delta >= -1e-9,
         examples=tuple(examples),

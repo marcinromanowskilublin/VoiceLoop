@@ -99,6 +99,22 @@ class QdrantVectorStore:
                 f"Nie udało się sprawdzić kolekcji Qdrant: {type(exc).__name__}"
             ) from exc
 
+    async def count_points(self) -> int:
+        """Return an exact, read-only collection count for operator diagnostics."""
+
+        if not await self.collection_exists():
+            return 0
+        try:
+            result = await self.client.count(
+                collection_name=self.collection_name,
+                exact=True,
+            )
+        except Exception as exc:
+            raise QdrantUnavailableError(
+                f"Nie udało się policzyć punktów Qdrant: {type(exc).__name__}"
+            ) from exc
+        return int(result.count)
+
     async def close(self) -> None:
         await self.client.close()
 
@@ -223,6 +239,7 @@ class QdrantVectorStore:
         source: str,
         source_id: str,
         content_hash: str | None = None,
+        metadata_match: Mapping[str, str] | None = None,
     ) -> bool:
         if not self.enabled:
             return False
@@ -231,7 +248,7 @@ class QdrantVectorStore:
             records = await self.client.retrieve(
                 collection_name=self.collection_name,
                 ids=[point_id],
-                with_payload=content_hash is not None,
+                with_payload=content_hash is not None or metadata_match is not None,
                 with_vectors=False,
             )
         except Exception as exc:
@@ -244,17 +261,21 @@ class QdrantVectorStore:
             ) from exc
         if not records:
             return False
-        if content_hash is None:
-            return True
         payload = getattr(records[0], "payload", None)
         if not isinstance(payload, dict):
-            return False
-        stored_hash = payload.get("content_hash")
-        if not stored_hash:
-            metadata = payload.get("metadata")
-            if isinstance(metadata, dict):
-                stored_hash = metadata.get("content_hash")
-        return str(stored_hash or "") == content_hash
+            return content_hash is None and metadata_match is None
+        metadata = payload.get("metadata")
+        details = metadata if isinstance(metadata, dict) else {}
+        if content_hash is not None:
+            stored_hash = payload.get("content_hash") or details.get("content_hash")
+            if str(stored_hash or "") != content_hash:
+                return False
+        if metadata_match is not None:
+            return all(
+                str(details.get(key) or "") == str(value)
+                for key, value in metadata_match.items()
+            )
+        return True
 
     async def has_content_hash(
         self,

@@ -51,7 +51,8 @@ Podgląd nie łączy się z Qdrant, więc `would_index` oznacza liczbę rozważa
 Przy `--apply` indexer:
 
 1. wymaga lokalnego endpointu embeddingów i lokalnego Qdrant;
-2. sprawdza punkt po stabilnym `source/source_id` i `content_hash`;
+2. sprawdza punkt po stabilnym `source/source_id`, `content_hash` oraz
+   fingerprintcie obejmującym TTL, dokumenty osi i wersje źródeł;
 3. pomija niezmieniony punkt przed wywołaniem embeddingu;
 4. zapisuje `episode_id`, hash epizodu i hashe wszystkich źródeł;
 5. aktualizuje w SQLite wyłącznie listę rzeczywiście zapisanych przestrzeni.
@@ -108,8 +109,10 @@ CONTEXT_DUAL_TRACK_TIMEOUT_SECONDS=5
 CONTEXT_DUAL_TRACK_TRACE_RETENTION_DAYS=30
 ```
 
-Włączenie flagi dodaje pomiar wyłącznie dla pytań z rozpoznanym czasem.
-Ścieżka odpowiedzi nadal korzysta z dotychczasowego kontekstu i routingu.
+Włączenie flagi dodaje pomiar wyłącznie dla pytań z rozpoznanym czasem i bez
+kroków wykonawczych. Task startuje dopiero po utworzeniu oraz przyjęciu planu,
+więc nie konkuruje z modelem podczas budowania bieżącej odpowiedzi. Ścieżka
+odpowiedzi nadal korzysta z dotychczasowego kontekstu i routingu.
 
 ## Raport CLI i gold set
 
@@ -123,15 +126,17 @@ Raport uruchamia faktyczny RRF5 i 2+2+1 na izolowanej kolekcji. Zawiera metryki
 obu torów, delty, rozkład werdyktów, zgodność z oczekiwanym werdyktem i zdrowie
 providerów. Pole `promotion_allowed` ma zawsze wartość `false`.
 
-Repo zawiera 40 przykładów syntetycznych. Sprawdzają format, klasy pytań,
-deterministyczny czas i raportowanie; nie dowodzą jakości prywatnej pamięci.
-Prywatny gold set pozostaje poza repo.
+Repo zawiera 40 przykładów syntetycznych: 24 oczekiwane `agreement`, osiem
+`conflict` i osiem `uncertain`. Sprawdzają format, klasy pytań, deterministyczny
+czas i raportowanie; nie dowodzą jakości prywatnej pamięci. Prywatny gold set
+pozostaje poza repo.
 
 ## Demonstrator read-only
 
 Chronione tokenem endpointy:
 
-- `GET /api/v1/context/dual-track/status` — tryb, pokrycie indeksu i agregaty;
+- `GET /api/v1/context/dual-track/status` — tryb, rzeczywista liczba punktów
+  kolekcji, pomocnicze znaczniki SQL, ich zgodność i agregaty;
 - `GET /api/v1/context/dual-track/traces` — ostatnie content-free trace’y.
 
 Panel pokazuje te dane pod etykietą `PROTOTYPE / READ-ONLY`. Nie istnieje

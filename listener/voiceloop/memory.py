@@ -1225,6 +1225,7 @@ class MemoryStore:
             return {
                 "total": total,
                 "indexed": indexed,
+                "sql_marked": indexed,
                 "pending": max(0, total - indexed),
             }
 
