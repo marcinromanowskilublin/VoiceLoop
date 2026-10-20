@@ -1,4 +1,5 @@
 import json
+import socket
 
 import pytest
 
@@ -6,8 +7,18 @@ from voiceloop.context.evidence_demo import build_context_evidence_demo
 
 
 @pytest.mark.asyncio
-async def test_public_context_evidence_runs_real_sqlite_and_qdrant(tmp_path) -> None:
+async def test_public_context_evidence_runs_real_sqlite_and_qdrant(
+    tmp_path,
+    monkeypatch,
+) -> None:
     output = tmp_path / "artifact"
+
+    def reject_network(*_args, **_kwargs):
+        raise AssertionError("public evidence demo must not use the network")
+
+    monkeypatch.setattr(socket, "create_connection", reject_network)
+    monkeypatch.setattr(socket, "getaddrinfo", reject_network)
+    monkeypatch.setattr(socket.socket, "connect", reject_network)
 
     report = await build_context_evidence_demo(
         output_dir=output,

@@ -9,7 +9,7 @@ import tempfile
 import time
 import unicodedata
 import warnings
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,8 +17,16 @@ from typing import Any
 from qdrant_client import AsyncQdrantClient
 
 from ..actions import ActionRegistry
+from ..events import EventBus
+from ..executor import CommandExecutor
 from ..memory import MemoryStore
-from ..models import PlanStep, RiskLevel
+from ..models import (
+    CommandPlan,
+    CommandRequest,
+    CommandStatus,
+    PlanStep,
+    RiskLevel,
+)
 from ..qdrant_memory import QdrantVectorStore
 from ..settings import Settings
 from .dual_track import DualTrackRun, DualTrackRunner
@@ -191,13 +199,25 @@ async def build_context_evidence_demo(
             retrieve=cascade_from_runs,
             k=3,
         )
+        fts_public_metrics = _public_metrics(records, fts_scores, fts_metrics)
+        rrf_public_metrics = _public_metrics(
+            records,
+            baseline_scores,
+            dual_report.baseline,
+        )
+        cascade_public_metrics = _public_metrics(
+            records,
+            cascade_scores,
+            dual_report.cascade,
+        )
         scenarios = await _demonstration_scenarios(runner)
-        action_boundary = _demonstrate_action_boundary(settings, memory)
+        action_boundary = await _demonstrate_action_boundary(settings, memory)
         report = {
             "schema_version": 1,
             "evidence_pack": "context-evidence-v1",
             "source_revision": revision,
-            "generated_at": DEMO_NOW.isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
+            "observation_time": DEMO_NOW.isoformat(),
             "data_class": "public_synthetic_only",
             "network_used": False,
             "storage": {
@@ -221,9 +241,9 @@ async def build_context_evidence_demo(
             },
             "evaluation": {
                 "records": len(records),
-                "fts_only": fts_metrics.model_dump(mode="json"),
-                "rrf5": dual_report.baseline.model_dump(mode="json"),
-                "cascade_2_2_1": dual_report.cascade.model_dump(mode="json"),
+                "fts_only": fts_public_metrics,
+                "rrf5": rrf_public_metrics,
+                "cascade_2_2_1": cascade_public_metrics,
                 "arbiter": {
                     "verdict_counts": dual_report.verdict_counts,
                     "labeled_verdict_count": dual_report.labeled_verdict_count,
@@ -263,6 +283,10 @@ async def build_context_evidence_demo(
                 (
                     "Latency is runner-specific and must not be generalized "
                     "to target Windows hardware."
+                ),
+                (
+                    "Agreement means the same top canonical episode version; "
+                    "the remaining ranked lists may differ."
                 ),
                 "The arbiter remains shadow-only and cannot authorize an action.",
             ],
@@ -308,7 +332,10 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
         "",
         "## Retrieval comparison",
         "",
-        "| Track | Recall@3 | MRR | Abstention | Provenance | P50 ms | P95 ms |",
+        (
+            "| Track | Recall@3 | MRR | Negative abstention | "
+            "Result provenance | Smoke P50 ms | Smoke P95 ms |"
+        ),
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for label, metrics, latency in rows:
@@ -319,8 +346,8 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
                     label,
                     _number(metrics["recall_at_k"]),
                     _number(metrics["mean_reciprocal_rank"]),
-                    _number(metrics["abstention_accuracy"]),
-                    _number(metrics["provenance_coverage"]),
+                    _number(metrics["negative_abstention_accuracy"]),
+                    _number(metrics["provenance_coverage_on_results"]),
                     _number(latency["p50"]),
                     _number(latency["p95"]),
                 )
@@ -359,6 +386,8 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
             f"- Proposed action: `{action['action_id']}`",
             f"- Risk raised locally: `{action['risk_before']}` -> `{action['risk_after']}`",
             f"- Confirmation required: `{str(action['confirmation_required']).lower()}`",
+            f"- Executor status: `{action['executor_status']}`",
+            f"- Handler calls: `{action['handler_calls']}`",
             f"- Handler executed: `{str(action['executed']).lower()}`",
             "",
             "## Failure analysis",
@@ -399,7 +428,7 @@ def render_evidence_html(report: dict[str, Any]) -> str:
             f"<td>{html.escape(label)}</td>"
             f"<td>{_number(metrics['recall_at_k'])}</td>"
             f"<td>{_number(metrics['mean_reciprocal_rank'])}</td>"
-            f"<td>{_number(metrics['abstention_accuracy'])}</td>"
+            f"<td>{_number(metrics['negative_abstention_accuracy'])}</td>"
             f"<td>{_number(latency['p50'])}</td>"
             f"<td>{_number(latency['p95'])}</td>"
             "</tr>"
@@ -467,7 +496,8 @@ def render_evidence_html(report: dict[str, Any]) -> str:
   <h2>Retrieval comparison</h2>
   <table>
     <thead><tr><th>Track</th><th>Recall@3</th><th>MRR</th>
-      <th>Abstention</th><th>P50 ms</th><th>P95 ms</th></tr></thead>
+      <th>Negative abstention</th><th>Smoke P50 ms</th>
+      <th>Smoke P95 ms</th></tr></thead>
     <tbody>{''.join(metric_rows)}</tbody>
   </table>
   <h2>Observable outcomes</h2>
@@ -477,7 +507,8 @@ def render_evidence_html(report: dict[str, Any]) -> str:
     <span>Policy result</span>
     <strong><code>{html.escape(action['action_id'])}</code> requires confirmation</strong>
     <p>Risk: <code>{action['risk_before']}</code> to <code>{action['risk_after']}</code>.
-      Handler executed: <b class="truth">{str(action['executed']).lower()}</b>.</p>
+      Executor: <code>{action['executor_status']}</code>.
+      Handler calls: <b class="truth">{action['handler_calls']}</b>.</p>
   </article>
   <p class="lede">Synthetic lexical embeddings make this run repeatable; they
     are not evidence of private-data quality or target-hardware latency.
@@ -669,7 +700,43 @@ async def _demonstration_scenarios(
     return rows
 
 
-def _demonstrate_action_boundary(
+def _public_metrics(
+    records: list[ContextRetrievalEvalRecordV1],
+    scores: list[Any],
+    contract_metrics: Any,
+) -> dict[str, Any]:
+    positive = [
+        score
+        for record, score in zip(records, scores, strict=True)
+        if record.expected_source_ids
+    ]
+    negative = [
+        score
+        for record, score in zip(records, scores, strict=True)
+        if not record.expected_source_ids
+    ]
+    returned = [score for score in scores if score.predicted_source_ids]
+    return {
+        "schema_version": 1,
+        "sample_count": len(records),
+        "positive_count": len(positive),
+        "negative_count": len(negative),
+        "k": contract_metrics.k,
+        "recall_at_k": _ratio(score.hit_at_k for score in positive),
+        "mean_reciprocal_rank": _average(
+            score.reciprocal_rank for score in positive
+        ),
+        "negative_abstention_accuracy": _ratio(
+            score.abstention_correct for score in negative
+        ),
+        "provenance_coverage_on_results": _ratio(
+            score.provenance_complete for score in returned
+        ),
+        "reserve_axis_coverage": contract_metrics.reserve_axis_coverage,
+    }
+
+
+async def _demonstrate_action_boundary(
     settings: Settings,
     memory: MemoryStore,
 ) -> dict[str, Any]:
@@ -678,20 +745,55 @@ def _demonstrate_action_boundary(
         memory,
         _NoopTTS(),  # type: ignore[arg-type]
     )
+    handler_calls = 0
+
+    async def guarded_handler(_args: dict[str, Any]):
+        nonlocal handler_calls
+        handler_calls += 1
+        return "unexpected", {}
+
+    spec = registry._specs["remember"]
+    registry._specs["remember"] = replace(spec, handler=guarded_handler)
     proposed = PlanStep(
-        action_id="open_shell_item",
-        args={"query": "synthetic-report.pdf"},
+        action_id="remember",
+        args={"content": "synthetic public demo"},
         risk=RiskLevel.LOW,
         confirmation_required=False,
     )
-    gated = registry.enforce_policy(proposed.model_copy(deep=True))
+    request = CommandRequest(
+        request_id="public-demo-confirmation",
+        text="Zapamiętaj syntetyczny publiczny przykład.",
+    )
+    await memory.create_command(request)
+    executor = CommandExecutor(
+        memory=memory,
+        actions=registry,
+        events=EventBus(),
+        queue_limit=1,
+    )
+    command = await executor.submit(
+        CommandPlan(
+            request_id=request.request_id,
+            intent="remember",
+            response_text="Propozycja wymaga lokalnego potwierdzenia.",
+            confidence=1.0,
+            steps=[proposed.model_copy(deep=True)],
+            provider="public_demo",
+        )
+    )
+    if command is None or command.plan is None:
+        raise RuntimeError("Executor did not persist the confirmation plan.")
+    gated = command.plan.steps[0]
     return {
         "action_id": gated.action_id,
         "risk_before": proposed.risk.value,
         "risk_after": gated.risk.value,
         "confirmation_required": gated.confirmation_required,
-        "executed": False,
-        "note": "The demo stops at local policy and never invokes the handler.",
+        "executor_status": command.status.value,
+        "pending_confirmation": request.request_id in executor.pending_confirmation,
+        "handler_calls": handler_calls,
+        "executed": handler_calls > 0,
+        "note": "CommandExecutor persisted awaiting_confirmation and did not call the handler.",
     }
 
 
@@ -724,6 +826,16 @@ def _percentile(values: list[float], percentile: float) -> float:
     return values[min(rank, len(values) - 1)]
 
 
+def _ratio(values: Any) -> float:
+    items = [bool(value) for value in values]
+    return sum(items) / len(items) if items else 0.0
+
+
+def _average(values: Any) -> float:
+    items = [float(value) for value in values]
+    return sum(items) / len(items) if items else 0.0
+
+
 def _assert_demo_contract(report: dict[str, Any]) -> None:
     scenarios = {item["name"]: item for item in report["scenarios"]}
     required = {"agreement", "conflict", "abstention", "unbounded"}
@@ -742,7 +854,13 @@ def _assert_demo_contract(report: dict[str, Any]) -> None:
     if not report["ingest"]["idempotent"]:
         raise RuntimeError("Episode indexer was not idempotent.")
     action = report["action_boundary"]
-    if not action["confirmation_required"] or action["executed"]:
+    if (
+        not action["confirmation_required"]
+        or action["executor_status"] != CommandStatus.AWAITING_CONFIRMATION.value
+        or not action["pending_confirmation"]
+        or action["handler_calls"] != 0
+        or action["executed"]
+    ):
         raise RuntimeError("Action boundary did not remain confirmation-only.")
     if report["evaluation"]["promotion_allowed"]:
         raise RuntimeError("Public evidence must never promote retrieval.")

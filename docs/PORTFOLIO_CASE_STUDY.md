@@ -63,11 +63,11 @@ Every CI run regenerates the same scenario and uploads all three formats as the
 
 The five-record fixture is deliberately small and synthetic:
 
-| Track | Recall@3 | MRR | Abstention | Observed P95 |
+| Track | Recall@3 | Positive-query MRR | Negative abstention | Smoke-run P95 |
 |---|---:|---:|---:|---:|
-| FTS only | 1.000 | 0.800 | 1.000 | 2.433 ms |
-| RRF5 | 0.750 | 0.400 | 0.800 | 11.770 ms |
-| Cascade 2+2+1 | 1.000 | 0.667 | 1.000 | 14.747 ms |
+| FTS only | 1.000 | 1.000 | 1.000 | regenerated per run |
+| RRF5 | 0.750 | 0.500 | 1.000 | regenerated per run |
+| Cascade 2+2+1 | 1.000 | 0.833 | 1.000 | regenerated per run |
 
 This is not a claim that the cascade is better. On this lexical fixture FTS is
 both faster and stronger, while RRF5 misses the synthetic topic example. That
@@ -75,15 +75,22 @@ failure is kept in the published report instead of being hidden. The result
 supports the current product decision: keep the candidate in shadow and collect
 representative private labels before discussing promotion.
 
+The timing columns contain five smoke-run observations from the machine that
+generated the artifact. They are useful for detecting gross regressions, not as
+a benchmark or target-Windows estimate.
+
 The same run also proves four observable safety outcomes:
 
-- an agreement is recorded without changing serving context;
+- an agreement (same top canonical episode version) is recorded without
+  changing serving context, even if lower-ranked results differ;
 - a disjoint result becomes a conflict for review;
 - an empty bounded range abstains;
 - an unbounded request is rejected by the experiment.
 
-Finally, a proposed `open_shell_item` starts at low risk, is raised locally to
-medium risk, requires confirmation and never invokes its handler in the demo.
+Finally, a proposed `remember` action starts at low risk. The real
+`CommandExecutor.submit()` path raises it locally to medium risk, persists
+`awaiting_confirmation`, keeps it in the pending-confirmation map and leaves
+the instrumented handler call count at zero.
 
 ## Human decisions and AI-assisted work
 
