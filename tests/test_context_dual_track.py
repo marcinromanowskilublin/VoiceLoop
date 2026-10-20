@@ -237,9 +237,89 @@ async def test_dual_track_rejects_unbounded_query_without_providers(tmp_path) ->
     result = await runner.run("Co ustaliliśmy?", request_id="request-unbounded")
 
     assert result.trace.reason == "unbounded_rejected"
+    assert result.trace.time_precision == "unknown"
+    assert result.trace.time_relation == "unbounded"
     assert result.trace.baseline_axes_attempted == ()
     assert result.baseline.items == ()
     assert result.cascade.items == ()
+
+
+@pytest.mark.asyncio
+async def test_dual_track_handles_approximate_epistemic_statement_and_persists_roles(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    approx_day = DAY - timedelta(days=30)
+    event = ContextEventV1.from_observation(
+        source="synthetic",
+        source_id="event-month-ago",
+        started_at=approx_day,
+        text="Miesiąc temu omawialiśmy architekturę kontekstu.",
+    )
+    await store.upsert_context_event(event)
+    episode = ContextEpisodeV1(
+        episode_id="episode-month-ago",
+        source="synthetic",
+        source_id="source-month-ago",
+        started_at=approx_day,
+        ended_at=approx_day + timedelta(minutes=5),
+        summary="Architektura kontekstu z zeszłego miesiąca.",
+        source_event_ids=(event.event_id,),
+    )
+    await store.upsert_context_episode(episode)
+    hit = SimpleNamespace(
+        source=episode.source,
+        source_id=episode.source_id,
+        score=0.95,
+        metadata={
+            "episode_id": episode.episode_id,
+            "content_hash": episode.content_hash,
+            "source_event_hashes": {
+                event.event_id: event.content_hash,
+            },
+        },
+    )
+    runner = DualTrackRunner(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=QdrantStub([hit]),  # type: ignore[arg-type]
+    )
+    raw_query = (
+        "A jeszcze miesiąc temu mówiliśmy, że będzie wspaniale — "
+        "co się zmieniło w projekcie?"
+    )
+
+    result = await runner.run(
+        raw_query,
+        request_id="private-approx-request",
+        now=DAY,
+    )
+    stored_traces = await store.list_context_dual_track_traces()
+
+    assert result.statement is not None
+    assert result.trace.bounded is True
+    assert result.trace.time_precision == "approximate"
+    assert (
+        result.trace.time_relation
+        == "approximately_one_month_before_observation"
+    )
+    assert result.trace.epistemic_role == "prediction"
+    assert result.trace.relevance_gate == "investigate"
+    assert result.trace.verdict == "agreement"
+    assert result.trace.cascade_waves[0] == ("semantic", "topic")
+    assert len(stored_traces) == 1
+    assert stored_traces[0].time_precision == "approximate"
+    assert stored_traces[0].epistemic_role == "prediction"
+    assert stored_traces[0].relevance_gate == "investigate"
+    serialized = stored_traces[0].model_dump_json()
+    assert raw_query not in serialized
+    assert "private-approx-request" not in serialized
+    with store._connect() as connection:
+        telemetry_count = connection.execute(
+            "SELECT COUNT(*) FROM context_cascade_shadow_telemetry"
+        ).fetchone()[0]
+    assert telemetry_count == 1
 
 
 @pytest.mark.asyncio

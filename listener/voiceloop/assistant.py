@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from collections import OrderedDict
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
 from .capability_index import CapabilityIndex, CapabilityIndexError
@@ -1277,35 +1277,13 @@ class AssistantService:
         ):
             return
         try:
-            from .context.retrieval import build_time_first_query
             from .context.shadow_statements import (
-                analyze_temporal_statement_shadow,
-                comparative_shadow_question,
+                build_temporal_shadow_context,
             )
 
-            normalized = normalize_text(text)
-            statement = analyze_temporal_statement_shadow(
+            plan, statement = build_temporal_shadow_context(
                 text,
                 request_id=request.request_id,
-                now=datetime.now(UTC),
-                comparative_question=comparative_shadow_question(text),
-                conflict=any(
-                    marker in normalized
-                    for marker in ("sprzecz", "konflikt", "nie zgadza", "ale teraz")
-                ),
-                decision_context=any(
-                    marker in normalized
-                    for marker in ("decyz", "wybier", "ustalmy", "postanow")
-                ),
-                action_impact=any(
-                    marker in normalized
-                    for marker in ("mam zrobic", "wykonaj", "uruchom", "usun")
-                ),
-            )
-            plan = (
-                statement.query_plan()
-                if statement is not None
-                else build_time_first_query(text)
             )
             if not plan.used_time_filter:
                 return
@@ -1337,9 +1315,15 @@ class AssistantService:
         if runner is None or not text.strip():
             return
         try:
-            from .context.retrieval import build_time_first_query
+            from .context.shadow_statements import (
+                build_temporal_shadow_context,
+            )
 
-            if not build_time_first_query(text).used_time_filter:
+            plan, statement = build_temporal_shadow_context(
+                text,
+                request_id=request.request_id,
+            )
+            if not plan.used_time_filter:
                 return
             opaque_id = hashlib.sha256(
                 request.request_id.encode("utf-8")
@@ -1349,6 +1333,8 @@ class AssistantService:
                     runner,
                     request=request,
                     text=text,
+                    plan=plan,
+                    statement=statement,
                 ),
                 name=f"context-dual-track-{opaque_id}",
             )
@@ -1363,13 +1349,19 @@ class AssistantService:
         *,
         request: CommandRequest,
         text: str,
+        plan=None,
+        statement=None,
     ) -> None:
         try:
-            result = await runner.run(
-                text,
-                request_id=request.request_id,
-                limit=min(8, self.vector_context_limit or 8),
-            )
+            kwargs: dict[str, object] = {
+                "request_id": request.request_id,
+                "limit": min(8, self.vector_context_limit or 8),
+            }
+            if plan is not None:
+                kwargs["query_plan"] = plan
+            if statement is not None:
+                kwargs["statement"] = statement
+            result = await runner.run(text, **kwargs)
             await self.events.publish(
                 "context.retrieval_dual_track",
                 result.trace.model_dump(mode="json"),
@@ -1421,6 +1413,8 @@ class AssistantService:
                 "request_id": opaque_id,
                 "mode": "shadow",
                 "bounded": True,
+                "time_precision": plan.time_precision,
+                "time_relation": plan.time_relation,
                 "stages": ["Czas", "FTS", "adaptive_vectors"],
                 "waves": [list(wave) for wave in trace.waves],
                 "axes_attempted": list(trace.axes_attempted),

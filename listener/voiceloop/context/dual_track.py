@@ -12,8 +12,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..embeddings import OpenAICompatibleEmbeddingClient
 from ..memory import MemoryStore
 from ..qdrant_memory import QdrantVectorStore
-from .retrieval import CascadeTrace, TimeFirstRetriever, build_time_first_query
+from .retrieval import (
+    CascadeTrace,
+    TimeFirstQueryPlan,
+    TimeFirstRetriever,
+    TimePrecision,
+)
 from .schema import ContextItemV1, ContextPackV1
+from .shadow_statements import (
+    TemporalStatementShadowV1,
+    build_temporal_shadow_context,
+)
 
 DualTrackVerdict = Literal["agreement", "conflict", "uncertain"]
 
@@ -28,6 +37,12 @@ class DualTrackTraceV1(BaseModel):
     created_at: datetime
     expires_at: datetime
     bounded: bool
+    time_precision: TimePrecision = "unknown"
+    time_relation: str = Field(default="unbounded", min_length=1, max_length=80)
+    epistemic_role: Literal["prediction", "opinion"] | None = None
+    relevance_gate: Literal["context_only", "candidate", "investigate"] = (
+        "context_only"
+    )
     verdict: DualTrackVerdict
     reason: str = Field(min_length=1, max_length=80)
     baseline_count: int = Field(ge=0, le=30)
@@ -64,6 +79,7 @@ class DualTrackRun:
     baseline: ContextPackV1
     cascade: ContextPackV1
     trace: DualTrackTraceV1
+    statement: TemporalStatementShadowV1 | None = None
 
 
 def arbitrate_context_packs(
@@ -162,6 +178,8 @@ class DualTrackRunner:
         now: datetime | None = None,
         limit: int = 8,
         persist: bool = True,
+        query_plan: TimeFirstQueryPlan | None = None,
+        statement: TemporalStatementShadowV1 | None = None,
     ) -> DualTrackRun:
         started = time.perf_counter()
         observed_at = now or datetime.now().astimezone()
@@ -169,7 +187,17 @@ class DualTrackRunner:
             raise ValueError("now must be timezone-aware")
         created_at = observed_at.astimezone(UTC)
         trace_id = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:24]
-        plan = build_time_first_query(query, now=observed_at)
+        if query_plan is None and statement is None:
+            plan, statement = build_temporal_shadow_context(
+                query,
+                request_id=request_id,
+                now=observed_at,
+            )
+        elif query_plan is None and statement is not None:
+            plan = statement.query_plan()
+        else:
+            assert query_plan is not None
+            plan = query_plan
         empty = ContextPackV1(question=query)
         if not plan.used_time_filter:
             trace = self._trace(
@@ -184,9 +212,11 @@ class DualTrackRunner:
                 timings={},
                 total_started=started,
                 bounded=False,
+                plan=plan,
+                statement=statement,
             )
-            await self._persist(trace, enabled=persist)
-            return DualTrackRun(empty, empty, trace)
+            await self._persist(trace, statement=statement, enabled=persist)
+            return DualTrackRun(empty, empty, trace, statement=statement)
         if not await self._try_enter():
             trace = self._trace(
                 trace_id=trace_id,
@@ -197,19 +227,28 @@ class DualTrackRunner:
                 cascade=empty,
                 baseline_trace=CascadeTrace(
                     time_bounded=True,
+                    time_precision=plan.time_precision,
                     stop_reason="concurrency_limit",
                 ),
                 cascade_trace=CascadeTrace(
                     time_bounded=True,
+                    time_precision=plan.time_precision,
                     stop_reason="concurrency_limit",
                 ),
                 timings={},
                 total_started=started,
                 bounded=True,
+                plan=plan,
+                statement=statement,
             )
-            await self._persist(trace, enabled=persist)
-            return DualTrackRun(empty, empty, trace)
+            await self._persist(trace, statement=statement, enabled=persist)
+            return DualTrackRun(empty, empty, trace, statement=statement)
 
+        preferred_axes = (
+            tuple(statement.preferred_axes)
+            if statement is not None
+            else tuple(plan.preferred_axes)
+        )
         baseline_retriever = TimeFirstRetriever(
             memory=self.memory,
             embeddings=self.embeddings,
@@ -223,6 +262,7 @@ class DualTrackRunner:
             scout_mode="cascade_2_2_1",
             qmax=self.qmax,
             wave_size=self.wave_size,
+            preferred_axes=preferred_axes,
         )
         timings: dict[str, float] = {}
 
@@ -298,10 +338,12 @@ class DualTrackRunner:
             timings=timings,
             total_started=started,
             bounded=True,
+            plan=plan,
+            statement=statement,
             error_type=error_type,
         )
-        await self._persist(trace, enabled=persist)
-        return DualTrackRun(baseline, cascade, trace)
+        await self._persist(trace, statement=statement, enabled=persist)
+        return DualTrackRun(baseline, cascade, trace, statement=statement)
 
     async def _try_enter(self) -> bool:
         async with self._slot_lock:
@@ -314,9 +356,19 @@ class DualTrackRunner:
         async with self._slot_lock:
             self._inflight = max(0, self._inflight - 1)
 
-    async def _persist(self, trace: DualTrackTraceV1, *, enabled: bool) -> None:
+    async def _persist(
+        self,
+        trace: DualTrackTraceV1,
+        *,
+        statement: TemporalStatementShadowV1 | None = None,
+        enabled: bool,
+    ) -> None:
         if enabled:
             await self.memory.save_context_dual_track_trace(trace)
+            if statement is not None:
+                await self.memory.save_context_cascade_shadow_temporal_roles(
+                    statement
+                )
 
     def _trace(
         self,
@@ -332,6 +384,8 @@ class DualTrackRunner:
         timings: dict[str, float],
         total_started: float,
         bounded: bool,
+        plan: TimeFirstQueryPlan,
+        statement: TemporalStatementShadowV1 | None = None,
         error_type: str | None = None,
     ) -> DualTrackTraceV1:
         decision = arbitrate_context_packs(baseline, cascade)
@@ -340,6 +394,16 @@ class DualTrackRunner:
             created_at=created_at,
             expires_at=created_at + timedelta(days=self.trace_retention_days),
             bounded=bounded,
+            time_precision=plan.time_precision,
+            time_relation=plan.time_relation,
+            epistemic_role=(
+                statement.epistemic_role if statement is not None else None
+            ),
+            relevance_gate=(
+                statement.relevance_gate
+                if statement is not None
+                else "context_only"
+            ),
             verdict=verdict,
             reason=reason,
             baseline_count=len(baseline.items),

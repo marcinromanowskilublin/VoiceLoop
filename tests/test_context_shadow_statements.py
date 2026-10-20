@@ -3,9 +3,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from voiceloop.context.retrieval import build_time_first_query
 from voiceloop.context.shadow_statements import (
     AtomicClaimProposal,
     analyze_temporal_statement_shadow,
+    build_temporal_shadow_context,
     shadow_relevance_gate,
 )
 from voiceloop.memory import MemoryStore
@@ -13,6 +15,121 @@ from voiceloop.models import CommandRequest
 
 TEXT = "a jeszcze miesiąc temu mówiliśmy, że będzie wspaniale"
 NOW = datetime(2026, 10, 11, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("query", "relation", "min_days", "max_days", "confidence"),
+    [
+        (
+            "Co ustaliliśmy miesiąc temu?",
+            "approximately_one_month_before_observation",
+            23,
+            37,
+            0.65,
+        ),
+        (
+            "O czym rozmawialiśmy w zeszłym miesiącu?",
+            "approximately_one_month_before_observation",
+            23,
+            37,
+            0.65,
+        ),
+        (
+            "Co ustaliliśmy 2 miesiące temu?",
+            "approximately_2_months_before_observation",
+            46,
+            74,
+            0.65,
+        ),
+        (
+            "O czym rozmawialiśmy tydzień temu?",
+            "approximately_one_week_before_observation",
+            5,
+            9,
+            0.7,
+        ),
+        (
+            "Co było w zeszłym tygodniu?",
+            "approximately_one_week_before_observation",
+            5,
+            9,
+            0.7,
+        ),
+        (
+            "Co omawialiśmy kilka dni temu?",
+            "approximately_several_days_before_observation",
+            2,
+            7,
+            0.6,
+        ),
+        (
+            "O czym pisaliśmy parę tygodni temu?",
+            "approximately_several_weeks_before_observation",
+            14,
+            35,
+            0.55,
+        ),
+    ],
+)
+def test_build_time_first_query_recognizes_approximate_intervals(
+    query: str,
+    relation: str,
+    min_days: int,
+    max_days: int,
+    confidence: float,
+) -> None:
+    plan = build_time_first_query(query, now=NOW)
+
+    assert plan.used_time_filter is True
+    assert plan.time_precision == "approximate"
+    assert plan.time_source == "relative_text"
+    assert plan.time_relation == relation
+    assert plan.time_confidence == confidence
+    assert plan.start == NOW - timedelta(days=max_days)
+    assert plan.end == NOW - timedelta(days=min_days)
+
+
+def test_temporal_shadow_context_shares_plan_with_time_first_query() -> None:
+    direct_plan = build_time_first_query(TEXT, now=NOW)
+    shadow_plan, statement = build_temporal_shadow_context(
+        TEXT,
+        request_id="req-shared",
+        now=NOW,
+    )
+
+    assert statement is not None
+    assert shadow_plan.used_time_filter is True
+    assert shadow_plan.start == direct_plan.start
+    assert shadow_plan.end == direct_plan.end
+    assert shadow_plan.time_precision == "approximate"
+    assert shadow_plan.time_relation == direct_plan.time_relation
+    assert shadow_plan.preferred_axes == ("semantic", "topic")
+    assert direct_plan.preferred_axes == ("semantic", "topic")
+    assert statement.utterance_time.start == direct_plan.start
+    assert statement.utterance_time.end == direct_plan.end
+
+
+def test_compound_temporal_statement_supports_opinion_and_week_window() -> None:
+    analysis = analyze_temporal_statement_shadow(
+        "Tydzień temu uważaliśmy, że temat wymaga rewizji, ale teraz jest konflikt.",
+        request_id="req-week-opinion",
+        now=NOW,
+        conflict=True,
+    )
+
+    assert analysis is not None
+    assert analysis.epistemic_role == "opinion"
+    assert analysis.relevance_gate == "investigate"
+    assert (
+        analysis.utterance_time.relation
+        == "approximately_one_week_before_observation"
+    )
+    assert analysis.utterance_time.start == NOW - timedelta(days=9)
+    assert analysis.utterance_time.end == NOW - timedelta(days=5)
+    assert (
+        analysis.content_time.relation == "contemporaneous_with_utterance"
+    )
+    assert analysis.content_time.precision == "unknown"
 
 
 def test_compound_temporal_statement_is_a_prediction_candidate() -> None:

@@ -390,6 +390,60 @@ def test_dual_track_result_cannot_change_live_plan(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_dual_track_schedules_approximate_temporal_statement(tmp_path) -> None:
+    class TraceStub:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return {
+                "trace_id": "1" * 24,
+                "verdict": "agreement",
+                "reason": "top_match",
+                "time_precision": "approximate",
+            }
+
+    class DualTrackStub:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def run(self, text, **kwargs):
+            self.calls.append({"text": text, **kwargs})
+            return SimpleNamespace(trace=TraceStub())
+
+    async def scenario() -> None:
+        memory = MemoryStore(tmp_path / "voice.db")
+        await memory.initialize()
+        runner = DualTrackStub()
+        assistant = _assistant(
+            memory,
+            router=RouterStub(),
+            n8n=N8nStub(),
+            executor=ExecutorStub(memory),
+            tts=TTSStub(),
+            dual_track_runner=runner,
+        )
+        request = CommandRequest(
+            text="A jeszcze miesiąc temu mówiliśmy, że będzie wspaniale"
+        )
+
+        accepted = await assistant.handle(request)
+        if assistant._background_tasks:
+            await asyncio.gather(*assistant._background_tasks)
+
+        assert accepted.plan is not None
+        assert len(runner.calls) == 1
+        call = runner.calls[0]
+        assert call["text"] == request.text
+        plan = call["query_plan"]
+        statement = call["statement"]
+        assert plan.used_time_filter is True
+        assert plan.time_precision == "approximate"
+        assert statement is not None
+        assert statement.epistemic_role == "prediction"
+        await assistant.close()
+
+    asyncio.run(scenario())
+
+
 def test_vector_memory_falls_back_to_sqlite_when_qdrant_is_unavailable(tmp_path) -> None:
     class EmbeddingsStub:
         enabled = True

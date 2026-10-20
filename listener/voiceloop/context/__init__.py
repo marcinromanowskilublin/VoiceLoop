@@ -8,7 +8,13 @@ from .entities import (
     stable_entity_id,
 )
 from .episodes import activity_bucket, group_events_into_episodes
-from .retrieval import TimeFirstQueryPlan, TimeFirstRetriever, build_time_first_query
+from .retrieval import (
+    TimeFirstQueryPlan,
+    TimeFirstRetriever,
+    TimePrecision,
+    TimeSource,
+    build_time_first_query,
+)
 from .schema import (
     ContextEpisodeV1,
     ContextEventV1,
@@ -21,8 +27,18 @@ from .schema import (
     stable_context_id,
     stable_episode_id,
 )
+from .shadow_statements import (
+    AtomicClaimProposal,
+    TemporalRoleV1,
+    TemporalStatementShadowV1,
+    analyze_temporal_statement_shadow,
+    build_temporal_shadow_context,
+    comparative_shadow_question,
+    shadow_relevance_gate,
+)
 
 __all__ = [
+    "AtomicClaimProposal",
     "ContextAssembler",
     "ContextBudgets",
     "ContextEntityKind",
@@ -35,11 +51,19 @@ __all__ = [
     "ContextTrust",
     "ForegroundConfidence",
     "ResolvedEntity",
+    "TemporalRoleV1",
+    "TemporalStatementShadowV1",
     "TimeFirstQueryPlan",
     "TimeFirstRetriever",
+    "TimePrecision",
+    "TimeSource",
     "activity_bucket",
+    "analyze_temporal_statement_shadow",
+    "build_temporal_shadow_context",
     "build_time_first_query",
+    "comparative_shadow_question",
     "content_hash_for",
+    "shadow_relevance_gate",
     "stable_context_id",
     "stable_episode_id",
     "stable_entity_id",

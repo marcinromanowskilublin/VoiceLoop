@@ -266,6 +266,10 @@ class MemoryStore:
                         created_at TEXT NOT NULL,
                         expires_at TEXT NOT NULL,
                         bounded INTEGER NOT NULL,
+                        time_precision TEXT NOT NULL DEFAULT 'unknown',
+                        time_relation TEXT NOT NULL DEFAULT 'unbounded',
+                        epistemic_role TEXT,
+                        relevance_gate TEXT NOT NULL DEFAULT 'context_only',
                         verdict TEXT NOT NULL,
                         reason TEXT NOT NULL,
                         baseline_count INTEGER NOT NULL,
@@ -698,6 +702,32 @@ class MemoryStore:
                         ON context_cascade_shadow_telemetry(expires_at)
                         """
                     )
+                dual_track_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(context_dual_track_traces)"
+                    ).fetchall()
+                }
+                for column_name, ddl in (
+                    (
+                        "time_precision",
+                        "TEXT NOT NULL DEFAULT 'unknown'",
+                    ),
+                    (
+                        "time_relation",
+                        "TEXT NOT NULL DEFAULT 'unbounded'",
+                    ),
+                    ("epistemic_role", "TEXT"),
+                    (
+                        "relevance_gate",
+                        "TEXT NOT NULL DEFAULT 'context_only'",
+                    ),
+                ):
+                    if column_name not in dual_track_columns:
+                        connection.execute(
+                            "ALTER TABLE context_dual_track_traces "
+                            f"ADD COLUMN {column_name} {ddl}"
+                        )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_conversation_session
@@ -2093,7 +2123,9 @@ class MemoryStore:
                     """
                     INSERT OR REPLACE INTO context_dual_track_traces(
                         trace_id, schema_version, created_at, expires_at,
-                        bounded, verdict, reason,
+                        bounded, time_precision, time_relation,
+                        epistemic_role, relevance_gate,
+                        verdict, reason,
                         baseline_count, cascade_count, overlap_count, top_match,
                         baseline_result_ids_json, cascade_result_ids_json,
                         baseline_axes_attempted_json, baseline_axes_queried_json,
@@ -2105,7 +2137,7 @@ class MemoryStore:
                         total_duration_ms, error_type
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -2114,6 +2146,10 @@ class MemoryStore:
                         payload["created_at"],
                         payload["expires_at"],
                         int(payload["bounded"]),
+                        payload["time_precision"],
+                        payload["time_relation"],
+                        payload["epistemic_role"],
+                        payload["relevance_gate"],
                         payload["verdict"],
                         payload["reason"],
                         payload["baseline_count"],
@@ -2164,6 +2200,7 @@ class MemoryStore:
         rows = await asyncio.to_thread(_list)
         traces: list[DualTrackTraceV1] = []
         for row in rows:
+            row_keys = set(row.keys())
             traces.append(
                 DualTrackTraceV1.model_validate(
                     {
@@ -2172,6 +2209,26 @@ class MemoryStore:
                         "created_at": row["created_at"],
                         "expires_at": row["expires_at"],
                         "bounded": bool(row["bounded"]),
+                        "time_precision": (
+                            row["time_precision"]
+                            if "time_precision" in row_keys
+                            else "unknown"
+                        ),
+                        "time_relation": (
+                            row["time_relation"]
+                            if "time_relation" in row_keys
+                            else "unbounded"
+                        ),
+                        "epistemic_role": (
+                            row["epistemic_role"]
+                            if "epistemic_role" in row_keys
+                            else None
+                        ),
+                        "relevance_gate": (
+                            row["relevance_gate"]
+                            if "relevance_gate" in row_keys
+                            else "context_only"
+                        ),
                         "verdict": row["verdict"],
                         "reason": row["reason"],
                         "baseline_count": row["baseline_count"],

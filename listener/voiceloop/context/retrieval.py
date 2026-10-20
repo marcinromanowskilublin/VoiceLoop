@@ -33,24 +33,57 @@ _STOPWORDS = {
     "ale",
     "co",
     "czy",
+    "dni",
+    "dnia",
+    "dniach",
     "do",
     "dzis",
     "dzisiaj",
+    "godzin",
+    "godziny",
+    "godzinach",
     "i",
     "jak",
+    "jeszcze",
+    "kilka",
+    "kilku",
     "mi",
+    "miesiac",
+    "miesiaca",
+    "miesiace",
+    "miesiecy",
+    "mowilismy",
     "na",
     "o",
     "od",
+    "okolo",
+    "ostatni",
+    "ostatnia",
     "ostatnie",
+    "ostatniego",
     "ostatnich",
+    "ostatnim",
+    "paru",
+    "pare",
+    "przedwczoraj",
     "przypomnij",
+    "rok",
+    "roku",
     "temu",
+    "tydzien",
+    "tygodni",
+    "tygodnia",
+    "tygodnie",
     "w",
     "wczoraj",
     "z",
     "ze",
+    "zeszlym",
+    "zeszlego",
 }
+
+TimePrecision = Literal["exact", "approximate", "unknown"]
+TimeSource = Literal["none", "relative_text", "semantic_relation"]
 
 
 class TimeFirstQueryPlan(BaseModel):
@@ -61,12 +94,18 @@ class TimeFirstQueryPlan(BaseModel):
     start: datetime | None = None
     end: datetime | None = None
     used_time_filter: bool = False
+    time_precision: TimePrecision = "unknown"
+    time_relation: str = Field(default="unbounded", min_length=1, max_length=80)
+    time_source: TimeSource = "none"
+    time_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    preferred_axes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class CascadeTrace:
     time_stage: str = "Czas"
     time_bounded: bool = False
+    time_precision: TimePrecision = "unknown"
     waves: tuple[tuple[str, ...], ...] = ()
     axes_attempted: tuple[str, ...] = ()
     axes_queried: tuple[str, ...] = ()
@@ -86,38 +125,77 @@ def build_time_first_query(
     normalized = _normalized_text(query)
     start: datetime | None = None
     end: datetime | None = None
+    precision: TimePrecision = "unknown"
+    relation = "unbounded"
+    source: TimeSource = "none"
+    confidence = 0.0
+    preferred_axes: tuple[str, ...] = ()
     if "przedwczoraj" in normalized:
         day = local_now.date() - timedelta(days=2)
         start = datetime.combine(day, time.min, tzinfo=local_now.tzinfo)
         end = datetime.combine(day, time.max, tzinfo=local_now.tzinfo)
+        precision = "exact"
+        relation = "two_days_before_observation"
+        source = "relative_text"
+        confidence = 0.95
     elif "wczoraj" in normalized:
         day = local_now.date() - timedelta(days=1)
         start = datetime.combine(day, time.min, tzinfo=local_now.tzinfo)
         end = datetime.combine(day, time.max, tzinfo=local_now.tzinfo)
+        precision = "exact"
+        relation = "one_day_before_observation"
+        source = "relative_text"
+        confidence = 0.95
     elif re.search(r"\b(?:dzis|dzisiaj)\b", normalized):
         start = datetime.combine(local_now.date(), time.min, tzinfo=local_now.tzinfo)
         end = local_now
+        precision = "exact"
+        relation = "same_day_as_observation"
+        source = "relative_text"
+        confidence = 0.95
     else:
         recent = re.search(
-            r"\b(?:ostatnie|ostatnich)\s+(\d{1,3})\s+"
-            r"(godzin(?:y|ach)?|dni|dnia|dniach)\b",
+            r"\b(?:ostatni(?:e|ch|ego|m|a)?)\s+(\d{1,3})\s+"
+            r"(godzin(?:y|ach)?|dni|dnia|dniach|tygodni(?:e|ach)?|miesiec(?:y|ach)?|miesiac(?:e|ach)?)\b",
             normalized,
         )
         if recent:
             amount = max(1, min(int(recent.group(1)), 365))
-            delta = (
-                timedelta(hours=amount)
-                if recent.group(2).startswith("godzin")
-                else timedelta(days=amount)
-            )
+            unit = recent.group(2)
+            if unit.startswith("godzin"):
+                delta = timedelta(hours=amount)
+                relation = f"last_{amount}_hours"
+            elif unit.startswith("tygodni"):
+                delta = timedelta(days=amount * 7)
+                relation = f"last_{amount}_weeks"
+            elif unit.startswith("miesi"):
+                delta = timedelta(days=amount * 30)
+                relation = f"last_{amount}_months"
+            else:
+                delta = timedelta(days=amount)
+                relation = f"last_{amount}_days"
             start = local_now - delta
             end = local_now
+            precision = "exact" if not unit.startswith("miesi") else "approximate"
+            source = "relative_text"
+            confidence = 0.9 if precision == "exact" else 0.7
+        else:
+            approx = _approximate_relative_window(normalized, local_now=local_now)
+            if approx is not None:
+                start, end, relation, confidence, preferred_axes = approx
+                precision = "approximate"
+                source = "relative_text"
     return TimeFirstQueryPlan(
         original_query=query,
         search_text=_search_text(query),
         start=start.astimezone(UTC) if start else None,
         end=end.astimezone(UTC) if end else None,
         used_time_filter=start is not None,
+        time_precision=precision,
+        time_relation=relation,
+        time_source=source,
+        time_confidence=confidence,
+        preferred_axes=preferred_axes,
     )
 
 
@@ -160,10 +238,14 @@ class TimeFirstRetriever:
         query_plan: TimeFirstQueryPlan | None = None,
     ) -> ContextPackV1:
         plan = query_plan or build_time_first_query(query, now=now)
-        self.last_trace = CascadeTrace(time_bounded=plan.used_time_filter)
+        self.last_trace = CascadeTrace(
+            time_bounded=plan.used_time_filter,
+            time_precision=plan.time_precision,
+        )
         if self.scout_mode in {"rrf5", "cascade_2_2_1"} and not _is_bounded_plan(plan):
             self.last_trace = CascadeTrace(
                 time_bounded=False,
+                time_precision=plan.time_precision,
                 stop_reason="unbounded_rejected",
             )
             return ContextPackV1(question=query, session_id=session_id)
@@ -220,6 +302,7 @@ class TimeFirstRetriever:
         elif self.scout_mode == "cascade_2_2_1":
             self.last_trace = CascadeTrace(
                 time_bounded=plan.used_time_filter,
+                time_precision=plan.time_precision,
                 stop_reason="exact_evidence",
                 candidate_count=len(items),
             )
@@ -243,12 +326,16 @@ class TimeFirstRetriever:
     ) -> ContextPackV1:
         """Run only the vector track after a shared, already-bounded time gate."""
 
-        self.last_trace = CascadeTrace(time_bounded=query_plan.used_time_filter)
+        self.last_trace = CascadeTrace(
+            time_bounded=query_plan.used_time_filter,
+            time_precision=query_plan.time_precision,
+        )
         if self.scout_mode in {"rrf5", "cascade_2_2_1"} and not _is_bounded_plan(
             query_plan
         ):
             self.last_trace = CascadeTrace(
                 time_bounded=False,
+                time_precision=query_plan.time_precision,
                 stop_reason="unbounded_rejected",
             )
             return ContextPackV1(question=query)
@@ -289,6 +376,7 @@ class TimeFirstRetriever:
             if self.scout_mode in {"rrf5", "cascade_2_2_1"}:
                 self.last_trace = CascadeTrace(
                     time_bounded=plan.used_time_filter,
+                    time_precision=plan.time_precision,
                     stop_reason="provider_unavailable",
                 )
             return []
@@ -312,11 +400,20 @@ class TimeFirstRetriever:
                 existing=existing,
                 limit=limit,
             )
-        axes = ("semantic", *_reserve_axes_for(query))
+        axes = (
+            "semantic",
+            *self.preferred_axes,
+            *(axis for axis in plan.preferred_axes if axis in MEMORY_VECTOR_NAMES),
+            *_reserve_axes_for(query),
+        )
+        ordered_axes: list[str] = []
+        for axis in axes:
+            if axis in MEMORY_VECTOR_NAMES and axis not in ordered_axes:
+                ordered_axes.append(axis)
         results: list[ContextItemV1] = []
         seen = {item.content_hash for item in existing}
         try:
-            for axis in axes:
+            for axis in ordered_axes:
                 document = query_documents.get(axis)
                 if not document:
                     continue
@@ -363,6 +460,7 @@ class TimeFirstRetriever:
         )
         self.last_trace = CascadeTrace(
             time_bounded=plan.used_time_filter,
+            time_precision=plan.time_precision,
             waves=(axes,) if axes else (),
             axes_attempted=axes,
             stop_reason="in_progress",
@@ -408,6 +506,7 @@ class TimeFirstRetriever:
             results = []
         self.last_trace = CascadeTrace(
             time_bounded=plan.used_time_filter,
+            time_precision=plan.time_precision,
             waves=(axes,) if axes else (),
             axes_attempted=axes,
             axes_queried=queried,
@@ -417,11 +516,18 @@ class TimeFirstRetriever:
         )
         return results
 
-    def _cascade_waves_for(self, query: str) -> tuple[tuple[str, ...], ...]:
+    def _cascade_waves_for(
+        self,
+        query: str,
+        *,
+        plan: TimeFirstQueryPlan | None = None,
+    ) -> tuple[tuple[str, ...], ...]:
         ordered: list[str] = []
+        plan_axes = plan.preferred_axes if plan is not None else ()
         for axis in (
             "semantic",
             *self.preferred_axes,
+            *plan_axes,
             *_reserve_axes_for(query),
             *MEMORY_VECTOR_NAMES,
         ):
@@ -445,7 +551,7 @@ class TimeFirstRetriever:
         from ..embeddings import EmbeddingUnavailableError
         from ..qdrant_memory import QdrantMemoryError
 
-        waves = self._cascade_waves_for(query)
+        waves = self._cascade_waves_for(query, plan=plan)
         results: list[ContextItemV1] = []
         seen = {item.content_hash for item in existing}
         attempted: list[str] = []
@@ -463,6 +569,7 @@ class TimeFirstRetriever:
                 attempted.extend(active_axes)
                 self.last_trace = CascadeTrace(
                     time_bounded=plan.used_time_filter,
+                    time_precision=plan.time_precision,
                     waves=(*tuple(completed_waves), active_axes),
                     axes_attempted=tuple(attempted),
                     axes_queried=tuple(queried),
@@ -515,6 +622,7 @@ class TimeFirstRetriever:
             results = []
         self.last_trace = CascadeTrace(
             time_bounded=plan.used_time_filter,
+            time_precision=plan.time_precision,
             waves=tuple(completed_waves),
             axes_attempted=tuple(attempted),
             axes_queried=tuple(queried),
@@ -601,8 +709,18 @@ class TimeFirstRetriever:
         return results
 
 
+_POLISH_ASCII_MAP = str.maketrans(
+    {
+        "ł": "l",
+        "Ł": "l",
+    }
+)
+
+
 def _normalized_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value.casefold())
+    normalized = unicodedata.normalize(
+        "NFKD", value.translate(_POLISH_ASCII_MAP).casefold()
+    )
     return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
@@ -623,6 +741,99 @@ def _parse_timestamp(value: str) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
     return parsed.astimezone(UTC)
+
+
+def _approximate_relative_window(
+    normalized: str,
+    *,
+    local_now: datetime,
+) -> tuple[datetime, datetime, str, float, tuple[str, ...]] | None:
+    """Resolve approximate relative temporal expressions into bounded intervals."""
+    epistemic = _has_epistemic_marker(normalized)
+    preferred_axes = ("semantic", "topic") if epistemic else ()
+
+    if re.search(r"\b(?:kilka|kilku|pare|paru)\s+dni\s+temu\b", normalized):
+        start = local_now - timedelta(days=7)
+        end = local_now - timedelta(days=2)
+        return (
+            start,
+            end,
+            "approximately_several_days_before_observation",
+            0.6,
+            preferred_axes,
+        )
+
+    if re.search(
+        r"\b(?:kilka|kilku|pare|paru)\s+tygodni\s+temu\b",
+        normalized,
+    ):
+        start = local_now - timedelta(days=35)
+        end = local_now - timedelta(days=14)
+        return (
+            start,
+            end,
+            "approximately_several_weeks_before_observation",
+            0.55,
+            preferred_axes,
+        )
+
+    if re.search(
+        r"\b(?:kilka|kilku|pare|paru)\s+(?:miesiec(?:y)?|miesiac(?:e|y)?)\s+temu\b",
+        normalized,
+    ):
+        start = local_now - timedelta(days=120)
+        end = local_now - timedelta(days=45)
+        return (
+            start,
+            end,
+            "approximately_several_months_before_observation",
+            0.55,
+            preferred_axes,
+        )
+
+    month_ago = re.search(
+        r"\b(?:(\d{1,2})\s+)?(?:miesiac(?:e|y)?|miesiec(?:y)?)\s+temu\b"
+        r"|\bw\s+(?:zeszlym|ostatnim|poprzednim)\s+miesiacu\b",
+        normalized,
+    )
+    if month_ago:
+        count = max(1, min(int(month_ago.group(1) or 1), 12))
+        center_days = 30 * count
+        half_window = 7 * count
+        start = local_now - timedelta(days=center_days + half_window)
+        end = local_now - timedelta(days=max(1, center_days - half_window))
+        relation = (
+            "approximately_one_month_before_observation"
+            if count == 1
+            else f"approximately_{count}_months_before_observation"
+        )
+        return start, end, relation, 0.65, preferred_axes
+
+    week_ago = re.search(
+        r"\b(?:(\d{1,2})\s+)?(?:tydzien|tygodni(?:e)?)\s+temu\b"
+        r"|\bw\s+(?:zeszlym|ostatnim|poprzednim)\s+tygodniu\b",
+        normalized,
+    )
+    if week_ago:
+        count = max(1, min(int(week_ago.group(1) or 1), 52))
+        center_days = 7 * count
+        half_window = max(2, 2 * count)
+        start = local_now - timedelta(days=center_days + half_window)
+        end = local_now - timedelta(days=max(1, center_days - half_window))
+        relation = (
+            "approximately_one_week_before_observation"
+            if count == 1
+            else f"approximately_{count}_weeks_before_observation"
+        )
+        return start, end, relation, 0.7, preferred_axes
+
+    return None
+
+
+def _has_epistemic_marker(normalized: str) -> bool:
+    if re.search(r"\bbedzi(?:e|emy|esz)\b", normalized):
+        return True
+    return any(marker in normalized for marker in ("mysl", "uwaz", "wydaje"))
 
 
 def _reserve_axes_for(query: str) -> tuple[str, ...]:

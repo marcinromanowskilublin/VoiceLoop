@@ -2961,6 +2961,9 @@ class ActionRegistry:
                             if timeline_plan.end
                             else None
                         ),
+                        "precision": timeline_plan.time_precision,
+                        "relation": timeline_plan.time_relation,
+                        "confidence": timeline_plan.time_confidence,
                     },
                 },
             )

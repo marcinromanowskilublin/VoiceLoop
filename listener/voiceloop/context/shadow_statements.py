@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .retrieval import TimeFirstQueryPlan
+from .retrieval import TimeFirstQueryPlan, build_time_first_query
 
 
 class AtomicClaimProposal(BaseModel):
@@ -58,6 +58,11 @@ class TemporalStatementShadowV1(BaseModel):
             start=self.utterance_time.start,
             end=self.utterance_time.end,
             used_time_filter=True,
+            time_precision=self.utterance_time.precision,
+            time_relation=self.utterance_time.relation,
+            time_source=self.utterance_time.source,
+            time_confidence=self.utterance_time.confidence,
+            preferred_axes=tuple(self.preferred_axes),
         )
 
     def telemetry(self) -> dict[str, object]:
@@ -71,6 +76,7 @@ class TemporalStatementShadowV1(BaseModel):
             "relevance_gate": self.relevance_gate,
             "utterance_precision": self.utterance_time.precision,
             "utterance_source": self.utterance_time.source,
+            "utterance_relation": self.utterance_time.relation,
             "content_precision": self.content_time.precision,
             "content_relation": self.content_time.relation,
             "approved_claim_count": len(self.approved_claims),
@@ -90,10 +96,21 @@ def analyze_temporal_statement_shadow(
     action_impact: bool = False,
     llm_proposals: tuple[AtomicClaimProposal, ...] = (),
 ) -> TemporalStatementShadowV1 | None:
-    """Recognize one narrow compound form without expanding live retrieval."""
+    """Recognize approximate compound temporal statements without expanding live facts."""
+
+    observed_at = now or datetime.now().astimezone()
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    observed_utc = observed_at.astimezone(UTC)
 
     normalized = _normalized_text(text)
-    if "miesiac temu" not in normalized:
+    plan = build_time_first_query(text, now=observed_utc)
+    if (
+        not plan.used_time_filter
+        or plan.time_precision != "approximate"
+        or plan.start is None
+        or plan.end is None
+    ):
         return None
     epistemic_role: Literal["prediction", "opinion"]
     if re.search(r"\bbedzi(?:e|emy|esz)\b", normalized):
@@ -103,13 +120,6 @@ def analyze_temporal_statement_shadow(
     else:
         return None
 
-    observed_at = now or datetime.now().astimezone()
-    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
-        raise ValueError("now must be timezone-aware")
-    observed_utc = observed_at.astimezone(UTC)
-    # "Miesiąc temu" is approximate. A two-week interval avoids fake day precision.
-    utterance_start = observed_utc - timedelta(days=37)
-    utterance_end = observed_utc - timedelta(days=23)
     relevance_gate = shadow_relevance_gate(
         has_epistemic_content=True,
         comparative_question=comparative_question,
@@ -123,22 +133,27 @@ def analyze_temporal_statement_shadow(
         if proposal.role == epistemic_role
         and _normalized_text(proposal.evidence_span) in normalized
     )
+    content_relation = (
+        "future_relative_to_utterance"
+        if epistemic_role == "prediction"
+        else "contemporaneous_with_utterance"
+    )
     return TemporalStatementShadowV1(
         raw_text=text,
         provenance_request_id=request_id,
         observed_at=observed_utc,
         utterance_time=TemporalRoleV1(
             role="utterance",
-            start=utterance_start,
-            end=utterance_end,
-            relation="approximately_one_month_before_observation",
+            start=plan.start,
+            end=plan.end,
+            relation=plan.time_relation,
             precision="approximate",
             source="relative_text",
-            confidence=0.65,
+            confidence=plan.time_confidence or 0.65,
         ),
         content_time=TemporalRoleV1(
             role="content",
-            relation="future_relative_to_utterance",
+            relation=content_relation,
             precision="unknown",
             source="semantic_relation",
             confidence=0.55,
@@ -148,6 +163,41 @@ def analyze_temporal_statement_shadow(
         approved_claims=approved,
         gap="" if approved else "compound_claim_requires_review",
     )
+
+
+def build_temporal_shadow_context(
+    text: str,
+    *,
+    request_id: str,
+    now: datetime | None = None,
+) -> tuple[TimeFirstQueryPlan, TemporalStatementShadowV1 | None]:
+    """Build a unified time-first query plan and optional epistemic shadow analysis."""
+
+    observed_at = now or datetime.now().astimezone()
+    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    normalized = _normalized_text(text)
+    statement = analyze_temporal_statement_shadow(
+        text,
+        request_id=request_id,
+        now=observed_at,
+        comparative_question=comparative_shadow_question(text),
+        conflict=any(
+            marker in normalized
+            for marker in ("sprzecz", "konflikt", "nie zgadza", "ale teraz")
+        ),
+        decision_context=any(
+            marker in normalized
+            for marker in ("decyz", "wybier", "ustalmy", "postanow")
+        ),
+        action_impact=any(
+            marker in normalized
+            for marker in ("mam zrobic", "wykonaj", "uruchom", "usun")
+        ),
+    )
+    if statement is not None:
+        return statement.query_plan(), statement
+    return build_time_first_query(text, now=observed_at), None
 
 
 def shadow_relevance_gate(
@@ -178,8 +228,18 @@ def comparative_shadow_question(text: str) -> bool:
     )
 
 
+_POLISH_ASCII_MAP = str.maketrans(
+    {
+        "ł": "l",
+        "Ł": "l",
+    }
+)
+
+
 def _normalized_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value.casefold())
+    normalized = unicodedata.normalize(
+        "NFKD", value.translate(_POLISH_ASCII_MAP).casefold()
+    )
     return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
