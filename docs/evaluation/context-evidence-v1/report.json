@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "evidence_pack": "context-evidence-v1",
-  "source_revision": "deb77fe",
-  "generated_at": "2026-10-19T12:00:00+00:00",
+  "source_revision": "372b642",
+  "generated_at": "2026-10-20T02:44:08.455524+00:00",
+  "observation_time": "2026-10-19T12:00:00+00:00",
   "data_class": "public_synthetic_only",
   "network_used": false,
   "storage": {
@@ -39,31 +40,37 @@
     "fts_only": {
       "schema_version": 1,
       "sample_count": 5,
+      "positive_count": 4,
+      "negative_count": 1,
       "k": 3,
       "recall_at_k": 1.0,
-      "mean_reciprocal_rank": 0.8,
-      "abstention_accuracy": 1.0,
-      "provenance_coverage": 0.8,
+      "mean_reciprocal_rank": 1.0,
+      "negative_abstention_accuracy": 1.0,
+      "provenance_coverage_on_results": 1.0,
       "reserve_axis_coverage": 0.2
     },
     "rrf5": {
       "schema_version": 1,
       "sample_count": 5,
+      "positive_count": 4,
+      "negative_count": 1,
       "k": 3,
       "recall_at_k": 0.75,
-      "mean_reciprocal_rank": 0.4,
-      "abstention_accuracy": 0.8,
-      "provenance_coverage": 0.8,
+      "mean_reciprocal_rank": 0.5,
+      "negative_abstention_accuracy": 1.0,
+      "provenance_coverage_on_results": 1.0,
       "reserve_axis_coverage": 0.2
     },
     "cascade_2_2_1": {
       "schema_version": 1,
       "sample_count": 5,
+      "positive_count": 4,
+      "negative_count": 1,
       "k": 3,
       "recall_at_k": 1.0,
-      "mean_reciprocal_rank": 0.6666666666666666,
-      "abstention_accuracy": 1.0,
-      "provenance_coverage": 0.8,
+      "mean_reciprocal_rank": 0.8333333333333333,
+      "negative_abstention_accuracy": 1.0,
+      "provenance_coverage_on_results": 1.0,
       "reserve_axis_coverage": 0.2
     },
     "arbiter": {
@@ -78,23 +85,23 @@
     "latency_ms": {
       "fts_only": {
         "count": 5,
-        "p50": 2.24,
-        "p95": 2.433
+        "p50": 1.511,
+        "p95": 1.877
       },
       "dual_track_wall": {
         "count": 5,
-        "p50": 12.568,
-        "p95": 15.115
+        "p50": 11.074,
+        "p95": 14.658
       },
       "rrf5_track": {
         "count": 5,
-        "p50": 10.101,
-        "p95": 11.77
+        "p50": 9.728,
+        "p95": 10.883
       },
       "cascade_track": {
         "count": 5,
-        "p50": 12.157,
-        "p95": 14.747
+        "p50": 10.176,
+        "p95": 14.271
       }
     },
     "failures": {
@@ -169,18 +176,22 @@
     }
   ],
   "action_boundary": {
-    "action_id": "open_shell_item",
+    "action_id": "remember",
     "risk_before": "low",
     "risk_after": "medium",
     "confirmation_required": true,
+    "executor_status": "awaiting_confirmation",
+    "pending_confirmation": true,
+    "handler_calls": 0,
     "executed": false,
-    "note": "The demo stops at local policy and never invokes the handler."
+    "note": "CommandExecutor persisted awaiting_confirmation and did not call the handler."
   },
   "limitations": [
     "Synthetic data is not evidence of private-data quality.",
     "Lexical hash embeddings make the run deterministic; they are not a model benchmark.",
     "Qdrant runs in the real qdrant-client local engine, not a network server.",
     "Latency is runner-specific and must not be generalized to target Windows hardware.",
+    "Agreement means the same top canonical episode version; the remaining ranked lists may differ.",
     "The arbiter remains shadow-only and cannot authorize an action."
   ]
 }

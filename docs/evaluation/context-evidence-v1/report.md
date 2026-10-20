@@ -1,6 +1,6 @@
 # VoiceLoop public context evidence v1
 
-- Source revision: `deb77fe`
+- Source revision: `372b642`
 - Data: public synthetic only
 - Network: not used
 - SQLite events/episodes: 5
@@ -10,11 +10,11 @@
 
 ## Retrieval comparison
 
-| Track | Recall@3 | MRR | Abstention | Provenance | P50 ms | P95 ms |
+| Track | Recall@3 | MRR | Negative abstention | Result provenance | Smoke P50 ms | Smoke P95 ms |
 |---|---:|---:|---:|---:|---:|---:|
-| FTS only | 1.000 | 0.800 | 1.000 | 0.800 | 2.240 | 2.433 |
-| RRF5 | 0.750 | 0.400 | 0.800 | 0.800 | 10.101 | 11.770 |
-| Cascade 2+2+1 | 1.000 | 0.667 | 1.000 | 0.800 | 12.157 | 14.747 |
+| FTS only | 1.000 | 1.000 | 1.000 | 1.000 | 1.511 | 1.877 |
+| RRF5 | 0.750 | 0.500 | 1.000 | 1.000 | 9.728 | 10.883 |
+| Cascade 2+2+1 | 1.000 | 0.833 | 1.000 | 1.000 | 10.176 | 14.271 |
 
 ## Observable outcomes
 
@@ -27,9 +27,11 @@
 
 ## Action boundary
 
-- Proposed action: `open_shell_item`
+- Proposed action: `remember`
 - Risk raised locally: `low` -> `medium`
 - Confirmation required: `true`
+- Executor status: `awaiting_confirmation`
+- Handler calls: `0`
 - Handler executed: `false`
 
 ## Failure analysis
@@ -44,4 +46,5 @@
 - Lexical hash embeddings make the run deterministic; they are not a model benchmark.
 - Qdrant runs in the real qdrant-client local engine, not a network server.
 - Latency is runner-specific and must not be generalized to target Windows hardware.
+- Agreement means the same top canonical episode version; the remaining ranked lists may differ.
 - The arbiter remains shadow-only and cannot authorize an action.

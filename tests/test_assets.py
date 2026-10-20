@@ -115,7 +115,7 @@ def test_public_context_evidence_is_committed_and_ci_generated() -> None:
         encoding="utf-8"
     )
 
-    assert report["source_revision"] == "deb77fe"
+    assert report["source_revision"] == "372b642"
     assert report["network_used"] is False
     assert report["storage"]["canonical"] == "SQLite"
     assert report["storage"]["derived_index"] == "Qdrant local mode"

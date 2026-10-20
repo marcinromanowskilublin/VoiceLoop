@@ -50,20 +50,22 @@
   <h2>Retrieval comparison</h2>
   <table>
     <thead><tr><th>Track</th><th>Recall@3</th><th>MRR</th>
-      <th>Abstention</th><th>P50 ms</th><th>P95 ms</th></tr></thead>
-    <tbody><tr><td>FTS only</td><td>1.000</td><td>0.800</td><td>1.000</td><td>2.240</td><td>2.433</td></tr><tr><td>RRF5</td><td>0.750</td><td>0.400</td><td>0.800</td><td>10.101</td><td>11.770</td></tr><tr><td>Cascade 2+2+1</td><td>1.000</td><td>0.667</td><td>1.000</td><td>12.157</td><td>14.747</td></tr></tbody>
+      <th>Negative abstention</th><th>Smoke P50 ms</th>
+      <th>Smoke P95 ms</th></tr></thead>
+    <tbody><tr><td>FTS only</td><td>1.000</td><td>1.000</td><td>1.000</td><td>1.511</td><td>1.877</td></tr><tr><td>RRF5</td><td>0.750</td><td>0.500</td><td>1.000</td><td>9.728</td><td>10.883</td></tr><tr><td>Cascade 2+2+1</td><td>1.000</td><td>0.833</td><td>1.000</td><td>10.176</td><td>14.271</td></tr></tbody>
   </table>
   <h2>Observable outcomes</h2>
   <section class="scenarios"><article class="scenario"><span>agreement</span><strong>agreement</strong><p>record agreement; no serving switch</p></article><article class="scenario"><span>conflict</span><strong>conflict</strong><p>record conflict for human review</p></article><article class="scenario"><span>abstention</span><strong>uncertain</strong><p>return no bounded evidence</p></article><article class="scenario"><span>unbounded</span><strong>uncertain</strong><p>reject unbounded dual-track measurement</p></article></section>
   <h2>Action boundary</h2>
   <article class="card boundary">
     <span>Policy result</span>
-    <strong><code>open_shell_item</code> requires confirmation</strong>
+    <strong><code>remember</code> requires confirmation</strong>
     <p>Risk: <code>low</code> to <code>medium</code>.
-      Handler executed: <b class="truth">false</b>.</p>
+      Executor: <code>awaiting_confirmation</code>.
+      Handler calls: <b class="truth">0</b>.</p>
   </article>
   <p class="lede">Synthetic lexical embeddings make this run repeatable; they
     are not evidence of private-data quality or target-hardware latency.
-    Source revision: <code>deb77fe</code>.</p>
+    Source revision: <code>372b642</code>.</p>
 </main></body>
 </html>
