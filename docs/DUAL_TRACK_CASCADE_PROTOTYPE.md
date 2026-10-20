@@ -31,6 +31,31 @@ Oba tory czytają tę samą izolowaną kolekcję
 `voiceloop_memory`. Kod odrzuca konfigurację, w której obie nazwy są takie
 same.
 
+## Jeden parser czasu i tekstu wyszukiwania
+
+`normalize_context_text`, `build_context_search_text` i
+`build_time_first_query` są jednym źródłem prawdy dla normalizacji, usuwania
+rusztowania czasowego z FTS oraz budowania zakresu. Analiza zdania shadow nie
+składa osobnego `search_text`: ponownie używa kanonicznego planu, a nadpisuje
+wyłącznie zweryfikowane role czasu i preferowane osie.
+
+Obsługiwane polskie formy obejmują:
+
+- `wczoraj`, `przedwczoraj`, `dziś` i `dzisiaj`;
+- ostatnie okno z liczbą lub liczebnikiem, np. `ostatnie 2 godziny`,
+  `ostatnie dwie godziny` i `ostatnie trzy miesiące`;
+- `kilka` / `kilku` / `parę` / `paru` dni, tygodni albo miesięcy temu;
+- liczbę cyfrą lub słowem, np. `2 miesiące temu`, `dwa tygodnie temu` i
+  `dwa lata temu`;
+- warianty `w zeszłym`, `ostatnim`, `poprzednim` lub `tamtym`
+  tygodniu, miesiącu i roku oraz odpowiadające formy dopełniacza;
+- `około miesiąca temu` i `pół roku temu`.
+
+Formy przybliżone tworzą skończony przedział `start`–`end`, precyzję
+`approximate`, relację i jawnie niższą pewność. Nieznany czas pozostaje
+`unbounded`; oba tory odrzucają taki pomiar jako `unbounded_rejected`, zanim
+wykonają wyszukiwanie wektorowe.
+
 ## Jawny, idempotentny indexer
 
 Indexer nie działa przy starcie aplikacji i nie jest workerem. Domyślnie
@@ -92,12 +117,21 @@ treści epizodu, jawnego `request_id`, `session_id` ani `source_id`. Zapisuje:
 
 - skrót requestu i skróty wyników solone identyfikatorem trace’u;
 - werdykt, powód, liczności i overlap;
+- precyzję i relację czasu oraz content-free rolę epistemiczną i bramkę
+  relewancji;
 - osie próbowane i zakończone, fale oraz powody stopu;
 - liczbę odrzuceń przez SQL gate;
 - czasy obu torów, timeout i klasę błędu bez komunikatu.
 
 Trace ma TTL konfigurowany przez
 `CONTEXT_DUAL_TRACK_TRACE_RETENTION_DAYS` i jest objęty workerem retencji.
+
+Role czasowe zdania mają jednego właściciela zapisu. Gdy cascade shadow jest
+włączony i ma dostępne providery, zapisuje role przed rozpoczęciem retrieval,
+więc timeout albo błąd Qdrant ich nie gubi; uruchamiany równolegle dual-track
+dostaje wtedy `persist_statement=False` i nie wykonuje duplikatu. Gdy cascade
+nie jest dostępny, `DualTrackRunner` zachowuje domyślne
+`persist_statement=True`, co utrzymuje samodzielne użycie runnera.
 
 ## Konfiguracja runtime
 
@@ -136,7 +170,9 @@ pozostaje poza repo.
 Chronione tokenem endpointy:
 
 - `GET /api/v1/context/dual-track/status` — tryb, rzeczywista liczba punktów
-  kolekcji, pomocnicze znaczniki SQL, ich zgodność i agregaty;
+  kolekcji, pomocnicze znaczniki SQL, ich zgodność i content-free agregaty:
+  liczności według werdyktu, precyzji czasu, bramki relewancji i roli
+  epistemicznej, średnie czasy, timeouty oraz czas ostatniej próbki;
 - `GET /api/v1/context/dual-track/traces` — ostatnie content-free trace’y.
 
 Panel pokazuje te dane pod etykietą `PROTOTYPE / READ-ONLY`. Nie istnieje

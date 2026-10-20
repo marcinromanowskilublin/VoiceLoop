@@ -237,6 +237,17 @@ SQLite/FTS first, can consult historical Screenpipe evidence, and accepts
 semantic candidates only when their canonical SQLite episode and source hashes
 still match.
 
+Temporal parsing and lexical cleanup share one implementation:
+`normalize_context_text`, `build_context_search_text` and
+`build_time_first_query`. The builder supplies one normalized FTS text to
+timeline/cascade SQL and one bounded plan to cascade shadow and dual-track.
+Polish relative forms include `wczoraj`, `przedwczoraj`, recent windows such as
+`ostatnie dwie godziny`, and approximate phrases such as `dwa tygodnie temu`,
+`w tamtym miesiącu`, `około miesiąca temu`, `pół roku temu` and `dwa lata
+temu`. Approximate phrases produce explicit finite intervals with lower
+confidence; missing time remains unbounded and is rejected by cascade and
+dual-track measurement.
+
 Retrieval is measured, not assumed. If Qdrant is unavailable, planner/default
 recall may fall back to SQLite semantic search; time-first recall preserves its
 time boundary and may return no evidence. Threshold Guard classifies dead,
@@ -338,6 +349,12 @@ account, including what this version deliberately leaves open, is
   It does not store the query or the memories. A compound sentence such as
   “a month ago we said it would be wonderful” is labeled as approximate
   utterance time plus unknown content time. It does not become a timeline fact.
+- A temporal statement has one telemetry writer. When cascade shadow is
+  available it writes the content-free roles before retrieval and dual-track
+  skips that statement write; otherwise standalone dual-track keeps its
+  default ownership. The status summary exposes only aggregate counts by
+  verdict, time precision, relevance gate and epistemic role, plus durations
+  and timeout count.
 
 ## Work only a person can do
 
