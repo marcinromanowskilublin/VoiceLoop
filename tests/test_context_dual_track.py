@@ -192,6 +192,9 @@ async def test_dual_track_runs_parallel_tracks_and_persists_content_free_trace(
     summary = await store.context_dual_track_summary()
     assert summary["sample_count"] == 1
     assert summary["verdict_counts"] == {"agreement": 1}
+    assert summary["time_precision_counts"] == {"exact": 1}
+    assert summary["relevance_gate_counts"] == {"context_only": 1}
+    assert summary["epistemic_role_counts"] == {}
 
 
 @pytest.mark.asyncio
@@ -320,6 +323,10 @@ async def test_dual_track_handles_approximate_epistemic_statement_and_persists_r
             "SELECT COUNT(*) FROM context_cascade_shadow_telemetry"
         ).fetchone()[0]
     assert telemetry_count == 1
+    summary = await store.context_dual_track_summary()
+    assert summary["time_precision_counts"] == {"approximate": 1}
+    assert summary["relevance_gate_counts"] == {"investigate": 1}
+    assert summary["epistemic_role_counts"] == {"prediction": 1}
 
 
 @pytest.mark.asyncio

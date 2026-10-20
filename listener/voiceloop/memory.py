@@ -2276,14 +2276,42 @@ class MemoryStore:
 
         def _summary() -> dict[str, object]:
             with self._connect() as connection:
-                rows = connection.execute(
+                cutoff = _now_iso()
+                verdict_rows = connection.execute(
                     """
                     SELECT verdict, COUNT(*) AS count
                     FROM context_dual_track_traces
                     WHERE expires_at > ?
                     GROUP BY verdict
                     """,
-                    (_now_iso(),),
+                    (cutoff,),
+                ).fetchall()
+                precision_rows = connection.execute(
+                    """
+                    SELECT time_precision, COUNT(*) AS count
+                    FROM context_dual_track_traces
+                    WHERE expires_at > ?
+                    GROUP BY time_precision
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                relevance_rows = connection.execute(
+                    """
+                    SELECT relevance_gate, COUNT(*) AS count
+                    FROM context_dual_track_traces
+                    WHERE expires_at > ?
+                    GROUP BY relevance_gate
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                epistemic_rows = connection.execute(
+                    """
+                    SELECT epistemic_role, COUNT(*) AS count
+                    FROM context_dual_track_traces
+                    WHERE expires_at > ? AND epistemic_role IS NOT NULL
+                    GROUP BY epistemic_role
+                    """,
+                    (cutoff,),
                 ).fetchall()
                 aggregate = connection.execute(
                     """
@@ -2298,12 +2326,24 @@ class MemoryStore:
                     FROM context_dual_track_traces
                     WHERE expires_at > ?
                     """,
-                    (_now_iso(),),
+                    (cutoff,),
                 ).fetchone()
             return {
                 "sample_count": int(aggregate["sample_count"] or 0),
                 "verdict_counts": {
-                    row["verdict"]: int(row["count"]) for row in rows
+                    row["verdict"]: int(row["count"]) for row in verdict_rows
+                },
+                "time_precision_counts": {
+                    row["time_precision"]: int(row["count"])
+                    for row in precision_rows
+                },
+                "relevance_gate_counts": {
+                    row["relevance_gate"]: int(row["count"])
+                    for row in relevance_rows
+                },
+                "epistemic_role_counts": {
+                    row["epistemic_role"]: int(row["count"])
+                    for row in epistemic_rows
                 },
                 "baseline_avg_ms": round(
                     float(aggregate["baseline_avg_ms"] or 0.0),
