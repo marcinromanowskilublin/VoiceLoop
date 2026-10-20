@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import re
-import unicodedata
 from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .retrieval import TimeFirstQueryPlan, build_time_first_query
+from .retrieval import (
+    TimeFirstQueryPlan,
+    build_time_first_query,
+    normalize_context_text,
+)
 
 
 class AtomicClaimProposal(BaseModel):
@@ -52,17 +55,23 @@ class TemporalStatementShadowV1(BaseModel):
     axis_insufficiency: tuple[str, ...] = ("claim_axis_not_available",)
 
     def query_plan(self) -> TimeFirstQueryPlan:
-        return TimeFirstQueryPlan(
-            original_query=self.raw_text,
-            search_text=_search_text(self.raw_text),
-            start=self.utterance_time.start,
-            end=self.utterance_time.end,
-            used_time_filter=True,
-            time_precision=self.utterance_time.precision,
-            time_relation=self.utterance_time.relation,
-            time_source=self.utterance_time.source,
-            time_confidence=self.utterance_time.confidence,
-            preferred_axes=tuple(self.preferred_axes),
+        """Reuse the canonical parser, overriding only reviewed temporal roles."""
+
+        plan = build_time_first_query(self.raw_text, now=self.observed_at)
+        return plan.model_copy(
+            update={
+                "start": self.utterance_time.start,
+                "end": self.utterance_time.end,
+                "used_time_filter": (
+                    self.utterance_time.start is not None
+                    and self.utterance_time.end is not None
+                ),
+                "time_precision": self.utterance_time.precision,
+                "time_relation": self.utterance_time.relation,
+                "time_source": self.utterance_time.source,
+                "time_confidence": self.utterance_time.confidence,
+                "preferred_axes": tuple(self.preferred_axes),
+            }
         )
 
     def telemetry(self) -> dict[str, object]:
@@ -103,7 +112,7 @@ def analyze_temporal_statement_shadow(
         raise ValueError("now must be timezone-aware")
     observed_utc = observed_at.astimezone(UTC)
 
-    normalized = _normalized_text(text)
+    normalized = normalize_context_text(text)
     plan = build_time_first_query(text, now=observed_utc)
     if (
         not plan.used_time_filter
@@ -131,7 +140,7 @@ def analyze_temporal_statement_shadow(
         proposal
         for proposal in llm_proposals[:3]
         if proposal.role == epistemic_role
-        and _normalized_text(proposal.evidence_span) in normalized
+        and normalize_context_text(proposal.evidence_span) in normalized
     )
     content_relation = (
         "future_relative_to_utterance"
@@ -176,7 +185,7 @@ def build_temporal_shadow_context(
     observed_at = now or datetime.now().astimezone()
     if observed_at.tzinfo is None or observed_at.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
-    normalized = _normalized_text(text)
+    normalized = normalize_context_text(text)
     statement = analyze_temporal_statement_shadow(
         text,
         request_id=request_id,
@@ -216,7 +225,7 @@ def shadow_relevance_gate(
 
 
 def comparative_shadow_question(text: str) -> bool:
-    normalized = _normalized_text(text)
+    normalized = normalize_context_text(text)
     return any(
         marker in normalized
         for marker in (
@@ -226,35 +235,3 @@ def comparative_shadow_question(text: str) -> bool:
             "wtedy a teraz",
         )
     )
-
-
-_POLISH_ASCII_MAP = str.maketrans(
-    {
-        "ł": "l",
-        "Ł": "l",
-    }
-)
-
-
-def _normalized_text(value: str) -> str:
-    normalized = unicodedata.normalize(
-        "NFKD", value.translate(_POLISH_ASCII_MAP).casefold()
-    )
-    return "".join(char for char in normalized if not unicodedata.combining(char))
-
-
-def _search_text(value: str) -> str:
-    stopwords = {
-        "a",
-        "jeszcze",
-        "miesiac",
-        "temu",
-        "mowilismy",
-        "ze",
-        "bedzie",
-    }
-    return " ".join(
-        token
-        for token in re.findall(r"[\w-]+", _normalized_text(value), flags=re.UNICODE)
-        if len(token) > 1 and token not in stopwords
-    )[:1000]

@@ -31,8 +31,15 @@ if TYPE_CHECKING:
 _STOPWORDS = {
     "a",
     "ale",
+    "bedzie",
     "co",
     "czy",
+    "cztery",
+    "dwa",
+    "dwie",
+    "dwanascie",
+    "dziesiec",
+    "dziewiec",
     "dni",
     "dnia",
     "dniach",
@@ -44,13 +51,21 @@ _STOPWORDS = {
     "godzinach",
     "i",
     "jak",
+    "jeden",
+    "jedna",
+    "jedenascie",
+    "jedno",
+    "jest",
     "jeszcze",
     "kilka",
     "kilku",
+    "lat",
+    "lata",
     "mi",
     "miesiac",
     "miesiaca",
     "miesiace",
+    "miesiacu",
     "miesiecy",
     "mowilismy",
     "na",
@@ -63,17 +78,29 @@ _STOPWORDS = {
     "ostatniego",
     "ostatnich",
     "ostatnim",
+    "osiem",
     "paru",
     "pare",
+    "piec",
+    "pol",
+    "poprzednim",
+    "poprzedniego",
     "przedwczoraj",
     "przypomnij",
     "rok",
     "roku",
+    "siedem",
+    "szesc",
+    "tamtym",
+    "tamtego",
     "temu",
+    "teraz",
+    "trzy",
     "tydzien",
     "tygodni",
     "tygodnia",
     "tygodnie",
+    "tygodniu",
     "w",
     "wczoraj",
     "z",
@@ -81,6 +108,28 @@ _STOPWORDS = {
     "zeszlym",
     "zeszlego",
 }
+
+_RELATIVE_COUNT_VALUES = {
+    "jeden": 1,
+    "jedna": 1,
+    "jedno": 1,
+    "dwa": 2,
+    "dwie": 2,
+    "trzy": 3,
+    "cztery": 4,
+    "piec": 5,
+    "szesc": 6,
+    "siedem": 7,
+    "osiem": 8,
+    "dziewiec": 9,
+    "dziesiec": 10,
+    "jedenascie": 11,
+    "dwanascie": 12,
+}
+_RELATIVE_COUNT_PATTERN = (
+    r"\d{1,3}|jeden|jedna|jedno|dwa|dwie|trzy|cztery|piec|szesc|"
+    r"siedem|osiem|dziewiec|dziesiec|jedenascie|dwanascie"
+)
 
 TimePrecision = Literal["exact", "approximate", "unknown"]
 TimeSource = Literal["none", "relative_text", "semantic_relation"]
@@ -122,7 +171,7 @@ def build_time_first_query(
     local_now = now or datetime.now().astimezone()
     if local_now.tzinfo is None or local_now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
-    normalized = _normalized_text(query)
+    normalized = normalize_context_text(query)
     start: datetime | None = None
     end: datetime | None = None
     precision: TimePrecision = "unknown"
@@ -155,12 +204,12 @@ def build_time_first_query(
         confidence = 0.95
     else:
         recent = re.search(
-            r"\b(?:ostatni(?:e|ch|ego|m|a)?)\s+(\d{1,3})\s+"
+            rf"\b(?:ostatni(?:e|ch|ego|m|a)?)\s+({_RELATIVE_COUNT_PATTERN})\s+"
             r"(godzin(?:y|ach)?|dni|dnia|dniach|tygodni(?:e|ach)?|miesiec(?:y|ach)?|miesiac(?:e|ach)?)\b",
             normalized,
         )
         if recent:
-            amount = max(1, min(int(recent.group(1)), 365))
+            amount = _relative_count(recent.group(1), maximum=365)
             unit = recent.group(2)
             if unit.startswith("godzin"):
                 delta = timedelta(hours=amount)
@@ -187,7 +236,7 @@ def build_time_first_query(
                 source = "relative_text"
     return TimeFirstQueryPlan(
         original_query=query,
-        search_text=_search_text(query),
+        search_text=build_context_search_text(query),
         start=start.astimezone(UTC) if start else None,
         end=end.astimezone(UTC) if end else None,
         used_time_filter=start is not None,
@@ -717,17 +766,25 @@ _POLISH_ASCII_MAP = str.maketrans(
 )
 
 
-def _normalized_text(value: str) -> str:
+def normalize_context_text(value: str) -> str:
+    """Normalize Polish text once for temporal parsing and lexical retrieval."""
+
     normalized = unicodedata.normalize(
         "NFKD", value.translate(_POLISH_ASCII_MAP).casefold()
     )
     return "".join(char for char in normalized if not unicodedata.combining(char))
 
 
-def _search_text(value: str) -> str:
+def build_context_search_text(value: str) -> str:
+    """Remove temporal scaffolding from the canonical bounded FTS query."""
+
     tokens = [
         token
-        for token in re.findall(r"[\w-]+", _normalized_text(value), flags=re.UNICODE)
+        for token in re.findall(
+            r"[\w-]+",
+            normalize_context_text(value),
+            flags=re.UNICODE,
+        )
         if len(token) > 1 and token not in _STOPWORDS and not token.isdigit()
     ]
     return " ".join(tokens[:12])
@@ -792,12 +849,14 @@ def _approximate_relative_window(
         )
 
     month_ago = re.search(
-        r"\b(?:(\d{1,2})\s+)?(?:miesiac(?:e|y)?|miesiec(?:y)?)\s+temu\b"
-        r"|\bw\s+(?:zeszlym|ostatnim|poprzednim)\s+miesiacu\b",
+        rf"\b(?:({_RELATIVE_COUNT_PATTERN})\s+)?"
+        r"(?:miesiac(?:a|e|u)?|miesiec(?:y)?)\s+temu\b"
+        r"|\b(?:w\s+)?(?:zeszlym|ostatnim|poprzednim|tamtym)\s+miesiacu\b"
+        r"|\b(?:w\s+)?(?:zeszlego|ostatniego|poprzedniego|tamtego)\s+miesiaca\b",
         normalized,
     )
     if month_ago:
-        count = max(1, min(int(month_ago.group(1) or 1), 12))
+        count = _relative_count(month_ago.group(1), maximum=12)
         center_days = 30 * count
         half_window = 7 * count
         start = local_now - timedelta(days=center_days + half_window)
@@ -810,12 +869,14 @@ def _approximate_relative_window(
         return start, end, relation, 0.65, preferred_axes
 
     week_ago = re.search(
-        r"\b(?:(\d{1,2})\s+)?(?:tydzien|tygodni(?:e)?)\s+temu\b"
-        r"|\bw\s+(?:zeszlym|ostatnim|poprzednim)\s+tygodniu\b",
+        rf"\b(?:({_RELATIVE_COUNT_PATTERN})\s+)?"
+        r"(?:tydzien|tygodni(?:a|e|u)?)\s+temu\b"
+        r"|\b(?:w\s+)?(?:zeszlym|ostatnim|poprzednim|tamtym)\s+tygodniu\b"
+        r"|\b(?:w\s+)?(?:zeszlego|ostatniego|poprzedniego|tamtego)\s+tygodnia\b",
         normalized,
     )
     if week_ago:
-        count = max(1, min(int(week_ago.group(1) or 1), 52))
+        count = _relative_count(week_ago.group(1), maximum=52)
         center_days = 7 * count
         half_window = max(2, 2 * count)
         start = local_now - timedelta(days=center_days + half_window)
@@ -827,6 +888,39 @@ def _approximate_relative_window(
         )
         return start, end, relation, 0.7, preferred_axes
 
+    if re.search(r"\bpol\s+roku\s+temu\b", normalized):
+        center_days = 182
+        half_window = 30
+        return (
+            local_now - timedelta(days=center_days + half_window),
+            local_now - timedelta(days=center_days - half_window),
+            "approximately_half_year_before_observation",
+            0.5,
+            preferred_axes,
+        )
+
+    year_ago = re.search(
+        rf"\b(?:({_RELATIVE_COUNT_PATTERN})\s+)?(?:rok|roku|lata|lat)\s+temu\b"
+        r"|\b(?:w\s+)?(?:zeszlym|ostatnim|poprzednim|tamtym)\s+roku\b",
+        normalized,
+    )
+    if year_ago:
+        count = _relative_count(year_ago.group(1), maximum=10)
+        center_days = 365 * count
+        half_window = 30 * count
+        relation = (
+            "approximately_one_year_before_observation"
+            if count == 1
+            else f"approximately_{count}_years_before_observation"
+        )
+        return (
+            local_now - timedelta(days=center_days + half_window),
+            local_now - timedelta(days=center_days - half_window),
+            relation,
+            0.5,
+            preferred_axes,
+        )
+
     return None
 
 
@@ -837,7 +931,7 @@ def _has_epistemic_marker(normalized: str) -> bool:
 
 
 def _reserve_axes_for(query: str) -> tuple[str, ...]:
-    normalized = _normalized_text(query)
+    normalized = normalize_context_text(query)
     axes: list[str] = []
     markers = (
         ("decision", ("ustal", "decyz", "zdecyd", "postanow")),
@@ -849,6 +943,13 @@ def _reserve_axes_for(query: str) -> tuple[str, ...]:
         if any(value in normalized for value in values):
             axes.append(axis)
     return tuple(axes)
+
+
+def _relative_count(value: str | None, *, maximum: int) -> int:
+    if value is None:
+        return 1
+    amount = int(value) if value.isdigit() else _RELATIVE_COUNT_VALUES[value]
+    return max(1, min(amount, maximum))
 
 
 def _range_matches(start: datetime, end: datetime, plan: TimeFirstQueryPlan) -> bool:

@@ -13,7 +13,9 @@ from .retrieval import (
     TimeFirstRetriever,
     TimePrecision,
     TimeSource,
+    build_context_search_text,
     build_time_first_query,
+    normalize_context_text,
 )
 from .schema import (
     ContextEpisodeV1,
@@ -59,10 +61,12 @@ __all__ = [
     "TimeSource",
     "activity_bucket",
     "analyze_temporal_statement_shadow",
+    "build_context_search_text",
     "build_temporal_shadow_context",
     "build_time_first_query",
     "comparative_shadow_question",
     "content_hash_for",
+    "normalize_context_text",
     "shadow_relevance_gate",
     "stable_context_id",
     "stable_episode_id",

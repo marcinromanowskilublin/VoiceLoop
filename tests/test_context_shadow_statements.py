@@ -3,7 +3,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from voiceloop.context.retrieval import build_time_first_query
+from voiceloop.context.retrieval import (
+    build_context_search_text,
+    build_time_first_query,
+)
 from voiceloop.context.shadow_statements import (
     AtomicClaimProposal,
     analyze_temporal_statement_shadow,
@@ -69,6 +72,48 @@ NOW = datetime(2026, 10, 11, 12, tzinfo=UTC)
             35,
             0.55,
         ),
+        (
+            "Co ustaliliśmy dwa tygodnie temu?",
+            "approximately_2_weeks_before_observation",
+            10,
+            18,
+            0.7,
+        ),
+        (
+            "Co było w tamtym tygodniu?",
+            "approximately_one_week_before_observation",
+            5,
+            9,
+            0.7,
+        ),
+        (
+            "Co planowaliśmy około miesiąca temu?",
+            "approximately_one_month_before_observation",
+            23,
+            37,
+            0.65,
+        ),
+        (
+            "Co planowaliśmy pół roku temu?",
+            "approximately_half_year_before_observation",
+            152,
+            212,
+            0.5,
+        ),
+        (
+            "Co było w tamtym roku?",
+            "approximately_one_year_before_observation",
+            335,
+            395,
+            0.5,
+        ),
+        (
+            "Co planowaliśmy dwa lata temu?",
+            "approximately_2_years_before_observation",
+            670,
+            790,
+            0.5,
+        ),
     ],
 )
 def test_build_time_first_query_recognizes_approximate_intervals(
@@ -89,6 +134,32 @@ def test_build_time_first_query_recognizes_approximate_intervals(
     assert plan.end == NOW - timedelta(days=min_days)
 
 
+@pytest.mark.parametrize(
+    ("query", "relation", "delta", "precision"),
+    [
+        ("Podsumuj ostatnie dwie godziny", "last_2_hours", timedelta(hours=2), "exact"),
+        (
+            "Podsumuj ostatnie trzy miesiące",
+            "last_3_months",
+            timedelta(days=90),
+            "approximate",
+        ),
+    ],
+)
+def test_build_time_first_query_accepts_word_counts_for_recent_windows(
+    query: str,
+    relation: str,
+    delta: timedelta,
+    precision: str,
+) -> None:
+    plan = build_time_first_query(query, now=NOW)
+
+    assert plan.start == NOW - delta
+    assert plan.end == NOW
+    assert plan.time_relation == relation
+    assert plan.time_precision == precision
+
+
 def test_temporal_shadow_context_shares_plan_with_time_first_query() -> None:
     direct_plan = build_time_first_query(TEXT, now=NOW)
     shadow_plan, statement = build_temporal_shadow_context(
@@ -101,12 +172,29 @@ def test_temporal_shadow_context_shares_plan_with_time_first_query() -> None:
     assert shadow_plan.used_time_filter is True
     assert shadow_plan.start == direct_plan.start
     assert shadow_plan.end == direct_plan.end
+    assert shadow_plan.search_text == direct_plan.search_text
     assert shadow_plan.time_precision == "approximate"
     assert shadow_plan.time_relation == direct_plan.time_relation
     assert shadow_plan.preferred_axes == ("semantic", "topic")
     assert direct_plan.preferred_axes == ("semantic", "topic")
     assert statement.utterance_time.start == direct_plan.start
     assert statement.utterance_time.end == direct_plan.end
+
+
+def test_shadow_query_plan_reuses_canonical_search_text() -> None:
+    text = "W zeszłym tygodniu uważaliśmy, że projekt wymaga rewizji."
+    direct_plan = build_time_first_query(text, now=NOW)
+    shadow_plan, statement = build_temporal_shadow_context(
+        text,
+        request_id="req-search-text",
+        now=NOW,
+    )
+
+    assert statement is not None
+    assert shadow_plan.search_text == direct_plan.search_text
+    assert shadow_plan.search_text == build_context_search_text(text)
+    assert "zeszlym" not in shadow_plan.search_text
+    assert "tygodniu" not in shadow_plan.search_text
 
 
 def test_compound_temporal_statement_supports_opinion_and_week_window() -> None:
