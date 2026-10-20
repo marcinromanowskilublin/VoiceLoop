@@ -48,7 +48,7 @@ Obsługiwane polskie formy obejmują:
 - liczbę cyfrą lub słowem, np. `2 miesiące temu`, `dwa tygodnie temu` i
   `dwa lata temu`;
 - warianty `w zeszłym`, `ostatnim`, `poprzednim` lub `tamtym`
-  tygodniu, miesiącu i roku oraz odpowiadające formy dopełniacza;
+  tygodniu, miesiącu i roku oraz formy dopełniacza tygodnia i miesiąca;
 - `około miesiąca temu` i `pół roku temu`.
 
 Formy przybliżone tworzą skończony przedział `start`–`end`, precyzję
