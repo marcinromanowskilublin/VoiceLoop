@@ -96,6 +96,7 @@ def _assistant(
     vector_context_limit: int = 0,
     context_cascade_shadow_enabled: bool = False,
     context_cascade_shadow_qmax: int = 5,
+    context_cascade_shadow_timeout_seconds: float = 5.0,
     dual_track_runner=None,
 ) -> AssistantService:
     return AssistantService(
@@ -115,6 +116,9 @@ def _assistant(
         routing_v2=routing_v2,
         context_cascade_shadow_enabled=context_cascade_shadow_enabled,
         context_cascade_shadow_qmax=context_cascade_shadow_qmax,
+        context_cascade_shadow_timeout_seconds=(
+            context_cascade_shadow_timeout_seconds
+        ),
         dual_track_runner=dual_track_runner,
     )
 
@@ -419,6 +423,7 @@ def test_dual_track_schedules_approximate_temporal_statement(tmp_path) -> None:
             n8n=N8nStub(),
             executor=ExecutorStub(memory),
             tts=TTSStub(),
+            context_cascade_shadow_enabled=True,
             dual_track_runner=runner,
         )
         request = CommandRequest(
@@ -439,6 +444,107 @@ def test_dual_track_schedules_approximate_temporal_statement(tmp_path) -> None:
         assert plan.time_precision == "approximate"
         assert statement is not None
         assert statement.epistemic_role == "prediction"
+        assert call["persist_statement"] is True
+        await assistant.close()
+
+    asyncio.run(scenario())
+
+
+def test_available_cascade_owns_single_temporal_role_write(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    class EmbeddingsStub:
+        enabled = True
+
+        def accepts_private_text(self) -> bool:
+            return True
+
+        async def embed_queries(self, documents):
+            return [[1.0, float(index)] for index, _ in enumerate(documents)]
+
+    class BlockingQdrantStub:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        def accepts_private_data(self) -> bool:
+            return True
+
+        async def search(self, **_kwargs):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.cancelled.set()
+
+    class TraceStub:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return {
+                "trace_id": "2" * 24,
+                "verdict": "uncertain",
+                "reason": "timeout",
+            }
+
+    class DualTrackStub:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def run(self, text, **kwargs):
+            self.calls.append({"text": text, **kwargs})
+            return SimpleNamespace(trace=TraceStub())
+
+    async def scenario() -> None:
+        memory = MemoryStore(tmp_path / "voice.db")
+        await memory.initialize()
+        save_calls: list[str] = []
+        original_save = memory.save_context_cascade_shadow_temporal_roles
+
+        async def counted_save(statement) -> None:
+            save_calls.append(statement.provenance_request_id)
+            await original_save(statement)
+
+        monkeypatch.setattr(
+            memory,
+            "save_context_cascade_shadow_temporal_roles",
+            counted_save,
+        )
+        qdrant = BlockingQdrantStub()
+        runner = DualTrackStub()
+        assistant = _assistant(
+            memory,
+            router=RouterStub(),
+            n8n=N8nStub(),
+            executor=ExecutorStub(memory),
+            tts=TTSStub(),
+            embeddings=EmbeddingsStub(),
+            qdrant=qdrant,
+            context_cascade_shadow_enabled=True,
+            context_cascade_shadow_timeout_seconds=0.1,
+            dual_track_runner=runner,
+        )
+        request = CommandRequest(
+            request_id="single-owner",
+            text="Miesiąc temu mówiliśmy, że będzie wspaniale.",
+        )
+
+        await assistant.handle(request)
+        if assistant._background_tasks:
+            await asyncio.gather(*tuple(assistant._background_tasks))
+
+        assert qdrant.started.is_set()
+        assert qdrant.cancelled.is_set()
+        assert save_calls == [request.request_id]
+        assert len(runner.calls) == 1
+        assert runner.calls[0]["persist_statement"] is False
+        with memory._connect() as connection:
+            telemetry_count = connection.execute(
+                "SELECT COUNT(*) FROM context_cascade_shadow_telemetry"
+            ).fetchone()[0]
+        assert telemetry_count == 1
         await assistant.close()
 
     asyncio.run(scenario())

@@ -178,6 +178,7 @@ class DualTrackRunner:
         now: datetime | None = None,
         limit: int = 8,
         persist: bool = True,
+        persist_statement: bool = True,
         query_plan: TimeFirstQueryPlan | None = None,
         statement: TemporalStatementShadowV1 | None = None,
     ) -> DualTrackRun:
@@ -215,7 +216,12 @@ class DualTrackRunner:
                 plan=plan,
                 statement=statement,
             )
-            await self._persist(trace, statement=statement, enabled=persist)
+            await self._persist(
+                trace,
+                statement=statement,
+                enabled=persist,
+                persist_statement=persist_statement,
+            )
             return DualTrackRun(empty, empty, trace, statement=statement)
         if not await self._try_enter():
             trace = self._trace(
@@ -241,7 +247,12 @@ class DualTrackRunner:
                 plan=plan,
                 statement=statement,
             )
-            await self._persist(trace, statement=statement, enabled=persist)
+            await self._persist(
+                trace,
+                statement=statement,
+                enabled=persist,
+                persist_statement=persist_statement,
+            )
             return DualTrackRun(empty, empty, trace, statement=statement)
 
         preferred_axes = (
@@ -342,7 +353,12 @@ class DualTrackRunner:
             statement=statement,
             error_type=error_type,
         )
-        await self._persist(trace, statement=statement, enabled=persist)
+        await self._persist(
+            trace,
+            statement=statement,
+            enabled=persist,
+            persist_statement=persist_statement,
+        )
         return DualTrackRun(baseline, cascade, trace, statement=statement)
 
     async def _try_enter(self) -> bool:
@@ -362,10 +378,11 @@ class DualTrackRunner:
         *,
         statement: TemporalStatementShadowV1 | None = None,
         enabled: bool,
+        persist_statement: bool,
     ) -> None:
         if enabled:
             await self.memory.save_context_dual_track_trace(trace)
-            if statement is not None:
+            if persist_statement and statement is not None:
                 await self.memory.save_context_cascade_shadow_temporal_roles(
                     statement
                 )

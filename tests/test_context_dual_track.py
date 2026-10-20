@@ -330,6 +330,32 @@ async def test_dual_track_handles_approximate_epistemic_statement_and_persists_r
 
 
 @pytest.mark.asyncio
+async def test_dual_track_can_delegate_temporal_role_persistence(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    runner = DualTrackRunner(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=QdrantStub([]),  # type: ignore[arg-type]
+    )
+
+    result = await runner.run(
+        "Miesiąc temu mówiliśmy, że będzie wspaniale.",
+        request_id="delegated-statement",
+        now=DAY,
+        persist_statement=False,
+    )
+
+    assert result.statement is not None
+    assert len(await store.list_context_dual_track_traces()) == 1
+    with store._connect() as connection:
+        telemetry_count = connection.execute(
+            "SELECT COUNT(*) FROM context_cascade_shadow_telemetry"
+        ).fetchone()[0]
+    assert telemetry_count == 0
+
+
+@pytest.mark.asyncio
 async def test_dual_track_enforces_concurrency_limit(tmp_path) -> None:
     store, hits = await seeded_store(tmp_path)
     started = asyncio.Event()

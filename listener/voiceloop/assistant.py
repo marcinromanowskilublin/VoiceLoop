@@ -1264,17 +1264,20 @@ class AssistantService:
         self._recent_action_summaries.append(summary)
         self._recent_action_summaries = self._recent_action_summaries[-8:]
 
+    def _context_cascade_shadow_available(self, text: str) -> bool:
+        return bool(
+            self.context_cascade_shadow_enabled
+            and text.strip()
+            and self.embeddings is not None
+            and self.qdrant is not None
+        )
+
     def _schedule_context_cascade_shadow(
         self,
         request: CommandRequest,
         text: str,
     ) -> None:
-        if (
-            not self.context_cascade_shadow_enabled
-            or not text.strip()
-            or self.embeddings is None
-            or self.qdrant is None
-        ):
+        if not self._context_cascade_shadow_available(text):
             return
         try:
             from .context.shadow_statements import (
@@ -1361,6 +1364,10 @@ class AssistantService:
                 kwargs["query_plan"] = plan
             if statement is not None:
                 kwargs["statement"] = statement
+            kwargs["persist_statement"] = not (
+                statement is not None
+                and self._context_cascade_shadow_available(text)
+            )
             result = await runner.run(text, **kwargs)
             await self.events.publish(
                 "context.retrieval_dual_track",
@@ -1396,6 +1403,8 @@ class AssistantService:
             ),
         )
         try:
+            if statement is not None:
+                await self.memory.save_context_cascade_shadow_temporal_roles(statement)
             pack = await asyncio.wait_for(
                 retriever.retrieve(
                     text,
@@ -1405,8 +1414,6 @@ class AssistantService:
                 ),
                 timeout=self.context_cascade_shadow_timeout_seconds,
             )
-            if statement is not None:
-                await self.memory.save_context_cascade_shadow_temporal_roles(statement)
             trace = retriever.last_trace
             payload: dict[str, object] = {
                 "schema_version": "context-cascade-shadow-v1",
