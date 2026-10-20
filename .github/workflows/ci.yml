@@ -44,9 +44,55 @@ jobs:
           ../scripts/voice_capture_server.py
           ../scripts/holding-commands/server.py
           ../scripts/calibration-phrases/server.py
+          ../scripts/run_context_evidence_demo.py
 
       - name: Dependency audit
         run: python -m pip_audit -r requirements.lock
 
       - name: Pytest
         run: python -m pytest -c pyproject.toml -q
+
+  portfolio-evidence:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: listener
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: listener/requirements.lock
+
+      - name: Install Linux-compatible runtime
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          awk '!/^(pywin32|pywinauto|comtypes)==/' requirements.lock \
+            > "$RUNNER_TEMP/requirements-linux.lock"
+          python -m pip install -r "$RUNNER_TEMP/requirements-linux.lock"
+
+      - name: Run public context evidence
+        run: >-
+          python ../scripts/run_context_evidence_demo.py
+          --output ../artifacts/context-evidence-demo
+          --revision "${{ github.sha }}"
+
+      - name: Publish evidence summary
+        shell: bash
+        run: cat ../artifacts/context-evidence-demo/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload context evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: context-evidence-${{ github.sha }}
+          path: artifacts/context-evidence-demo
+          if-no-files-found: error
+          retention-days: 14

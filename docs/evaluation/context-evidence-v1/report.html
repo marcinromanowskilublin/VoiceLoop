@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoiceLoop context evidence v1</title>
+  <style>
+    :root { color-scheme: dark; --bg: #08111f; --panel: #111c2f;
+      --line: #334155; --text: #f8fafc; --muted: #94a3b8;
+      --green: #6ee7b7; --blue: #7dd3fc; --amber: #fcd34d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(circle at 10% 0, #12304a, var(--bg) 38%);
+      color: var(--text); font: 16px/1.5 Inter, Segoe UI, sans-serif; }
+    main { max-width: 1120px; margin: 0 auto; padding: 48px 28px 80px; }
+    h1 { max-width: 720px; margin: 10px 0; font-size: 46px; line-height: 1.05; }
+    h2 { margin-top: 38px; } p { color: #cbd5e1; }
+    .eyebrow { color: var(--green); font-weight: 800; letter-spacing: .09em; }
+    .lede { max-width: 820px; color: var(--muted); }
+    .cards, .scenarios { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .card, .scenario { padding: 18px; border: 1px solid var(--line);
+      border-radius: 18px; background: rgba(17, 28, 47, .9); }
+    .card span, .scenario span { display: block; color: var(--muted);
+      font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .card strong, .scenario strong { display: block; margin-top: 7px;
+      color: var(--blue); font-size: 22px; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden;
+      border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: right; }
+    th:first-child, td:first-child { text-align: left; } th { color: var(--muted); }
+    .boundary { border-left: 4px solid var(--amber); }
+    code { color: var(--green); } .truth { color: var(--green); }
+    @media (max-width: 760px) {
+      h1 { font-size: 34px; } .cards, .scenarios { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">PUBLIC SYNTHETIC EVIDENCE · NO NETWORK</div>
+  <h1>Context retrieval you can reproduce locally.</h1>
+  <p class="lede">A deterministic run over real SQLite and the Qdrant local
+    engine. It exercises ingest, provenance checks, RRF5, cascade 2+2+1,
+    abstention, conflict handling and the local action policy.</p>
+  <section class="cards">
+    <div class="card"><span>Canonical store</span><strong>SQLite</strong></div>
+    <div class="card"><span>Derived index</span>
+      <strong>5 points</strong></div>
+    <div class="card"><span>Second index</span><strong>idempotent</strong></div>
+    <div class="card"><span>Serving promotion</span><strong>false</strong></div>
+  </section>
+  <h2>Retrieval comparison</h2>
+  <table>
+    <thead><tr><th>Track</th><th>Recall@3</th><th>MRR</th>
+      <th>Negative abstention</th><th>Smoke P50 ms</th>
+      <th>Smoke P95 ms</th></tr></thead>
+    <tbody><tr><td>FTS only</td><td>1.000</td><td>1.000</td><td>1.000</td><td>1.511</td><td>1.877</td></tr><tr><td>RRF5</td><td>0.750</td><td>0.500</td><td>1.000</td><td>9.728</td><td>10.883</td></tr><tr><td>Cascade 2+2+1</td><td>1.000</td><td>0.833</td><td>1.000</td><td>10.176</td><td>14.271</td></tr></tbody>
+  </table>
+  <h2>Observable outcomes</h2>
+  <section class="scenarios"><article class="scenario"><span>agreement</span><strong>agreement</strong><p>record agreement; no serving switch</p></article><article class="scenario"><span>conflict</span><strong>conflict</strong><p>record conflict for human review</p></article><article class="scenario"><span>abstention</span><strong>uncertain</strong><p>return no bounded evidence</p></article><article class="scenario"><span>unbounded</span><strong>uncertain</strong><p>reject unbounded dual-track measurement</p></article></section>
+  <h2>Action boundary</h2>
+  <article class="card boundary">
+    <span>Policy result</span>
+    <strong><code>remember</code> requires confirmation</strong>
+    <p>Risk: <code>low</code> to <code>medium</code>.
+      Executor: <code>awaiting_confirmation</code>.
+      Handler calls: <b class="truth">0</b>.</p>
+  </article>
+  <p class="lede">Synthetic lexical embeddings make this run repeatable; they
+    are not evidence of private-data quality or target-hardware latency.
+    Source revision: <code>372b642</code>.</p>
+</main></body>
+</html>

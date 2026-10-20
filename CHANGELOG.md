@@ -20,6 +20,11 @@ All notable public changes to VoiceLoop are documented here.
   arbiter, expiring content-free traces and a token-protected read-only panel.
 - Forty-example synthetic dual-track gold set and a real CLI report that
   executes both vector tracks while keeping promotion disabled.
+- Reproducible public evidence command using real SQLite and the Qdrant local
+  engine, with FTS/RRF5/2+2+1 metrics, explicit failure analysis, observable
+  safety scenarios and a confirmation-only action-policy check.
+- CI-generated JSON, Markdown and HTML evidence artifacts plus a portfolio case
+  study and release checklist.
 
 ### Fixed
 

@@ -4,6 +4,8 @@ import runpy
 import xml.etree.ElementTree as ET
 from pathlib import Path, PureWindowsPath
 
+from PIL import Image
+
 from voiceloop.models import CommandRequest, CommandSource
 from voiceloop.router import deterministic_plan
 
@@ -101,6 +103,40 @@ def test_updated_documentation_has_no_missing_local_links() -> None:
             assert (document.parent / target).resolve().exists(), (
                 f"{document.relative_to(ROOT)} -> {raw_target}"
             )
+
+
+def test_public_context_evidence_is_committed_and_ci_generated() -> None:
+    evidence = ROOT / "docs" / "evaluation" / "context-evidence-v1"
+    report = json.loads((evidence / "report.json").read_text(encoding="utf-8"))
+    markdown = (evidence / "report.md").read_text(encoding="utf-8")
+    html = (evidence / "report.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert report["source_revision"] == "372b642"
+    assert report["network_used"] is False
+    assert report["storage"]["canonical"] == "SQLite"
+    assert report["storage"]["derived_index"] == "Qdrant local mode"
+    assert report["ingest"]["idempotent"] is True
+    assert report["evaluation"]["promotion_allowed"] is False
+    assert {item["name"] for item in report["scenarios"]} == {
+        "agreement",
+        "conflict",
+        "abstention",
+        "unbounded",
+    }
+    assert "**rrf5:**" in markdown.casefold()
+    assert "topic:miss" in markdown.casefold()
+    assert "PUBLIC SYNTHETIC EVIDENCE" in html
+    assert "scripts\\run_context_evidence_demo.py" in readme
+    assert "docs/evaluation/context-evidence-v1/report.md" in readme
+    assert "run_context_evidence_demo.py" in workflow
+    assert "actions/upload-artifact@v6" in workflow
+
+    with Image.open(ROOT / "docs" / "img" / "voiceloop-context-evidence.png") as image:
+        assert image.size == (1440, 1200)
 
 
 def test_legacy_deepgram_entrypoints_are_retired() -> None:

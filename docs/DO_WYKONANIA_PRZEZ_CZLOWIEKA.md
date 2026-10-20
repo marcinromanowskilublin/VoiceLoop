@@ -45,6 +45,10 @@ docelowego komputera.
 - [ ] Zweryfikować z czytnikiem ekranu sens alt textów i kolejność nagłówków.
 - [ ] Zdecydować, czy publicznie pokazywać zrzut panelu obok diagramów
   architektury; kod nie rozstrzyga tej decyzji komunikacyjnej.
+- [ ] Przejrzeć publiczny raport `context-evidence-v1` i potwierdzić, że
+  syntetycznych liczb nie przedstawiamy jako jakości danych prywatnych.
+- [ ] Po scaleniu wybrać numer wersji, utworzyć tag i opublikować GitHub Release;
+  CI przygotowuje artefakt, ale nie publikuje wydania automatycznie.
 
 ## Dziennik etapów
 
@@ -57,4 +61,5 @@ docelowego komputera.
 | 4. Demonstrator read-only | zakończony | Chronione tokenem endpointy `GET` pokazują wyłącznie pokrycie indeksu, agregaty i content-free trace’y. Panel nie ma przycisku uruchamiającego pomiar, indeksowanie, zmianę flag ani akcję. | Operator powinien potwierdzić, że widok jest zrozumiały i nie sugeruje awansu prototypu do live recall. |
 | 5. Weryfikacja końcowa | zakończony | Pełny Linux suite: 1030 zaliczonych, 3 pominięte; Ruff czysty; pełny przypięty lock i lokalny venv bez znanych podatności. Niezależny review nie znalazł P0, a wskazane P1 naprawiono i objęto regresjami. | Nadal potrzebne są prywatne etykiety, pomiar na docelowym Windows oraz jawna decyzja operatora o uruchomieniu shadow. |
 | 6. README i diagramy | zakończony | Repo przedstawia VoiceLoop jako local-first context layer; głos jest jednym z adapterów; trzy SVG opisują prawdziwe granice dual-track i czasu. | Wykonać ręczny przegląd renderowania, dostępności i publicznych sformułowań powyżej. |
-| 7. Przybliżony czas i ownership telemetrii | zakończony | Wspólny parser buduje bounded plan i jeden `search_text` dla polskich form względnych. Cascade zapisuje role przed retrieval i przekazuje ownership zamiast dublować zapis dual-track; standalone runner nadal zapisuje je domyślnie. Summary agreguje precyzję czasu, bramkę relewancji i rolę epistemiczną bez treści. | Na prywatnych przykładach zatwierdzić szerokości przybliżonych okien, progi pewności i znaczenie nowych rozkładów; kod ich nie promuje automatycznie. |
+| 7. Publiczny pakiet dowodów | zakończony | Jedna komenda uruchamia bez sieci realny SQLite i silnik Qdrant local, indeksuje dane idempotentnie, mierzy FTS/RRF5/2+2+1, pokazuje agreement/conflict/abstention/unbounded, a prawdziwy `CommandExecutor.submit()` zapisuje `awaiting_confirmation` bez wywołania instrumentowanego handlera. CI publikuje JSON, Markdown i HTML jako artefakt. | Traktować pięć pomiarów czasu tylko jako smoke-run, zebrać liczby na docelowym Windows, nagrać narrację demonstratora i dopiero po scaleniu opublikować wybrany release/tag. |
+| 8. Przybliżony czas i ownership telemetrii | zakończony | Wspólny parser buduje bounded plan i jeden `search_text` dla polskich form względnych. Cascade zapisuje role przed retrieval i przekazuje ownership zamiast dublować zapis dual-track; standalone runner nadal zapisuje je domyślnie. Summary agreguje precyzję czasu, bramkę relewancji i rolę epistemiczną bez treści. | Na prywatnych przykładach zatwierdzić szerokości przybliżonych okien, progi pewności i znaczenie nowych rozkładów; kod ich nie promuje automatycznie. |
