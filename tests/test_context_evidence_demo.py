@@ -23,6 +23,7 @@ async def test_public_context_evidence_runs_real_sqlite_and_qdrant(
     report = await build_context_evidence_demo(
         output_dir=output,
         revision="test-revision",
+        work_dir=tmp_path / "runtime",
     )
 
     assert report["source_revision"] == "test-revision"

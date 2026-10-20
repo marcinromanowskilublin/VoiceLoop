@@ -9,6 +9,7 @@ import tempfile
 import time
 import unicodedata
 import warnings
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -87,12 +88,23 @@ async def build_context_evidence_demo(
     *,
     output_dir: Path,
     revision: str,
+    work_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run a no-network SQLite + local-Qdrant evidence scenario."""
 
     resolved_output = output_dir.resolve()
     resolved_output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="voiceloop-evidence-") as raw_workdir:
+    if work_dir is not None:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    work_context = (
+        nullcontext(str(work_dir.resolve()))
+        if work_dir is not None
+        else tempfile.TemporaryDirectory(
+            prefix="voiceloop-evidence-",
+            ignore_cleanup_errors=True,
+        )
+    )
+    with work_context as raw_workdir:
         workdir = Path(raw_workdir)
         settings = Settings(
             voiceloop_data_dir=str(workdir / "data"),
