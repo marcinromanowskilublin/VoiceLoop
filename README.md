@@ -60,6 +60,32 @@ VoiceLoop remains a Windows-first engineering project with opt-in integrations.
 The committed synthetic evaluation set verifies contracts, not private-data
 quality, production readiness or 100% retrieval accuracy.
 
+## Reproduce the evidence
+
+![Public synthetic VoiceLoop evidence report showing SQLite and Qdrant ingest, FTS/RRF5/2+2+1 metrics, agreement, conflict, abstention and a confirmation-only action boundary](docs/img/voiceloop-context-evidence.png)
+
+One command runs a no-network scenario over real SQLite and the local engine
+shipped by `qdrant-client`:
+
+```powershell
+cd listener
+.\.venv\Scripts\python.exe ..\scripts\run_context_evidence_demo.py `
+  --output ..\artifacts\context-evidence-demo
+```
+
+It writes JSON, Markdown and standalone HTML. The fixture demonstrates
+idempotent indexing, SQL-verified retrieval, agreement, conflict, bounded
+abstention, unbounded rejection and an action stopped at confirmation. It also
+keeps a real RRF5 miss in the failure analysis.
+
+- [Committed evaluation card](docs/evaluation/context-evidence-v1/report.md)
+- [Case study and interpretation](docs/PORTFOLIO_CASE_STUDY.md)
+- [Evidence-pack release notes](docs/CONTEXT_EVIDENCE_RELEASE_V1.md)
+
+CI regenerates the evidence after the Windows quality job and uploads
+`context-evidence-<sha>`. Synthetic lexical embeddings make the run
+reproducible; they are not a model benchmark or a private quality gate.
+
 ## Windows-first, software-agnostic
 
 VoiceLoop is designed first for Windows and works across the software already

@@ -14,6 +14,8 @@ like current runtime behavior.
   planned components mapped to code.
 - [Architecture invariants](ARCHITECTURE_INVARIANTS.md) — safety boundaries
   enforced by tests.
+- [Portfolio case study](PORTFOLIO_CASE_STUDY.md) — problem, product
+  hypothesis, reproducible evidence, interpretation and human/AI roles.
 
 ## Context, memory and evaluation
 
@@ -28,6 +30,10 @@ like current runtime behavior.
   deterministic arbiter, content-free traces and read-only demonstrator.
 - [Manual human contribution](DO_WYKONANIA_PRZEZ_CZLOWIEKA.md) — decisions,
   private labeling and operator steps that cannot be completed by code.
+- [Context Evidence Pack V1](CONTEXT_EVIDENCE_RELEASE_V1.md) — reproduction,
+  included artifacts, known failure and release checklist.
+- [Committed evaluation card](evaluation/context-evidence-v1/report.md) —
+  FTS/RRF5/2+2+1 metrics, observable outcomes and limitations.
 - [Memory-axis navigation design](VECTOR_NAVIGATION_DESIGN.md) — agreed direction
   for a larger set of specialized axes, evidence requirements and stopping
   rules; separates future design from current code and human labeling duties.
@@ -48,6 +54,8 @@ These contracts exist in code but do not grant execution authority.
 
 ## Visual reference
 
+- [Public context evidence screenshot](img/voiceloop-context-evidence.png) —
+  the committed deterministic SQLite/Qdrant integration report.
 - [Local context dual-track flow](img/voiceloop-dual-track-flow.svg) — local
   adapters, canonical SQL time, parallel retrieval and shadow evidence.
 - [Arbiter outcomes](img/voiceloop-arbiter-outcomes.svg) — deterministic
