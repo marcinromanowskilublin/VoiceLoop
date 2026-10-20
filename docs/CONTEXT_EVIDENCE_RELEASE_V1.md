@@ -44,4 +44,3 @@ lexical fixture, FTS is the fastest and strongest baseline.
 After merge, a person must choose the repository version, review the CI
 artifact, create the Git tag and GitHub Release, and attach or link the
 evidence artifact. Automated publication is intentionally absent.
-

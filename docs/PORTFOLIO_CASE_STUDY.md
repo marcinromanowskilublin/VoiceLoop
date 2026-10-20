@@ -129,4 +129,3 @@ Publishing a version still requires a person to:
 4. attach or link the evidence artifact;
 5. keep the private quality gate and target-machine results clearly separate
    from this synthetic reference.
-
