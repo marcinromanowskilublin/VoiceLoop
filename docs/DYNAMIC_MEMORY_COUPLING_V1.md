@@ -1,9 +1,9 @@
 # Dynamic Memory Coupling V1 — plan inżynierski i stan wdrożenia
 
 **Status:** fundament techniczny wdrożony w trybie shadow; brak przełączenia
-odpowiedzi live.  
+odpowiedzi live.
 **Zakres:** SQLite/FTS, izolowany indeks epizodów Qdrant, wersjonowanie indeksu,
-adaptacyjna polityka wyszukiwania, ewaluacja i bezpieczny rollout.  
+adaptacyjna polityka wyszukiwania, ewaluacja i bezpieczny rollout.
 **Niezmienna granica:** pamięć pozostaje kontekstem. Nie tworzy `action_id`,
 nie obniża ryzyka i nie zastępuje potwierdzenia.
 
