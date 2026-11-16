@@ -74,6 +74,8 @@ class ContextIndexJobV1(BaseModel):
     schema_version: Literal[1] = 1
     job_id: str = Field(min_length=24, max_length=64)
     episode_id: str = Field(min_length=1, max_length=120)
+    source: str = Field(min_length=1, max_length=80)
+    source_id: str = Field(min_length=1, max_length=240)
     operation: ContextIndexOperation
     desired_revision: str = Field(min_length=1, max_length=64)
     status: ContextIndexStatus

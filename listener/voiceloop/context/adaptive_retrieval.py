@@ -39,6 +39,7 @@ class AdaptiveRetrievalTraceV1(BaseModel):
     fts_weight: float = Field(ge=0.0, le=1.0)
     vector_weight: float = Field(ge=0.0, le=1.0)
     exact_count: int = Field(ge=0)
+    vector_attempted: bool
     vector_count: int = Field(ge=0)
     result_count: int = Field(ge=0)
     axes_attempted: tuple[str, ...] = ()
@@ -107,6 +108,7 @@ class AdaptiveHybridRetriever:
 
         vector_pack = ContextPackV1(question=query, session_id=session_id)
         vector_trace = CascadeTrace(stop_reason="not_needed")
+        vector_attempted = False
         if policy.strategy == "exact_only":
             stop_reason = "policy_exact_only"
         elif policy.require_time_bound and not plan.used_time_filter:
@@ -116,6 +118,7 @@ class AdaptiveHybridRetriever:
         ):
             stop_reason = "exact_evidence_sufficient"
         else:
+            vector_attempted = True
             vector_retriever = TimeFirstRetriever(
                 memory=self.memory,
                 embeddings=self.embeddings,
@@ -160,6 +163,7 @@ class AdaptiveHybridRetriever:
             fts_weight=policy.fts_weight,
             vector_weight=policy.vector_weight,
             exact_count=len(exact_pack.items),
+            vector_attempted=vector_attempted,
             vector_count=len(vector_pack.items),
             result_count=len(selected),
             axes_attempted=vector_trace.axes_attempted,
@@ -203,12 +207,21 @@ def _weighted_rrf(
                     "item": item,
                     "score": 0.0,
                     "tracks": [],
+                    "axes": [],
                 },
             )
             entry["score"] = float(entry["score"]) + weight / (rrf_k + rank)
             cast_tracks = entry["tracks"]
             assert isinstance(cast_tracks, list)
             cast_tracks.append(track)
+            if track == "vector" and item.selection_reason.startswith(
+                "semantic_scout:"
+            ):
+                cast_axes = entry["axes"]
+                assert isinstance(cast_axes, list)
+                cast_axes.extend(
+                    item.selection_reason.split(":", 1)[1].split("+")
+                )
 
     ordered = sorted(
         aggregate.values(),
@@ -222,8 +235,10 @@ def _weighted_rrf(
     for entry in ordered[:limit]:
         item = entry["item"]
         tracks_for_item = entry["tracks"]
+        axes_for_item = entry["axes"]
         assert isinstance(item, ContextItemV1)
         assert isinstance(tracks_for_item, list)
+        assert isinstance(axes_for_item, list)
         score = min(float(entry["score"]) / maximum, 1.0)
         selected.append(
             item.model_copy(
@@ -232,6 +247,10 @@ def _weighted_rrf(
                     "selection_reason": (
                         "adaptive_hybrid:" + "+".join(tracks_for_item)
                     ),
+                    "metadata": {
+                        **item.metadata,
+                        "retrieval_axes": list(dict.fromkeys(axes_for_item)),
+                    },
                 }
             )
         )

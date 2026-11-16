@@ -20,6 +20,7 @@ from ..qdrant_memory import QdrantVectorStore
 from .schema import (
     ContextEpisodeV1,
     ContextIndexOperation,
+    ContextIndexStatus,
 )
 
 
@@ -143,6 +144,22 @@ class ContextEpisodeVectorizer:
             source_event_hashes=resolved_source_hashes,
             index_profile=resolved_profile,
         )
+        if self.memory is not None:
+            state = await self.memory.get_context_index_state(episode.episode_id)
+            if (
+                state is None
+                or state.desired_operation is not ContextIndexOperation.UPSERT
+                or state.desired_revision != episode.content_hash
+                or state.status is ContextIndexStatus.NOT_REQUESTED
+            ):
+                return EpisodeVectorizationResult(
+                    episode_id=episode.episode_id,
+                    vector_spaces=(),
+                    indexed=False,
+                    reason="superseded",
+                    index_fingerprint=resolved_index_hash,
+                    index_profile=resolved_profile,
+                )
         try:
             await self.qdrant.upsert_memory(
                 source=episode.source,
@@ -197,6 +214,18 @@ class ContextEpisodeVectorizer:
                 vector_spaces=vector_names,
             )
             if not applied:
+                cleanup = getattr(
+                    self.qdrant,
+                    "delete_memory_if_matches",
+                    None,
+                )
+                if callable(cleanup):
+                    await cleanup(
+                        source=episode.source,
+                        source_id=episode.source_id,
+                        content_hash=episode.content_hash,
+                        index_fingerprint=resolved_index_hash,
+                    )
                 return EpisodeVectorizationResult(
                     episode_id=episode.episode_id,
                     vector_spaces=(),
@@ -245,6 +274,34 @@ class ContextEpisodeIndexer:
         offset: int = 0,
         dry_run: bool = True,
     ) -> EpisodeIndexingReport:
+        if dry_run:
+            episodes = await self.memory.list_context_episodes(
+                limit=limit,
+                offset=offset,
+            )
+            vectorizable = [
+                episode
+                for episode in episodes
+                if episode.metadata.get("vectorize") is not False
+            ]
+            return EpisodeIndexingReport(
+                collection=self.qdrant.collection_name,
+                considered=len(episodes),
+                indexed=0,
+                already_indexed=0,
+                would_index=len(vectorizable),
+                dry_run=True,
+                not_requested=len(episodes) - len(vectorizable),
+            )
+        if not self.qdrant.enabled or not self.qdrant.accepts_private_data():
+            raise ContextEpisodeIndexError(
+                "Indexer wymaga lokalnego Qdrant."
+            )
+
+        deleted, delete_failed = await self._apply_delete_jobs(
+            limit=limit,
+            index_profile="context-index-delete-v1",
+        )
         episodes = await self.memory.list_context_episodes(
             limit=limit,
             offset=offset,
@@ -255,83 +312,43 @@ class ContextEpisodeIndexer:
             if episode.metadata.get("vectorize") is not False
         ]
         not_requested = len(episodes) - len(vectorizable)
-        if dry_run:
-            return EpisodeIndexingReport(
-                collection=self.qdrant.collection_name,
-                considered=len(episodes),
-                indexed=0,
-                already_indexed=0,
-                would_index=len(vectorizable),
-                dry_run=True,
-                not_requested=not_requested,
-            )
-        if not self.vectorizer.available():
+        if vectorizable and not self.vectorizer.available():
             raise ContextEpisodeIndexError(
-                "Indexer wymaga lokalnych embeddingów i lokalnego Qdrant."
+                "Indeksowanie upsert wymaga lokalnych embeddingów."
             )
-
-        index_profile = await _embedding_index_profile(self.embeddings)
-        deleted = await self._apply_delete_jobs(
-            limit=limit,
-            index_profile=index_profile,
+        index_profile = (
+            await _embedding_index_profile(self.embeddings)
+            if vectorizable
+            else "no-upserts"
         )
         collection_ready = await self.qdrant.collection_exists()
         indexed = 0
         already_indexed = 0
+        failed = delete_failed
         for episode in vectorizable:
-            aspects = {
-                "topic": _metadata_text(episode.metadata.get("topic")),
-                "intent": _metadata_text(episode.metadata.get("intent")),
-                "decision": _metadata_text(episode.metadata.get("decision")),
-                "person_context": _metadata_text(
-                    episode.metadata.get("person_context")
-                    or episode.metadata.get("people")
-                ),
-            }
-            source_event_hashes = await self._complete_source_hashes(episode)
-            documents = memory_vector_documents(
-                summary=episode.summary,
-                redact=True,
-                **aspects,
-            )
-            vector_index_hash = _vector_index_hash(
-                episode=episode,
-                documents=documents,
-                source_event_hashes=source_event_hashes,
-                index_profile=index_profile,
-            )
-            if collection_ready and await self.qdrant.has_memory(
-                source=episode.source,
-                source_id=episode.source_id,
-                content_hash=episode.content_hash,
-                metadata_match={"vector_index_hash": vector_index_hash},
-            ):
-                applied = await self.memory.mark_context_index_applied(
-                    episode_id=episode.episode_id,
-                    operation=ContextIndexOperation.UPSERT,
-                    desired_revision=episode.content_hash,
-                    index_fingerprint=vector_index_hash,
+            try:
+                outcome, collection_ready = await self._index_one(
+                    episode,
                     index_profile=index_profile,
-                    vector_spaces=tuple(documents),
+                    collection_ready=collection_ready,
                 )
-                if applied:
-                    already_indexed += 1
-                continue
-            result = await self.vectorizer.index_episode(
-                episode,
-                **aspects,
-                source_event_hashes=source_event_hashes,
-                vector_index_hash=vector_index_hash,
-                index_profile=index_profile,
-            )
-            if result.reason == "superseded":
-                continue
-            if not result.indexed:
-                raise ContextEpisodeIndexError(
-                    f"Nie udało się zindeksować epizodu: {result.reason}."
+            except Exception as exc:
+                failed += 1
+                state = await self.memory.get_context_index_state(
+                    episode.episode_id
                 )
-            collection_ready = True
-            indexed += 1
+                if state is None or state.status is not ContextIndexStatus.FAILED:
+                    await self.memory.mark_context_index_failed(
+                        episode_id=episode.episode_id,
+                        operation=ContextIndexOperation.UPSERT,
+                        desired_revision=episode.content_hash,
+                        error_type=type(exc).__name__,
+                    )
+                continue
+            if outcome == "already_indexed":
+                already_indexed += 1
+            elif outcome == "indexed":
+                indexed += 1
         index_summary = await self.memory.context_index_summary()
         return EpisodeIndexingReport(
             collection=self.qdrant.collection_name,
@@ -342,43 +359,108 @@ class ContextEpisodeIndexer:
             dry_run=False,
             deleted=deleted,
             not_requested=not_requested,
+            failed=failed,
             outbox_pending=index_summary.get("outbox_ready", 0),
         )
+
+    async def _index_one(
+        self,
+        episode: ContextEpisodeV1,
+        *,
+        index_profile: str,
+        collection_ready: bool,
+    ) -> tuple[str, bool]:
+        state = await self.memory.get_context_index_state(episode.episode_id)
+        if (
+            state is None
+            or state.desired_operation is not ContextIndexOperation.UPSERT
+            or state.desired_revision != episode.content_hash
+            or state.status is ContextIndexStatus.NOT_REQUESTED
+        ):
+            return "superseded", collection_ready
+        aspects = {
+            "topic": _metadata_text(episode.metadata.get("topic")),
+            "intent": _metadata_text(episode.metadata.get("intent")),
+            "decision": _metadata_text(episode.metadata.get("decision")),
+            "person_context": _metadata_text(
+                episode.metadata.get("person_context")
+                or episode.metadata.get("people")
+            ),
+        }
+        source_event_hashes = await self._complete_source_hashes(episode)
+        documents = memory_vector_documents(
+            summary=episode.summary,
+            redact=True,
+            **aspects,
+        )
+        vector_index_hash = _vector_index_hash(
+            episode=episode,
+            documents=documents,
+            source_event_hashes=source_event_hashes,
+            index_profile=index_profile,
+        )
+        if collection_ready and await self.qdrant.has_memory(
+            source=episode.source,
+            source_id=episode.source_id,
+            content_hash=episode.content_hash,
+            metadata_match={"vector_index_hash": vector_index_hash},
+        ):
+            applied = await self.memory.mark_context_index_applied(
+                episode_id=episode.episode_id,
+                operation=ContextIndexOperation.UPSERT,
+                desired_revision=episode.content_hash,
+                index_fingerprint=vector_index_hash,
+                index_profile=index_profile,
+                vector_spaces=tuple(documents),
+            )
+            if applied:
+                return "already_indexed", collection_ready
+            return "superseded", collection_ready
+        result = await self.vectorizer.index_episode(
+            episode,
+            **aspects,
+            source_event_hashes=source_event_hashes,
+            vector_index_hash=vector_index_hash,
+            index_profile=index_profile,
+        )
+        if result.reason == "superseded":
+            return "superseded", collection_ready
+        if not result.indexed:
+            raise ContextEpisodeIndexError(
+                f"Nie udało się zindeksować epizodu: {result.reason}."
+            )
+        return "indexed", True
 
     async def _apply_delete_jobs(
         self,
         *,
         limit: int,
         index_profile: str,
-    ) -> int:
+    ) -> tuple[int, int]:
         jobs = await self.memory.list_context_index_jobs(
             operation=ContextIndexOperation.DELETE,
             limit=limit,
         )
         deleted = 0
+        failed = 0
         for job in jobs:
             episode = await self.memory.get_context_episode(job.episode_id)
-            if episode is None:
-                await self.memory.mark_context_index_failed(
-                    episode_id=job.episode_id,
-                    operation=job.operation,
-                    desired_revision=job.desired_revision,
-                    error_type="MissingCanonicalEpisode",
-                )
-                continue
+            source = episode.source if episode is not None else job.source
+            source_id = episode.source_id if episode is not None else job.source_id
             try:
                 await self.qdrant.delete_memory(
-                    source=episode.source,
-                    source_id=episode.source_id,
+                    source=source,
+                    source_id=source_id,
                 )
             except Exception as exc:
+                failed += 1
                 await self.memory.mark_context_index_failed(
                     episode_id=job.episode_id,
                     operation=job.operation,
                     desired_revision=job.desired_revision,
                     error_type=type(exc).__name__,
                 )
-                raise
+                continue
             fingerprint = hashlib.sha256(
                 (
                     f"context-index-delete-v1:{job.episode_id}:"
@@ -393,7 +475,7 @@ class ContextEpisodeIndexer:
                 index_profile=index_profile,
             ):
                 deleted += 1
-        return deleted
+        return deleted, failed
 
     async def _complete_source_hashes(
         self,

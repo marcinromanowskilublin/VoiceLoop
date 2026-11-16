@@ -71,6 +71,37 @@ async def test_qdrant_deletes_manual_memory_by_stable_point_id(tmp_path) -> None
     assert client.delete.await_args.kwargs["wait"] is True
 
 
+@pytest.mark.asyncio
+async def test_qdrant_conditional_delete_matches_exact_index_version(
+    tmp_path,
+) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        count=AsyncMock(return_value=SimpleNamespace(count=1)),
+        delete=AsyncMock(),
+    )
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,  # type: ignore[arg-type]
+    )
+
+    deleted = await store.delete_memory_if_matches(
+        source="timeline",
+        source_id="episode-1",
+        content_hash="content-v1",
+        index_fingerprint="index-v1",
+    )
+
+    assert deleted is True
+    selector = client.delete.await_args.kwargs["points_selector"]
+    conditions = selector.filter.must
+    assert conditions[0].has_id == [store._point_id("timeline", "episode-1")]
+    assert conditions[1].key == "content_hash"
+    assert conditions[1].match.value == "content-v1"
+    assert conditions[2].key == "metadata.vector_index_hash"
+    assert conditions[2].match.value == "index-v1"
+
+
 def test_qdrant_private_data_requires_loopback_endpoint(tmp_path) -> None:
     local = QdrantVectorStore(
         Settings(

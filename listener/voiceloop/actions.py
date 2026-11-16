@@ -206,8 +206,8 @@ class ActionRegistry:
         web_search: WebSearchClient | None = None,
         embeddings: OpenAICompatibleEmbeddingClient | None = None,
         qdrant: QdrantVectorStore | None = None,
-        context_qdrant: QdrantVectorStore | None = None,
         manual_memory: ManualMemoryService | None = None,
+        context_qdrant: QdrantVectorStore | None = None,
     ) -> None:
         self.settings = settings
         self.memory = memory

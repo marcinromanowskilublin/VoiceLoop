@@ -375,6 +375,54 @@ class QdrantVectorStore:
                 f"Nie udało się usunąć pamięci z Qdrant: {type(exc).__name__}"
             ) from exc
 
+    async def delete_memory_if_matches(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        content_hash: str,
+        index_fingerprint: str,
+    ) -> bool:
+        """Delete only the stale projection version written by this worker."""
+
+        if not self.enabled:
+            return False
+        try:
+            if not await self.client.collection_exists(self.collection_name):
+                return False
+            point_id = self._point_id(source, source_id)
+            selector_filter = models.Filter(
+                must=[
+                    models.HasIdCondition(has_id=[point_id]),
+                    models.FieldCondition(
+                        key="content_hash",
+                        match=models.MatchValue(value=content_hash),
+                    ),
+                    models.FieldCondition(
+                        key="metadata.vector_index_hash",
+                        match=models.MatchValue(value=index_fingerprint),
+                    ),
+                ]
+            )
+            count = await self.client.count(
+                collection_name=self.collection_name,
+                count_filter=selector_filter,
+                exact=True,
+            )
+            if int(count.count) <= 0:
+                return False
+            await self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=selector_filter),
+                wait=True,
+            )
+            return True
+        except Exception as exc:
+            raise QdrantMemoryError(
+                "Nie udało się warunkowo usunąć pamięci z Qdrant: "
+                f"{type(exc).__name__}"
+            ) from exc
+
     async def upsert_memory(
         self,
         *,

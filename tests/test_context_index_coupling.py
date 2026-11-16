@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -82,6 +82,23 @@ class QdrantStub:
     async def delete_memory(self, *, source: str, source_id: str) -> None:
         self.points.pop((source, source_id), None)
         self.deleted.append((source, source_id))
+
+    async def delete_memory_if_matches(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        content_hash: str,
+        index_fingerprint: str,
+    ) -> bool:
+        if self.points.get((source, source_id)) != (
+            content_hash,
+            index_fingerprint,
+        ):
+            return False
+        self.points.pop((source, source_id), None)
+        self.deleted.append((source, source_id))
+        return True
 
 
 async def seeded_episode(
@@ -191,10 +208,10 @@ async def test_index_failure_is_visible_and_retryable(tmp_path) -> None:
         primary_collection="voiceloop_memory",
     )
 
-    with pytest.raises(RuntimeError, match="synthetic qdrant outage"):
-        await indexer.index(dry_run=False)
+    failed_report = await indexer.index(dry_run=False)
     failed = await store.get_context_index_state(episode.episode_id)
 
+    assert failed_report.failed == 1
     assert failed is not None
     assert failed.status is ContextIndexStatus.FAILED
     assert failed.attempts == 1
@@ -301,3 +318,201 @@ async def test_tombstone_requests_delete_and_indexer_applies_it(tmp_path) -> Non
     assert applied.desired_operation is ContextIndexOperation.DELETE
     assert applied.status is ContextIndexStatus.APPLIED
     assert qdrant.deleted == [(episode.source, episode.source_id)]
+
+
+@pytest.mark.asyncio
+async def test_initialize_backfills_existing_episode_without_index_state(
+    tmp_path,
+) -> None:
+    database = tmp_path / "voice.db"
+    store = MemoryStore(database)
+    await store.initialize()
+    episode = await seeded_episode(store)
+    with store._connect() as connection:
+        connection.execute(
+            "DELETE FROM context_index_outbox WHERE episode_id = ?",
+            (episode.episode_id,),
+        )
+        connection.execute(
+            "DELETE FROM context_index_state WHERE episode_id = ?",
+            (episode.episode_id,),
+        )
+
+    reloaded = MemoryStore(database)
+    await reloaded.initialize()
+    state = await reloaded.get_context_index_state(episode.episode_id)
+    jobs = await reloaded.list_context_index_jobs()
+
+    assert state is not None
+    assert state.status is ContextIndexStatus.PENDING
+    assert len(jobs) == 1
+    assert jobs[0].source == episode.source
+    assert jobs[0].source_id == episode.source_id
+
+
+@pytest.mark.asyncio
+async def test_same_revision_jobs_reactivate_across_restore_delete_cycles(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+    qdrant = QdrantStub()
+    indexer = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+    await indexer.index(dry_run=False)
+
+    for _ in range(2):
+        assert await store.tombstone_context_episode(episode.episode_id) is True
+        delete_report = await indexer.index(dry_run=False)
+        assert delete_report.deleted == 1
+        restored = episode.model_copy(
+            update={
+                "deleted_at": None,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        await store.upsert_context_episode(restored)
+        upsert_report = await indexer.index(dry_run=False)
+        assert upsert_report.indexed == 1
+
+    assert (await store.context_index_summary())["outbox_ready"] == 0
+    assert qdrant.deleted == [
+        (episode.source, episode.source_id),
+        (episode.source, episode.source_id),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vectorize_opt_out_supersedes_pending_upsert(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+
+    opted_out = episode.model_copy(
+        update={
+            "metadata": {"vectorize": False},
+            "updated_at": datetime.now(UTC),
+        }
+    )
+    await store.upsert_context_episode(opted_out)
+    state = await store.get_context_index_state(episode.episode_id)
+    ready = await store.list_context_index_jobs()
+    superseded = await store.list_context_index_jobs(
+        statuses=(ContextIndexStatus.SUPERSEDED,),
+    )
+
+    assert state is not None
+    assert state.status is ContextIndexStatus.NOT_REQUESTED
+    assert ready == []
+    assert len(superseded) == 1
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_preserves_durable_qdrant_delete_job(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+    expired = NOW - timedelta(seconds=1)
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE context_episodes SET expires_at = ? WHERE episode_id = ?",
+            (expired.isoformat(), episode.episode_id),
+        )
+
+    await store.prune_expired_private_data(
+        managed_audio_root=tmp_path / "meetings",
+        now=NOW,
+    )
+    jobs = await store.list_context_index_jobs(
+        operation=ContextIndexOperation.DELETE,
+    )
+
+    assert await store.get_context_episode(episode.episode_id) is None
+    assert await store.get_context_index_state(episode.episode_id) is None
+    assert len(jobs) == 1
+    assert jobs[0].source == episode.source
+    assert jobs[0].source_id == episode.source_id
+
+    qdrant = QdrantStub()
+    qdrant.points[(episode.source, episode.source_id)] = (
+        episode.content_hash,
+        "old-fingerprint",
+    )
+    report = await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+
+    assert report.deleted == 1
+    assert (episode.source, episode.source_id) not in qdrant.points
+    assert (await store.context_index_summary())["outbox_ready"] == 0
+
+
+@pytest.mark.asyncio
+async def test_invalid_episode_does_not_starve_later_index_jobs(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    invalid = ContextEpisodeV1(
+        episode_id="episode-0-invalid",
+        source="test",
+        source_id="invalid",
+        started_at=NOW,
+        ended_at=NOW,
+        summary="Brakujące źródło.",
+        source_event_ids=("missing-event",),
+    )
+    await store.upsert_context_episode(invalid)
+    valid = await seeded_episode(store)
+    qdrant = QdrantStub()
+
+    report = await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+    invalid_state = await store.get_context_index_state(invalid.episode_id)
+    valid_state = await store.get_context_index_state(valid.episode_id)
+
+    assert report.failed == 1
+    assert report.indexed == 1
+    assert invalid_state is not None
+    assert invalid_state.status is ContextIndexStatus.FAILED
+    assert valid_state is not None
+    assert valid_state.status is ContextIndexStatus.APPLIED
+
+
+@pytest.mark.asyncio
+async def test_tombstone_during_remote_upsert_compensates_stale_point(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+
+    class RacingQdrant(QdrantStub):
+        async def upsert_memory(self, **kwargs):
+            await super().upsert_memory(**kwargs)
+            await store.tombstone_context_episode(episode.episode_id)
+
+    qdrant = RacingQdrant()
+    report = await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+    state = await store.get_context_index_state(episode.episode_id)
+
+    assert report.indexed == 0
+    assert qdrant.points == {}
+    assert state is not None
+    assert state.desired_operation is ContextIndexOperation.DELETE
+    assert state.status is ContextIndexStatus.PENDING

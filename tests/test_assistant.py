@@ -92,6 +92,7 @@ def _assistant(
     routing_v2=None,
     embeddings=None,
     qdrant=None,
+    context_qdrant=None,
     qdrant_shadow=None,
     vector_context_limit: int = 0,
     context_cascade_shadow_enabled: bool = False,
@@ -109,6 +110,7 @@ def _assistant(
         tts=tts,  # type: ignore[arg-type]
         embeddings=embeddings,
         qdrant=qdrant,
+        context_qdrant=context_qdrant,
         qdrant_shadow=qdrant_shadow,
         action_definitions=[],
         dedupe_seconds=0,
@@ -254,6 +256,12 @@ def test_compound_time_statement_runs_content_free_shadow_only(tmp_path) -> None
         memory = MemoryStore(tmp_path / "voice.db")
         await memory.initialize()
         qdrant = QdrantStub()
+        primary_qdrant = QdrantStub()
+
+        async def reject_primary(**_kwargs):
+            raise AssertionError("cascade shadow used primary memory collection")
+
+        primary_qdrant.search = reject_primary  # type: ignore[method-assign]
         assistant = _assistant(
             memory,
             router=RouterStub(),
@@ -261,7 +269,8 @@ def test_compound_time_statement_runs_content_free_shadow_only(tmp_path) -> None
             executor=ExecutorStub(memory),
             tts=TTSStub(),
             embeddings=EmbeddingsStub(),
-            qdrant=qdrant,
+            qdrant=primary_qdrant,
+            context_qdrant=qdrant,
             vector_context_limit=5,
             context_cascade_shadow_enabled=True,
             context_cascade_shadow_qmax=6,

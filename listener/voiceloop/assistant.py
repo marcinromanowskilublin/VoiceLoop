@@ -144,6 +144,7 @@ class AssistantService:
         context_cascade_shadow_wave_size: int = 2,
         context_cascade_shadow_timeout_seconds: float = 5.0,
         dual_track_runner: DualTrackRunner | None = None,
+        context_qdrant: QdrantVectorStore | None = None,
     ) -> None:
         self.memory = memory
         self.events = events
@@ -154,6 +155,7 @@ class AssistantService:
         self.tts = tts
         self.embeddings = embeddings
         self.qdrant = qdrant
+        self.context_qdrant = context_qdrant or qdrant
         self.qdrant_shadow = qdrant_shadow
         self.capability_index = capability_index
         self.routing_v2 = routing_v2
@@ -1269,7 +1271,7 @@ class AssistantService:
             self.context_cascade_shadow_enabled
             and text.strip()
             and self.embeddings is not None
-            and self.qdrant is not None
+            and self.context_qdrant is not None
         )
 
     def _schedule_context_cascade_shadow(
@@ -1394,7 +1396,7 @@ class AssistantService:
         retriever = TimeFirstRetriever(
             memory=self.memory,
             embeddings=self.embeddings,
-            qdrant=self.qdrant,
+            qdrant=self.context_qdrant,
             scout_mode="cascade_2_2_1",
             qmax=self.context_cascade_shadow_qmax,
             wave_size=self.context_cascade_shadow_wave_size,

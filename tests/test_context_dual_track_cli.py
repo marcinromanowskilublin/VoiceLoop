@@ -214,6 +214,7 @@ async def test_report_adaptive_context_retrieval_is_shadow_only(
                 ),
                 trace=SimpleNamespace(
                     stop_reason="exact_evidence_sufficient",
+                    vector_attempted=False,
                     vector_count=0,
                 ),
             )

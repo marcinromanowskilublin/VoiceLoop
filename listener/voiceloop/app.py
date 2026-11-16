@@ -469,6 +469,7 @@ def build_services(settings: Settings) -> Services:
         tts=tts,
         embeddings=embeddings,
         qdrant=qdrant,
+        context_qdrant=context_episode_qdrant,
         capability_index=capability_index,
         routing_v2=routing_v2,
         action_definitions=actions.definitions(),

@@ -1970,14 +1970,14 @@ async def _run_async(args: argparse.Namespace) -> int:
             stop_reason_counts[run.trace.stop_reason] = (
                 stop_reason_counts.get(run.trace.stop_reason, 0) + 1
             )
-            if run.trace.vector_count:
+            if run.trace.vector_attempted:
                 vector_expansions += 1
         payload = {
             "schema_version": 1,
             "policy_version": POLICY_VERSION,
             "domain": args.domain,
             "sample_count": len(records),
-            "k": args.k,
+            "k": metrics.k,
             "metrics": metrics.model_dump(mode="json"),
             "policy_counts": policy_counts,
             "query_class_counts": query_class_counts,

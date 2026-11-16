@@ -87,3 +87,56 @@ async def test_negative_false_positive_is_reported_separately() -> None:
     assert metrics.abstention_accuracy == 0.0
     assert metrics.answerability_accuracy == 0.0
     assert metrics.false_positive_rate == 1.0
+
+
+@pytest.mark.asyncio
+async def test_duplicate_source_ids_do_not_inflate_ndcg() -> None:
+    record = ContextRetrievalEvalRecordV1(
+        example_id="duplicate",
+        query="duplikat",
+        expected_source_ids=("a",),
+    )
+
+    async def retrieve(record, _k):
+        return ContextPackV1(
+            question=record.query,
+            items=(item("a"), item("a")),
+        )
+
+    scores, metrics = await evaluate_context_retrieval(
+        records=[record],
+        retrieve=retrieve,
+        k=2,
+    )
+
+    assert scores[0].ndcg_at_k == 1.0
+    assert metrics.ndcg_at_k == 1.0
+
+
+@pytest.mark.asyncio
+async def test_adaptive_metadata_preserves_axis_coverage() -> None:
+    record = ContextRetrievalEvalRecordV1(
+        example_id="axis",
+        query="temat",
+        expected_source_ids=("a",),
+        expected_axes=("topic",),
+    )
+    adaptive_item = item("a").model_copy(
+        update={
+            "selection_reason": "adaptive_hybrid:vector",
+            "metadata": {"retrieval_axes": ["semantic", "topic"]},
+        }
+    )
+
+    async def retrieve(record, _k):
+        return ContextPackV1(question=record.query, items=(adaptive_item,))
+
+    scores, metrics = await evaluate_context_retrieval(
+        records=[record],
+        retrieve=retrieve,
+        k=2,
+    )
+
+    assert scores[0].observed_axes == ("semantic", "topic")
+    assert scores[0].expected_axes_present is True
+    assert metrics.reserve_axis_coverage == 1.0

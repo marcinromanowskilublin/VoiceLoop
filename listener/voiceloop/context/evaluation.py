@@ -38,6 +38,7 @@ class ContextRetrievalEvalRecordV1(BaseModel):
 class ContextRetrievalScoreV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal[2] = 2
     example_id: str
     predicted_source_ids: tuple[str, ...]
     first_relevant_rank: int | None = Field(default=None, ge=1)
@@ -57,7 +58,7 @@ class ContextRetrievalScoreV1(BaseModel):
 class ContextRetrievalMetricsV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     sample_count: int = Field(ge=0)
     k: int = Field(ge=1, le=100)
     recall_at_k: float = Field(ge=0.0, le=1.0)
@@ -99,13 +100,18 @@ async def evaluate_context_retrieval(
             ),
             None,
         )
-        observed_axes = tuple(
-            dict.fromkeys(
-                item.selection_reason.split(":", 1)[1]
-                for item in items
-                if item.selection_reason.startswith("semantic_scout:")
-            )
-        )
+        observed_axis_values: list[str] = []
+        for item in items:
+            if item.selection_reason.startswith("semantic_scout:"):
+                observed_axis_values.extend(
+                    item.selection_reason.split(":", 1)[1].split("+")
+                )
+            metadata_axes = item.metadata.get("retrieval_axes", ())
+            if isinstance(metadata_axes, list | tuple):
+                observed_axis_values.extend(
+                    str(axis) for axis in metadata_axes if str(axis)
+                )
+        observed_axes = tuple(dict.fromkeys(observed_axis_values))
         negative = not relevant
         relevant_retrieved = sum(
             1 for source_id in dict.fromkeys(predicted) if source_id in relevant
@@ -114,7 +120,12 @@ async def evaluate_context_retrieval(
         source_recall = (
             relevant_retrieved / len(relevant) if relevant else 0.0
         )
-        gains = [1.0 if source_id in relevant else 0.0 for source_id in predicted]
+        gain_seen: set[str] = set()
+        gains = []
+        for source_id in predicted:
+            relevant_once = source_id in relevant and source_id not in gain_seen
+            gains.append(1.0 if relevant_once else 0.0)
+            gain_seen.add(source_id)
         ideal = [1.0] * min(len(relevant), safe_k)
         ndcg = _dcg(gains) / _dcg(ideal) if ideal else 0.0
         scores.append(

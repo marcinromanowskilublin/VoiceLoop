@@ -213,6 +213,15 @@ class MemoryStore:
         """Record desired index state and its outbox job in the caller transaction."""
 
         timestamp = now or _now_iso()
+        episode_row = connection.execute(
+            """
+            SELECT source, source_id FROM context_episodes
+            WHERE episode_id = ?
+            """,
+            (episode_id,),
+        ).fetchone()
+        if episode_row is None:
+            raise ValueError(f"Unknown context episode: {episode_id}")
         current = connection.execute(
             "SELECT * FROM context_index_state WHERE episode_id = ?",
             (episode_id,),
@@ -239,6 +248,21 @@ class MemoryStore:
                         desired_revision,
                         ContextIndexStatus.NOT_REQUESTED.value,
                         timestamp,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET status = ?, updated_at = ?
+                    WHERE episode_id = ?
+                      AND status IN (?, ?)
+                    """,
+                    (
+                        ContextIndexStatus.SUPERSEDED.value,
+                        timestamp,
+                        episode_id,
+                        ContextIndexStatus.PENDING.value,
+                        ContextIndexStatus.FAILED.value,
                     ),
                 )
                 return
@@ -283,36 +307,50 @@ class MemoryStore:
         connection.execute(
             """
             INSERT INTO context_index_outbox(
-                job_id, episode_id, operation, desired_revision, status,
-                available_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                job_id, episode_id, source, source_id, operation,
+                desired_revision, status, available_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(episode_id, operation, desired_revision) DO UPDATE SET
-                status = CASE
-                    WHEN context_index_outbox.status = 'applied' THEN
-                        context_index_outbox.status
-                    ELSE excluded.status
-                END,
-                available_at = CASE
-                    WHEN context_index_outbox.status = 'applied' THEN
-                        context_index_outbox.available_at
-                    ELSE excluded.available_at
-                END,
-                last_error_type = CASE
-                    WHEN context_index_outbox.status = 'applied' THEN
-                        context_index_outbox.last_error_type
-                    ELSE NULL
-                END,
+                source = excluded.source,
+                source_id = excluded.source_id,
+                status = excluded.status,
+                attempts = 0,
+                available_at = excluded.available_at,
+                claimed_at = NULL,
+                last_error_type = NULL,
                 updated_at = excluded.updated_at
             """,
             (
                 job_id,
                 episode_id,
+                str(episode_row["source"]),
+                str(episode_row["source_id"]),
                 resolved_operation.value,
                 desired_revision,
                 ContextIndexStatus.PENDING.value,
                 timestamp,
                 timestamp,
                 timestamp,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE context_index_outbox
+            SET status = ?, updated_at = ?
+            WHERE episode_id = ?
+              AND status IN (?, ?)
+              AND NOT (
+                  operation = ? AND desired_revision = ?
+              )
+            """,
+            (
+                ContextIndexStatus.SUPERSEDED.value,
+                timestamp,
+                episode_id,
+                ContextIndexStatus.PENDING.value,
+                ContextIndexStatus.FAILED.value,
+                resolved_operation.value,
+                desired_revision,
             ),
         )
 
@@ -605,6 +643,8 @@ class MemoryStore:
                         job_id TEXT PRIMARY KEY,
                         schema_version INTEGER NOT NULL DEFAULT 1,
                         episode_id TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
                         operation TEXT NOT NULL,
                         desired_revision TEXT NOT NULL,
                         status TEXT NOT NULL,
@@ -614,9 +654,7 @@ class MemoryStore:
                         last_error_type TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
-                        UNIQUE(episode_id, operation, desired_revision),
-                        FOREIGN KEY(episode_id) REFERENCES context_episodes(episode_id)
-                            ON DELETE CASCADE
+                        UNIQUE(episode_id, operation, desired_revision)
                     );
 
                     CREATE TABLE IF NOT EXISTS context_entities (
@@ -902,6 +940,73 @@ class MemoryStore:
                             "ALTER TABLE context_dual_track_traces "
                             f"ADD COLUMN {column_name} {ddl}"
                         )
+                outbox_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(context_index_outbox)"
+                    ).fetchall()
+                }
+                for column_name, ddl in (
+                    ("source", "TEXT NOT NULL DEFAULT ''"),
+                    ("source_id", "TEXT NOT NULL DEFAULT ''"),
+                ):
+                    if column_name not in outbox_columns:
+                        connection.execute(
+                            "ALTER TABLE context_index_outbox "
+                            f"ADD COLUMN {column_name} {ddl}"
+                        )
+                connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET source = COALESCE(
+                            NULLIF(source, ''),
+                            (
+                                SELECT source FROM context_episodes e
+                                WHERE e.episode_id =
+                                    context_index_outbox.episode_id
+                            ),
+                            'unknown'
+                        ),
+                        source_id = COALESCE(
+                            NULLIF(source_id, ''),
+                            (
+                                SELECT source_id FROM context_episodes e
+                                WHERE e.episode_id =
+                                    context_index_outbox.episode_id
+                            ),
+                            context_index_outbox.episode_id
+                        )
+                    WHERE source = '' OR source_id = ''
+                    """
+                )
+                existing_episodes = connection.execute(
+                    """
+                    SELECT episode_id, content_hash, metadata_json,
+                           deleted_at, updated_at
+                    FROM context_episodes
+                    """
+                ).fetchall()
+                for episode_row in existing_episodes:
+                    try:
+                        metadata = json.loads(episode_row["metadata_json"] or "{}")
+                    except json.JSONDecodeError:
+                        metadata = {}
+                    operation = (
+                        ContextIndexOperation.DELETE
+                        if episode_row["deleted_at"] is not None
+                        else ContextIndexOperation.UPSERT
+                    )
+                    self._request_context_index(
+                        connection,
+                        episode_id=str(episode_row["episode_id"]),
+                        desired_revision=str(episode_row["content_hash"]),
+                        operation=operation,
+                        vectorize_requested=(
+                            not isinstance(metadata, dict)
+                            or metadata.get("vectorize") is not False
+                        ),
+                        now=str(episode_row["updated_at"]),
+                    )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_conversation_session
@@ -1572,10 +1677,31 @@ class MemoryStore:
                     """,
                     (episode_id,),
                 ).fetchone()
+                if state is None and operation is ContextIndexOperation.DELETE:
+                    cursor = connection.execute(
+                        """
+                        UPDATE context_index_outbox
+                        SET status = ?, claimed_at = COALESCE(claimed_at, ?),
+                            last_error_type = NULL, updated_at = ?
+                        WHERE episode_id = ?
+                          AND operation = ?
+                          AND desired_revision = ?
+                        """,
+                        (
+                            ContextIndexStatus.APPLIED.value,
+                            timestamp,
+                            timestamp,
+                            episode_id,
+                            operation.value,
+                            desired_revision,
+                        ),
+                    )
+                    return cursor.rowcount > 0
                 if (
                     state is None
                     or state["desired_operation"] != operation.value
                     or state["desired_revision"] != desired_revision
+                    or state["status"] == ContextIndexStatus.NOT_REQUESTED.value
                 ):
                     connection.execute(
                         """
@@ -1699,16 +1825,37 @@ class MemoryStore:
             with self._connect() as connection:
                 state = connection.execute(
                     """
-                    SELECT desired_operation, desired_revision
+                    SELECT desired_operation, desired_revision, status
                     FROM context_index_state
                     WHERE episode_id = ?
                     """,
                     (episode_id,),
                 ).fetchone()
+                if state is None and operation is ContextIndexOperation.DELETE:
+                    cursor = connection.execute(
+                        """
+                        UPDATE context_index_outbox
+                        SET status = ?, attempts = attempts + 1,
+                            last_error_type = ?, updated_at = ?
+                        WHERE episode_id = ?
+                          AND operation = ?
+                          AND desired_revision = ?
+                        """,
+                        (
+                            ContextIndexStatus.FAILED.value,
+                            safe_error,
+                            timestamp,
+                            episode_id,
+                            operation.value,
+                            desired_revision,
+                        ),
+                    )
+                    return cursor.rowcount > 0
                 if (
                     state is None
                     or state["desired_operation"] != operation.value
                     or state["desired_revision"] != desired_revision
+                    or state["status"] == ContextIndexStatus.NOT_REQUESTED.value
                 ):
                     return False
                 connection.execute(
@@ -3892,16 +4039,24 @@ class MemoryStore:
                         (cutoff,),
                     ).fetchall()
                 ]
+                expired_episode_rows = connection.execute(
+                    """
+                    SELECT episode_id, content_hash FROM context_episodes
+                    WHERE expires_at IS NOT NULL AND expires_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
                 expired_episode_ids = [
-                    row["episode_id"]
-                    for row in connection.execute(
-                        """
-                        SELECT episode_id FROM context_episodes
-                        WHERE expires_at IS NOT NULL AND expires_at <= ?
-                        """,
-                        (cutoff,),
-                    ).fetchall()
+                    row["episode_id"] for row in expired_episode_rows
                 ]
+                for row in expired_episode_rows:
+                    self._request_context_index(
+                        connection,
+                        episode_id=str(row["episode_id"]),
+                        desired_revision=str(row["content_hash"]),
+                        operation=ContextIndexOperation.DELETE,
+                        now=cutoff,
+                    )
                 if self._context_fts_enabled:
                     connection.executemany(
                         "DELETE FROM context_events_fts WHERE event_id = ?",
@@ -4294,6 +4449,8 @@ class MemoryStore:
             schema_version=int(row["schema_version"]),
             job_id=row["job_id"],
             episode_id=row["episode_id"],
+            source=row["source"],
+            source_id=row["source_id"],
             operation=ContextIndexOperation(row["operation"]),
             desired_revision=row["desired_revision"],
             status=ContextIndexStatus(row["status"]),
