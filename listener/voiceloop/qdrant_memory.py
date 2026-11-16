@@ -495,6 +495,20 @@ class QdrantVectorStore:
         try:
             if not await self.client.collection_exists(self.collection_name):
                 return False
+            legacy_id = self._point_id(source, source_id)
+            legacy_records = await self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=[legacy_id],
+                with_payload=False,
+                with_vectors=False,
+            )
+            legacy_exists = bool(legacy_records)
+            if legacy_exists:
+                await self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=models.PointIdsList(points=[legacy_id]),
+                    wait=True,
+                )
             version_conditions: list[models.Condition] = [
                 models.IsEmptyCondition(
                     is_empty=models.PayloadField(
@@ -531,7 +545,7 @@ class QdrantVectorStore:
                 exact=True,
             )
             if int(count.count) <= 0:
-                return False
+                return legacy_exists
             await self.client.delete(
                 collection_name=self.collection_name,
                 points_selector=models.FilterSelector(filter=selector_filter),

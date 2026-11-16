@@ -330,7 +330,7 @@ class ContextEpisodeVectorizer:
                             await pruned_attempts
                     except Exception:
                         pass
-            if applied and resolved_generation > 1:
+            if applied:
                 prune_older = getattr(
                     self.qdrant,
                     "delete_memory_through_generation",
@@ -341,7 +341,7 @@ class ContextEpisodeVectorizer:
                         pruned = prune_older(
                             source=episode.source,
                             source_id=episode.source_id,
-                            max_generation=resolved_generation - 1,
+                            max_generation=max(0, resolved_generation - 1),
                         )
                         if inspect.isawaitable(pruned):
                             await pruned
@@ -624,6 +624,10 @@ class ContextEpisodeIndexer:
         state = await self.memory.get_context_index_state(episode.episode_id)
         if state is None or state.status is ContextIndexStatus.FAILED:
             return
+        if state.status is ContextIndexStatus.CLAIMED:
+            # This fallback path has not acquired a token. A CLAIMED state
+            # belongs to another attempt; only that attempt may fail it.
+            return
         fingerprint = (
             state.desired_index_fingerprint
             or hashlib.sha256(
@@ -633,19 +637,14 @@ class ContextEpisodeIndexer:
                 ).encode()
             ).hexdigest()
         )
-        claim_token = state.desired_claim_token or ""
-        if state.status is not ContextIndexStatus.CLAIMED:
-            claimed = await self.memory.claim_context_index_job(
-                episode_id=episode.episode_id,
-                operation=ContextIndexOperation.UPSERT,
-                desired_revision=episode.content_hash,
-                generation=state.desired_generation,
-                index_fingerprint=fingerprint,
-                index_profile=index_profile,
-            )
-            if not claimed:
-                return
-            claim_token = claimed
+        claim_token = await self.memory.claim_context_index_job(
+            episode_id=episode.episode_id,
+            operation=ContextIndexOperation.UPSERT,
+            desired_revision=episode.content_hash,
+            generation=state.desired_generation,
+            index_fingerprint=fingerprint,
+            index_profile=index_profile,
+        )
         if not claim_token:
             return
         await self.memory.mark_context_index_failed(

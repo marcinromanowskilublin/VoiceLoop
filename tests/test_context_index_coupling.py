@@ -849,9 +849,10 @@ async def test_late_delete_cannot_remove_restored_generation(tmp_path) -> None:
 
     class RestoreDuringDelete(QdrantStub):
         restored = False
+        armed = False
 
         async def delete_memory_through_generation(self, **kwargs):
-            if not self.restored:
+            if self.armed and not self.restored:
                 self.restored = True
                 await store.upsert_context_episode(
                     episode.model_copy(
@@ -878,6 +879,7 @@ async def test_late_delete_cannot_remove_restored_generation(tmp_path) -> None:
     )
     await initial.index(dry_run=False)
     assert await store.tombstone_context_episode(episode.episode_id)
+    qdrant.armed = True
 
     await initial.index(dry_run=False)
     state = await store.get_context_index_state(episode.episode_id)
