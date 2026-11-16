@@ -254,6 +254,8 @@ async def test_successful_index_applies_matching_revision_and_profile(tmp_path) 
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
     episode = await seeded_episode(store)
+    initial_state = await store.get_context_index_state(episode.episode_id)
+    assert initial_state is not None
     qdrant = QdrantStub()
     indexer = ContextEpisodeIndexer(
         memory=store,
@@ -273,6 +275,7 @@ async def test_successful_index_applies_matching_revision_and_profile(tmp_path) 
     assert report.outbox_pending == 0
     assert state is not None
     assert state.status is ContextIndexStatus.APPLIED
+    assert state.desired_generation == initial_state.desired_generation
     assert state.applied_revision == state.desired_revision
     assert state.index_fingerprint
     assert state.index_profile and state.index_profile.endswith(":embedding-a")
@@ -595,6 +598,47 @@ async def test_invalid_episode_does_not_starve_later_index_jobs(tmp_path) -> Non
     assert invalid_state.status is ContextIndexStatus.FAILED
     assert valid_state is not None
     assert valid_state.status is ContextIndexStatus.APPLIED
+
+
+@pytest.mark.asyncio
+async def test_indexer_advances_through_pending_upsert_batches(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    for index in range(5):
+        event = ContextEventV1.from_observation(
+            source="batch",
+            source_id=f"event-{index}",
+            started_at=NOW + timedelta(minutes=index),
+            text=f"Źródło {index}",
+        )
+        await store.upsert_context_event(event)
+        await store.upsert_context_episode(
+            ContextEpisodeV1(
+                episode_id=f"batch-episode-{index}",
+                source="batch",
+                source_id=f"episode-{index}",
+                started_at=event.started_at,
+                ended_at=event.started_at,
+                summary=f"Epizod {index}",
+                source_event_ids=(event.event_id,),
+            )
+        )
+    qdrant = QdrantStub()
+    indexer = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+
+    reports = [
+        await indexer.index(limit=2, dry_run=False)
+        for _ in range(3)
+    ]
+
+    assert [report.indexed for report in reports] == [2, 2, 1]
+    assert reports[-1].outbox_pending == 0
+    assert len(qdrant.points) == 5
 
 
 @pytest.mark.asyncio
@@ -1098,6 +1142,8 @@ async def test_lease_takeover_cannot_report_applied_after_point_is_removed(
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
     episode = await seeded_episode(store)
+    initial_state = await store.get_context_index_state(episode.episode_id)
+    assert initial_state is not None
 
     class ReverseCompletionQdrant(QdrantStub):
         def __init__(self) -> None:
@@ -1167,6 +1213,7 @@ async def test_lease_takeover_cannot_report_applied_after_point_is_removed(
     assert second_report.indexed == 1
     assert state is not None
     assert state.status is ContextIndexStatus.APPLIED
+    assert state.desired_generation == initial_state.desired_generation
     assert state.index_profile and state.index_profile.endswith(":embedding-b")
     point = qdrant.latest_point(
         source=episode.source,

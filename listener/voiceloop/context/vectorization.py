@@ -362,18 +362,6 @@ class ContextEpisodeVectorizer:
                         index_generation=resolved_generation,
                         claim_token=resolved_claim_token,
                     )
-                current = await self.memory.get_context_index_state(
-                    episode.episode_id
-                )
-                if (
-                    current is not None
-                    and current.desired_operation
-                    is ContextIndexOperation.UPSERT
-                    and current.status is ContextIndexStatus.APPLIED
-                ):
-                    await self.memory.request_context_episode_reindex(
-                        episode.episode_id
-                    )
                 return EpisodeVectorizationResult(
                     episode_id=episode.episode_id,
                     vector_spaces=(),
@@ -451,10 +439,28 @@ class ContextEpisodeIndexer:
             index_profile="context-index-delete-v1",
         )
         deleted += await self._verify_applied_delete_jobs(limit=limit)
-        episodes = await self.memory.list_context_episodes(
+        upsert_jobs = await self.memory.list_context_index_jobs(
+            operation=ContextIndexOperation.UPSERT,
             limit=limit,
-            offset=offset,
         )
+        episodes: list[ContextEpisodeV1] = []
+        if upsert_jobs:
+            for job in upsert_jobs:
+                episode = await self.memory.get_context_episode(job.episode_id)
+                if episode is None or episode.deleted_at is not None:
+                    await self.memory.mark_context_index_superseded(
+                        episode_id=job.episode_id,
+                        generation=job.generation,
+                    )
+                    continue
+                episodes.append(episode)
+        else:
+            # With no ready outbox work, keep the explicit sweep used to
+            # detect model/profile or source-version drift.
+            episodes = await self.memory.list_context_episodes(
+                limit=limit,
+                offset=offset,
+            )
         vectorizable = [
             episode
             for episode in episodes

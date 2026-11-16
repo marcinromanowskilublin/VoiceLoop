@@ -25,7 +25,11 @@ from ..context.evaluation import (
 from ..context.lifecycle import ContextLifecycleService
 from ..context.policy import POLICY_VERSION
 from ..context.projection import MemoryTimelineMigrator
-from ..context.vectorization import ContextEpisodeIndexer, ContextEpisodeIndexError
+from ..context.vectorization import (
+    ContextEpisodeIndexer,
+    ContextEpisodeIndexError,
+    EpisodeIndexingReport,
+)
 from ..embeddings import (
     EmbeddingUnavailableError,
     OpenAICompatibleEmbeddingClient,
@@ -1820,12 +1824,14 @@ async def _run_async(args: argparse.Namespace) -> int:
             )
         )
         try:
-            report = await ContextEpisodeIndexer(
+            indexer = ContextEpisodeIndexer(
                 memory=memory,
                 embeddings=embeddings,
                 qdrant=episode_qdrant,
                 primary_collection=settings.qdrant_collection,
-            ).index(
+            )
+            report = await _run_context_indexer(
+                indexer,
                 limit=args.limit,
                 offset=args.offset,
                 dry_run=not args.apply,
@@ -2011,6 +2017,58 @@ async def _context_memory_store(
     memory = MemoryStore(database_path)
     await memory.initialize()
     return memory
+
+
+async def _run_context_indexer(
+    indexer: ContextEpisodeIndexer,
+    *,
+    limit: int,
+    offset: int,
+    dry_run: bool,
+) -> EpisodeIndexingReport:
+    if dry_run:
+        return await indexer.index(
+            limit=limit,
+            offset=offset,
+            dry_run=True,
+        )
+    totals = {
+        "considered": 0,
+        "indexed": 0,
+        "already_indexed": 0,
+        "deleted": 0,
+        "not_requested": 0,
+        "failed": 0,
+    }
+    last_report: EpisodeIndexingReport | None = None
+    for _ in range(1000):
+        report = await indexer.index(
+            limit=limit,
+            offset=offset,
+            dry_run=False,
+        )
+        last_report = report
+        for field in totals:
+            totals[field] += int(getattr(report, field))
+        if report.outbox_pending <= 0:
+            break
+        progress = report.indexed + report.already_indexed + report.deleted
+        if progress <= 0:
+            break
+        offset = 0
+    assert last_report is not None
+    return EpisodeIndexingReport(
+        collection=last_report.collection,
+        considered=totals["considered"],
+        indexed=totals["indexed"],
+        already_indexed=totals["already_indexed"],
+        would_index=0,
+        dry_run=False,
+        deleted=totals["deleted"],
+        not_requested=totals["not_requested"],
+        failed=totals["failed"],
+        outbox_pending=last_report.outbox_pending,
+    )
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:

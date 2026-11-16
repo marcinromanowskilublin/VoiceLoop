@@ -11,6 +11,7 @@ from voiceloop.context.schema import (
     ContextScope,
     ContextTrust,
 )
+from voiceloop.context.vectorization import EpisodeIndexingReport
 from voiceloop.corpus import cli
 
 
@@ -296,3 +297,37 @@ async def test_context_prune_apply_targets_isolated_episode_collection(
 
     assert code == 0
     assert collections == ["voiceloop_context_episodes_v1"]
+
+
+@pytest.mark.asyncio
+async def test_context_index_cli_drains_all_ready_batches() -> None:
+    class IndexerStub:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def index(self, **_kwargs):
+            self.calls += 1
+            remaining = {1: 3, 2: 1, 3: 0}[self.calls]
+            indexed = {1: 2, 2: 2, 3: 1}[self.calls]
+            return EpisodeIndexingReport(
+                collection="episodes",
+                considered=indexed,
+                indexed=indexed,
+                already_indexed=0,
+                would_index=0,
+                dry_run=False,
+                outbox_pending=remaining,
+            )
+
+    indexer = IndexerStub()
+
+    report = await cli._run_context_indexer(
+        indexer,  # type: ignore[arg-type]
+        limit=2,
+        offset=0,
+        dry_run=False,
+    )
+
+    assert indexer.calls == 3
+    assert report.indexed == 5
+    assert report.outbox_pending == 0
