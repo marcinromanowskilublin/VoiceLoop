@@ -115,21 +115,21 @@ async def test_qdrant_conditional_delete_removes_legacy_point_without_generation
         Settings(voiceloop_data_dir=str(tmp_path)),
         client=client,
     )
-    await store.upsert_memory(
-        source="timeline",
-        source_id="legacy",
-        title="Legacy",
-        content="Legacy content",
-        vectors={"semantic": [1.0, 0.0]},
-        metadata={"vector_index_hash": "legacy-index"},
-        content_hash="legacy-content",
-    )
+    with pytest.warns(UserWarning, match="Payload indexes have no effect"):
+        await store.upsert_memory(
+            source="timeline",
+            source_id="legacy",
+            title="Legacy",
+            content="Legacy content",
+            vectors={"semantic": [1.0, 0.0]},
+            metadata={"vector_index_hash": "legacy-index"},
+            content_hash="legacy-content",
+        )
 
-    deleted = await store.delete_memory_if_matches(
+    deleted = await store.delete_memory_through_generation(
         source="timeline",
         source_id="legacy",
-        content_hash="legacy-content",
-        index_generation=None,
+        max_generation=7,
     )
 
     assert deleted is True

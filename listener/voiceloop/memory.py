@@ -273,11 +273,34 @@ class MemoryStore:
             if current["status"] == ContextIndexStatus.CLAIMED.value:
                 return
         else:
-            generation = (
-                int(current["desired_generation"]) + 1
-                if current is not None
-                else 1
-            )
+            counter = connection.execute(
+                """
+                SELECT last_generation FROM context_index_generation
+                WHERE episode_id = ?
+                """,
+                (episode_id,),
+            ).fetchone()
+            last_generation = int(counter["last_generation"]) if counter else 0
+            if current is not None:
+                last_generation = max(
+                    last_generation,
+                    int(current["desired_generation"]),
+                )
+            generation = last_generation + 1
+        connection.execute(
+            """
+            INSERT INTO context_index_generation(
+                episode_id, last_generation, updated_at
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(episode_id) DO UPDATE SET
+                last_generation = MAX(
+                    context_index_generation.last_generation,
+                    excluded.last_generation
+                ),
+                updated_at = excluded.updated_at
+            """,
+            (episode_id, generation, timestamp),
+        )
         target_generation = None
         if resolved_operation is ContextIndexOperation.DELETE and current is not None:
             target_generation = current["desired_generation"]
@@ -324,6 +347,9 @@ class MemoryStore:
             ON CONFLICT(episode_id, generation) DO UPDATE SET
                 source = excluded.source,
                 source_id = excluded.source_id,
+                operation = excluded.operation,
+                desired_revision = excluded.desired_revision,
+                target_generation = excluded.target_generation,
                 status = excluded.status,
                 available_at = excluded.available_at,
                 claimed_at = NULL,
@@ -396,6 +422,57 @@ class MemoryStore:
             """
         )
 
+        def backfill_generation_counter() -> None:
+            generations: dict[str, int] = {}
+            for row in connection.execute(
+                """
+                SELECT episode_id, desired_generation AS generation
+                FROM context_index_state
+                """
+            ).fetchall():
+                episode_id = str(row["episode_id"])
+                generations[episode_id] = max(
+                    generations.get(episode_id, 0),
+                    int(row["generation"]),
+                )
+            outbox_names = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(context_index_outbox)"
+                ).fetchall()
+            }
+            if "generation" in outbox_names:
+                for row in connection.execute(
+                    """
+                    SELECT episode_id, MAX(generation) AS generation
+                    FROM context_index_outbox
+                    GROUP BY episode_id
+                    """
+                ).fetchall():
+                    episode_id = str(row["episode_id"])
+                    generations[episode_id] = max(
+                        generations.get(episode_id, 0),
+                        int(row["generation"]),
+                    )
+            timestamp = _now_iso()
+            connection.executemany(
+                """
+                INSERT INTO context_index_generation(
+                    episode_id, last_generation, updated_at
+                ) VALUES (?, ?, ?)
+                ON CONFLICT(episode_id) DO UPDATE SET
+                    last_generation = MAX(
+                        context_index_generation.last_generation,
+                        excluded.last_generation
+                    ),
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    (episode_id, generation, timestamp)
+                    for episode_id, generation in generations.items()
+                ),
+            )
+
         outbox_columns = {
             row["name"]
             for row in connection.execute(
@@ -423,6 +500,7 @@ class MemoryStore:
                 ON context_index_outbox(status, available_at, created_at)
                 """
             )
+            backfill_generation_counter()
             return
 
         old_rows = [
@@ -471,6 +549,7 @@ class MemoryStore:
             )
             """
         )
+        backfill_generation_counter()
         for episode_id, row in latest_active.items():
             episode = connection.execute(
                 """
@@ -858,6 +937,12 @@ class MemoryStore:
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
                         UNIQUE(episode_id, generation)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_index_generation (
+                        episode_id TEXT PRIMARY KEY,
+                        last_generation INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL
                     );
 
                     CREATE TABLE IF NOT EXISTS context_entities (
@@ -1877,6 +1962,7 @@ class MemoryStore:
 
         def _claim() -> bool:
             with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 state = connection.execute(
                     """
                     SELECT * FROM context_index_state
@@ -1911,7 +1997,7 @@ class MemoryStore:
                 )
                 if not claimable:
                     return False
-                connection.execute(
+                cursor = connection.execute(
                     """
                     UPDATE context_index_outbox
                     SET status = ?, index_fingerprint = ?,
@@ -1919,6 +2005,10 @@ class MemoryStore:
                         available_at = ?, expires_at = NULL,
                         updated_at = ?
                     WHERE episode_id = ? AND generation = ?
+                      AND (
+                          status IN (?, ?)
+                          OR (status = ? AND available_at <= ?)
+                      )
                     """,
                     (
                         ContextIndexStatus.CLAIMED.value,
@@ -1929,8 +2019,14 @@ class MemoryStore:
                         now_iso,
                         episode_id,
                         generation,
+                        ContextIndexStatus.PENDING.value,
+                        ContextIndexStatus.FAILED.value,
+                        ContextIndexStatus.CLAIMED.value,
+                        now_iso,
                     ),
                 )
+                if not cursor.rowcount:
+                    return False
                 if state is not None:
                     connection.execute(
                         """

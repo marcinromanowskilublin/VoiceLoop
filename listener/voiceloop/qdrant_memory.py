@@ -441,6 +441,61 @@ class QdrantVectorStore:
                 f"{type(exc).__name__}"
             ) from exc
 
+    async def delete_memory_through_generation(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        max_generation: int | None,
+    ) -> bool:
+        """Delete a legacy projection or any generation not newer than the fence."""
+
+        if not self.enabled:
+            return False
+        try:
+            if not await self.client.collection_exists(self.collection_name):
+                return False
+            point_id = self._point_id(source, source_id)
+            version_conditions: list[models.Condition] = [
+                models.IsEmptyCondition(
+                    is_empty=models.PayloadField(
+                        key="metadata.index_generation"
+                    )
+                )
+            ]
+            if max_generation is not None:
+                version_conditions.append(
+                    models.FieldCondition(
+                        key="metadata.index_generation",
+                        range=models.Range(lte=max_generation),
+                    )
+                )
+            selector_filter = models.Filter(
+                must=[models.HasIdCondition(has_id=[point_id])],
+                min_should=models.MinShould(
+                    conditions=version_conditions,
+                    min_count=1,
+                ),
+            )
+            count = await self.client.count(
+                collection_name=self.collection_name,
+                count_filter=selector_filter,
+                exact=True,
+            )
+            if int(count.count) <= 0:
+                return False
+            await self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=selector_filter),
+                wait=True,
+            )
+            return True
+        except Exception as exc:
+            raise QdrantMemoryError(
+                "Nie udało się usunąć generacji pamięci z Qdrant: "
+                f"{type(exc).__name__}"
+            ) from exc
+
     async def upsert_memory(
         self,
         *,

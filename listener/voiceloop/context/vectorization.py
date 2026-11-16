@@ -253,6 +253,18 @@ class ContextEpisodeVectorizer:
                         index_fingerprint=resolved_index_hash,
                         index_generation=resolved_generation,
                     )
+                current = await self.memory.get_context_index_state(
+                    episode.episode_id
+                )
+                if (
+                    current is not None
+                    and current.desired_operation
+                    is ContextIndexOperation.UPSERT
+                    and current.status is ContextIndexStatus.APPLIED
+                ):
+                    await self.memory.request_context_episode_reindex(
+                        episode.episode_id
+                    )
                 return EpisodeVectorizationResult(
                     episode_id=episode.episode_id,
                     vector_spaces=(),
@@ -586,12 +598,10 @@ class ContextEpisodeIndexer:
             if not claimed:
                 continue
             try:
-                removed = await self.qdrant.delete_memory_if_matches(
+                removed = await self.qdrant.delete_memory_through_generation(
                     source=source,
                     source_id=source_id,
-                    content_hash=job.desired_revision,
-                    index_fingerprint="",
-                    index_generation=job.target_generation,
+                    max_generation=job.target_generation,
                 )
             except Exception as exc:
                 failed += 1
