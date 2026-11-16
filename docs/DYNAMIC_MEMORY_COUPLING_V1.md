@@ -58,20 +58,28 @@ adaptacyjności, jakości prywatnych danych ani gotowości live.
 
 Nowe tabele:
 
-- `context_index_state` — desired operation/revision, applied revision,
-  fingerprint, profil embeddingu, osie, status, próby i ostatnia klasa błędu;
+- `context_index_state` — desired operation/revision/generation, applied
+  revision/generation, fingerprint, profil embeddingu, osie, status, próby
+  i ostatnia klasa błędu;
 - `context_index_outbox` — idempotentne zadania `upsert` / `delete`.
 
 Upsert albo tombstone epizodu zapisuje stan indeksu i outbox w tej samej
 transakcji SQLite. Indexer:
 
 - pracuje at-least-once i idempotentnie;
+- używa lease/claim oraz CAS na generacji, fingerprintcie i profilu;
 - nie uznaje awarii Qdrant za pustą kolekcję;
 - odrzuca spóźnione zakończenie starej rewizji;
+- warunkowo usuwa wyłącznie tę generację Qdrant, do której należał job;
 - oznacza błąd i pozwala na ponowienie;
 - wykrywa zmianę modelu embeddingowego przez fingerprint;
 - respektuje `vectorize=false`;
 - aktualizuje `vector_spaces_json` dopiero po zgodnym zapisie indeksu.
+
+Migracja tworzy zadania dla starszych epizodów i przebudowuje wcześniejszy
+wariant outboxa z kaskadowym FK. Hard delete rekordu kanonicznego nie usuwa
+oczekującego zamiaru usunięcia Qdrant. Terminalne joby dostają 30-dniowy TTL
+i podlegają retencji.
 
 Nie uruchomiono automatycznego workera. Przetwarzanie pozostaje jawne przez
 `index-context-episodes --apply`.
@@ -131,7 +139,7 @@ nie ma jeszcze zatwierdzonego, trwałego scope domeny dla unbounded RPG.
 
 ### 5. Poprawione metryki
 
-Ewaluacja raportuje teraz osobno:
+Definicje metryk mają `schema_version=2`. Ewaluacja raportuje osobno:
 
 - prawdziwy source Recall@k;
 - HitRate@k;
@@ -172,6 +180,9 @@ To są blokery przed live recall, nie kosmetyka:
 6. Brakuje prywatnego gold setu z prawdziwym lokalnym modelem embeddingowym.
 7. Nie wykonano jeszcze pomiaru P95/P99, CPU, RAM i blokad SQLite na docelowym
    Windowsie.
+8. Fingerprint obejmuje nazwę modelu, schemat dokumentu i politykę prefiksu,
+   ale API embeddingów nie udostępnia hasha wag. Podmiana wag pod tym samym
+   aliasem wymaga jawnej zmiany aliasu/generacji przez operatora.
 
 ## Plan dalszego rollout'u
 
@@ -231,8 +242,8 @@ rozszerzał budżet.
 Do wdrożenia:
 
 - mały worker outbox z limitem współbieżności;
-- lease/claim, retry z backoffem i dead-letter;
-- desired/applied revision oraz ignorowanie starego joba;
+- istniejące lease/claim i CAS opakować stałą pętlą z backoffem i dead-letter;
+- zachować desired/applied generation oraz ignorowanie starego joba;
 - telemetry: outbox lag, failed, stale, orphan i missing;
 - rebuild całej generacji indeksu bez blokowania SQLite;
 - jedna semantyka retencji.
@@ -323,7 +334,7 @@ Przed uznaniem indeksu za zdrowy:
 - `coverage.consistent` powinno być `true`;
 - `coverage.pending`, `coverage.failed`, `coverage.delete_pending` i
   `coverage.untracked` powinny wynosić `0`;
-- `index_state.outbox_ready` powinno wynosić `0`.
+- `index_state.outbox_ready` i `index_state.outbox_claimed` powinny wynosić `0`.
 
 ### 6. Prywatny gold set
 

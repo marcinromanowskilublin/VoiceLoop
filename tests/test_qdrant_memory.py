@@ -90,6 +90,7 @@ async def test_qdrant_conditional_delete_matches_exact_index_version(
         source_id="episode-1",
         content_hash="content-v1",
         index_fingerprint="index-v1",
+        index_generation=7,
     )
 
     assert deleted is True
@@ -100,6 +101,8 @@ async def test_qdrant_conditional_delete_matches_exact_index_version(
     assert conditions[1].match.value == "content-v1"
     assert conditions[2].key == "metadata.vector_index_hash"
     assert conditions[2].match.value == "index-v1"
+    assert conditions[3].key == "metadata.index_generation"
+    assert conditions[3].match.value == 7
 
 
 def test_qdrant_private_data_requires_loopback_endpoint(tmp_path) -> None:

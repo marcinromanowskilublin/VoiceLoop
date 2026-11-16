@@ -89,16 +89,33 @@ class ContextLifecycleService:
 
     async def _mark_direct_delete_applied(self, episode) -> None:
         profile = "context-lifecycle-direct-delete-v1"
+        state = await self.memory.get_context_index_state(episode.episode_id)
+        if (
+            state is None
+            or state.desired_operation is not ContextIndexOperation.DELETE
+        ):
+            return
         fingerprint = hashlib.sha256(
             (
                 f"{profile}:{episode.episode_id}:"
-                f"{episode.content_hash}"
+                f"{episode.content_hash}:{state.desired_generation}"
             ).encode()
         ).hexdigest()
+        claimed = await self.memory.claim_context_index_job(
+            episode_id=episode.episode_id,
+            operation=ContextIndexOperation.DELETE,
+            desired_revision=episode.content_hash,
+            generation=state.desired_generation,
+            index_fingerprint=fingerprint,
+            index_profile=profile,
+        )
+        if not claimed:
+            return
         await self.memory.mark_context_index_applied(
             episode_id=episode.episode_id,
             operation=ContextIndexOperation.DELETE,
             desired_revision=episode.content_hash,
+            generation=state.desired_generation,
             index_fingerprint=fingerprint,
             index_profile=profile,
         )

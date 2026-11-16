@@ -381,7 +381,8 @@ class QdrantVectorStore:
         source: str,
         source_id: str,
         content_hash: str,
-        index_fingerprint: str,
+        index_fingerprint: str = "",
+        index_generation: int | None = None,
     ) -> bool:
         """Delete only the stale projection version written by this worker."""
 
@@ -391,19 +392,36 @@ class QdrantVectorStore:
             if not await self.client.collection_exists(self.collection_name):
                 return False
             point_id = self._point_id(source, source_id)
-            selector_filter = models.Filter(
-                must=[
-                    models.HasIdCondition(has_id=[point_id]),
-                    models.FieldCondition(
-                        key="content_hash",
-                        match=models.MatchValue(value=content_hash),
-                    ),
+            conditions: list[models.Condition] = [
+                models.HasIdCondition(has_id=[point_id]),
+                models.FieldCondition(
+                    key="content_hash",
+                    match=models.MatchValue(value=content_hash),
+                ),
+            ]
+            if index_fingerprint:
+                conditions.append(
                     models.FieldCondition(
                         key="metadata.vector_index_hash",
                         match=models.MatchValue(value=index_fingerprint),
-                    ),
-                ]
-            )
+                    )
+                )
+            if index_generation is None:
+                conditions.append(
+                    models.IsNullCondition(
+                        is_null=models.PayloadField(
+                            key="metadata.index_generation"
+                        )
+                    )
+                )
+            else:
+                conditions.append(
+                    models.FieldCondition(
+                        key="metadata.index_generation",
+                        match=models.MatchValue(value=index_generation),
+                    )
+                )
+            selector_filter = models.Filter(must=conditions)
             count = await self.client.count(
                 collection_name=self.collection_name,
                 count_filter=selector_filter,

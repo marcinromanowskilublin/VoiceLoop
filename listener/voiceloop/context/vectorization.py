@@ -100,6 +100,7 @@ class ContextEpisodeVectorizer:
         source_event_hashes: dict[str, str] | None = None,
         vector_index_hash: str | None = None,
         index_profile: str | None = None,
+        generation: int | None = None,
     ) -> EpisodeVectorizationResult:
         if episode.metadata.get("vectorize") is False:
             return EpisodeVectorizationResult(
@@ -160,6 +161,26 @@ class ContextEpisodeVectorizer:
                     index_fingerprint=resolved_index_hash,
                     index_profile=resolved_profile,
                 )
+            resolved_generation = generation or state.desired_generation
+            claimed = await self.memory.claim_context_index_job(
+                episode_id=episode.episode_id,
+                operation=ContextIndexOperation.UPSERT,
+                desired_revision=episode.content_hash,
+                generation=resolved_generation,
+                index_fingerprint=resolved_index_hash,
+                index_profile=resolved_profile,
+            )
+            if not claimed:
+                return EpisodeVectorizationResult(
+                    episode_id=episode.episode_id,
+                    vector_spaces=(),
+                    indexed=False,
+                    reason="superseded",
+                    index_fingerprint=resolved_index_hash,
+                    index_profile=resolved_profile,
+                )
+        else:
+            resolved_generation = generation or 1
         try:
             await self.qdrant.upsert_memory(
                 source=episode.source,
@@ -173,6 +194,7 @@ class ContextEpisodeVectorizer:
                     "source_event_hashes": resolved_source_hashes,
                     "vector_index_hash": resolved_index_hash,
                     "index_profile": resolved_profile,
+                    "index_generation": resolved_generation,
                     "started_at": episode.started_at.isoformat(),
                     "ended_at": episode.ended_at.isoformat(),
                     "time": episode.started_at.isoformat(),
@@ -201,6 +223,9 @@ class ContextEpisodeVectorizer:
                     episode_id=episode.episode_id,
                     operation=ContextIndexOperation.UPSERT,
                     desired_revision=episode.content_hash,
+                    generation=resolved_generation,
+                    index_fingerprint=resolved_index_hash,
+                    index_profile=resolved_profile,
                     error_type=type(exc).__name__,
                 )
             raise
@@ -209,6 +234,7 @@ class ContextEpisodeVectorizer:
                 episode_id=episode.episode_id,
                 operation=ContextIndexOperation.UPSERT,
                 desired_revision=episode.content_hash,
+                generation=resolved_generation,
                 index_fingerprint=resolved_index_hash,
                 index_profile=resolved_profile,
                 vector_spaces=vector_names,
@@ -225,6 +251,7 @@ class ContextEpisodeVectorizer:
                         source_id=episode.source_id,
                         content_hash=episode.content_hash,
                         index_fingerprint=resolved_index_hash,
+                        index_generation=resolved_generation,
                     )
                 return EpisodeVectorizationResult(
                     episode_id=episode.episode_id,
@@ -334,16 +361,11 @@ class ContextEpisodeIndexer:
                 )
             except Exception as exc:
                 failed += 1
-                state = await self.memory.get_context_index_state(
-                    episode.episode_id
+                await self._record_index_failure(
+                    episode,
+                    index_profile=index_profile,
+                    error_type=type(exc).__name__,
                 )
-                if state is None or state.status is not ContextIndexStatus.FAILED:
-                    await self.memory.mark_context_index_failed(
-                        episode_id=episode.episode_id,
-                        operation=ContextIndexOperation.UPSERT,
-                        desired_revision=episode.content_hash,
-                        error_type=type(exc).__name__,
-                    )
                 continue
             if outcome == "already_indexed":
                 already_indexed += 1
@@ -399,16 +421,53 @@ class ContextEpisodeIndexer:
             source_event_hashes=source_event_hashes,
             index_profile=index_profile,
         )
+        if state.status is ContextIndexStatus.CLAIMED:
+            if (
+                state.desired_index_fingerprint != vector_index_hash
+                or state.desired_index_profile != index_profile
+            ):
+                return "superseded", collection_ready
+        elif state.status is ContextIndexStatus.APPLIED and (
+            state.index_fingerprint != vector_index_hash
+            or state.index_profile != index_profile
+        ):
+            if not await self.memory.request_context_episode_reindex(
+                episode.episode_id
+            ):
+                return "superseded", collection_ready
+            state = await self.memory.get_context_index_state(
+                episode.episode_id
+            )
+            if state is None:
+                return "superseded", collection_ready
         if collection_ready and await self.qdrant.has_memory(
             source=episode.source,
             source_id=episode.source_id,
             content_hash=episode.content_hash,
             metadata_match={"vector_index_hash": vector_index_hash},
         ):
+            if (
+                state.status is ContextIndexStatus.APPLIED
+                and state.applied_generation == state.desired_generation
+                and state.index_fingerprint == vector_index_hash
+                and state.index_profile == index_profile
+            ):
+                return "already_indexed", collection_ready
+            claimed = await self.memory.claim_context_index_job(
+                episode_id=episode.episode_id,
+                operation=ContextIndexOperation.UPSERT,
+                desired_revision=episode.content_hash,
+                generation=state.desired_generation,
+                index_fingerprint=vector_index_hash,
+                index_profile=index_profile,
+            )
+            if not claimed:
+                return "superseded", collection_ready
             applied = await self.memory.mark_context_index_applied(
                 episode_id=episode.episode_id,
                 operation=ContextIndexOperation.UPSERT,
                 desired_revision=episode.content_hash,
+                generation=state.desired_generation,
                 index_fingerprint=vector_index_hash,
                 index_profile=index_profile,
                 vector_spaces=tuple(documents),
@@ -416,12 +475,23 @@ class ContextEpisodeIndexer:
             if applied:
                 return "already_indexed", collection_ready
             return "superseded", collection_ready
+        if state.status is ContextIndexStatus.APPLIED:
+            if not await self.memory.request_context_episode_reindex(
+                episode.episode_id
+            ):
+                return "superseded", collection_ready
+            state = await self.memory.get_context_index_state(
+                episode.episode_id
+            )
+            if state is None:
+                return "superseded", collection_ready
         result = await self.vectorizer.index_episode(
             episode,
             **aspects,
             source_event_hashes=source_event_hashes,
             vector_index_hash=vector_index_hash,
             index_profile=index_profile,
+            generation=state.desired_generation,
         )
         if result.reason == "superseded":
             return "superseded", collection_ready
@@ -430,6 +500,46 @@ class ContextEpisodeIndexer:
                 f"Nie udało się zindeksować epizodu: {result.reason}."
             )
         return "indexed", True
+
+    async def _record_index_failure(
+        self,
+        episode: ContextEpisodeV1,
+        *,
+        index_profile: str,
+        error_type: str,
+    ) -> None:
+        state = await self.memory.get_context_index_state(episode.episode_id)
+        if state is None or state.status is ContextIndexStatus.FAILED:
+            return
+        fingerprint = (
+            state.desired_index_fingerprint
+            or hashlib.sha256(
+                (
+                    f"context-index-failure-v1:{episode.episode_id}:"
+                    f"{episode.content_hash}:{index_profile}"
+                ).encode()
+            ).hexdigest()
+        )
+        if state.status is not ContextIndexStatus.CLAIMED:
+            claimed = await self.memory.claim_context_index_job(
+                episode_id=episode.episode_id,
+                operation=ContextIndexOperation.UPSERT,
+                desired_revision=episode.content_hash,
+                generation=state.desired_generation,
+                index_fingerprint=fingerprint,
+                index_profile=index_profile,
+            )
+            if not claimed:
+                return
+        await self.memory.mark_context_index_failed(
+            episode_id=episode.episode_id,
+            operation=ContextIndexOperation.UPSERT,
+            desired_revision=episode.content_hash,
+            generation=state.desired_generation,
+            index_fingerprint=fingerprint,
+            index_profile=index_profile,
+            error_type=error_type,
+        )
 
     async def _apply_delete_jobs(
         self,
@@ -447,10 +557,45 @@ class ContextEpisodeIndexer:
             episode = await self.memory.get_context_episode(job.episode_id)
             source = episode.source if episode is not None else job.source
             source_id = episode.source_id if episode is not None else job.source_id
+            state = await self.memory.get_context_index_state(job.episode_id)
+            if state is not None and (
+                state.desired_operation is not ContextIndexOperation.DELETE
+                or state.desired_revision != job.desired_revision
+                or state.desired_generation != job.generation
+            ):
+                await self.memory.mark_context_index_superseded(
+                    episode_id=job.episode_id,
+                    generation=job.generation,
+                )
+                continue
+            fingerprint = hashlib.sha256(
+                (
+                    f"context-index-delete-v2:{job.episode_id}:"
+                    f"{job.desired_revision}:{job.generation}:"
+                    f"{job.target_generation}:{index_profile}"
+                ).encode()
+            ).hexdigest()
+            claimed = await self.memory.claim_context_index_job(
+                episode_id=job.episode_id,
+                operation=job.operation,
+                desired_revision=job.desired_revision,
+                generation=job.generation,
+                index_fingerprint=fingerprint,
+                index_profile=index_profile,
+            )
+            if not claimed:
+                continue
             try:
-                await self.qdrant.delete_memory(
+                await self.qdrant.delete_memory_if_matches(
                     source=source,
                     source_id=source_id,
+                    content_hash=job.desired_revision,
+                    index_fingerprint=(
+                        state.index_fingerprint
+                        if state is not None and state.index_fingerprint
+                        else ""
+                    ),
+                    index_generation=job.target_generation,
                 )
             except Exception as exc:
                 failed += 1
@@ -458,19 +603,17 @@ class ContextEpisodeIndexer:
                     episode_id=job.episode_id,
                     operation=job.operation,
                     desired_revision=job.desired_revision,
+                    generation=job.generation,
+                    index_fingerprint=fingerprint,
+                    index_profile=index_profile,
                     error_type=type(exc).__name__,
                 )
                 continue
-            fingerprint = hashlib.sha256(
-                (
-                    f"context-index-delete-v1:{job.episode_id}:"
-                    f"{job.desired_revision}:{index_profile}"
-                ).encode()
-            ).hexdigest()
             if await self.memory.mark_context_index_applied(
                 episode_id=job.episode_id,
                 operation=job.operation,
                 desired_revision=job.desired_revision,
+                generation=job.generation,
                 index_fingerprint=fingerprint,
                 index_profile=index_profile,
             ):

@@ -61,6 +61,7 @@ class ContextIndexOperation(StrEnum):
 class ContextIndexStatus(StrEnum):
     NOT_REQUESTED = "not_requested"
     PENDING = "pending"
+    CLAIMED = "claimed"
     APPLIED = "applied"
     FAILED = "failed"
     SUPERSEDED = "superseded"
@@ -78,15 +79,26 @@ class ContextIndexJobV1(BaseModel):
     source_id: str = Field(min_length=1, max_length=240)
     operation: ContextIndexOperation
     desired_revision: str = Field(min_length=1, max_length=64)
+    generation: int = Field(ge=1)
+    target_generation: int | None = Field(default=None, ge=1)
     status: ContextIndexStatus
+    index_fingerprint: str | None = Field(default=None, max_length=64)
+    index_profile: str | None = Field(default=None, max_length=240)
     attempts: int = Field(default=0, ge=0)
     available_at: datetime
     claimed_at: datetime | None = None
     last_error_type: str | None = Field(default=None, max_length=120)
+    expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
-    @field_validator("available_at", "claimed_at", "created_at", "updated_at")
+    @field_validator(
+        "available_at",
+        "claimed_at",
+        "expires_at",
+        "created_at",
+        "updated_at",
+    )
     @classmethod
     def _aware_index_timestamp(cls, value: datetime | None) -> datetime | None:
         if value is None:
@@ -105,7 +117,11 @@ class ContextIndexStateV1(BaseModel):
     episode_id: str = Field(min_length=1, max_length=120)
     desired_operation: ContextIndexOperation
     desired_revision: str = Field(min_length=1, max_length=64)
+    desired_generation: int = Field(ge=1)
+    desired_index_fingerprint: str | None = Field(default=None, max_length=64)
+    desired_index_profile: str | None = Field(default=None, max_length=240)
     applied_revision: str | None = Field(default=None, max_length=64)
+    applied_generation: int | None = Field(default=None, ge=1)
     status: ContextIndexStatus
     index_fingerprint: str | None = Field(default=None, max_length=64)
     index_profile: str | None = Field(default=None, max_length=240)
