@@ -2119,6 +2119,7 @@ class MemoryStore:
                           AND claim_token = ?
                           AND index_fingerprint = ?
                           AND index_profile = ?
+                          AND status = ?
                         """,
                         (
                             ContextIndexStatus.APPLIED.value,
@@ -2132,6 +2133,7 @@ class MemoryStore:
                             claim_token,
                             index_fingerprint,
                             index_profile,
+                            ContextIndexStatus.CLAIMED.value,
                         ),
                     )
                     return cursor.rowcount > 0
@@ -2325,6 +2327,7 @@ class MemoryStore:
                           AND claim_token = ?
                           AND index_fingerprint = ?
                           AND index_profile = ?
+                          AND status = ?
                         """,
                         (
                             ContextIndexStatus.FAILED.value,
@@ -2336,6 +2339,7 @@ class MemoryStore:
                             claim_token,
                             index_fingerprint,
                             index_profile,
+                            ContextIndexStatus.CLAIMED.value,
                         ),
                     )
                     return cursor.rowcount > 0
