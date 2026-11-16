@@ -98,7 +98,9 @@ async def test_qdrant_conditional_delete_matches_exact_index_version(
     assert deleted is True
     selector = client.delete.await_args.kwargs["points_selector"]
     conditions = selector.filter.must
-    assert conditions[0].has_id == [store._point_id("timeline", "episode-1")]
+    assert conditions[0].has_id == [
+        store._point_id("timeline", "episode-1", "7")
+    ]
     assert conditions[1].key == "content_hash"
     assert conditions[1].match.value == "content-v1"
     assert conditions[2].key == "metadata.vector_index_hash"
@@ -213,7 +215,9 @@ async def test_qdrant_ensures_payload_indexes_on_existing_collection(tmp_path) -
         "content_hash",
         "embedding_prefix_policy",
         "embedding_input_kind",
+        "metadata.index_claim_token",
         "expires_at",
+        "metadata.index_generation",
     }
 
 

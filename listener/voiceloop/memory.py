@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from .context.entities import (
     ContextEntityCandidateV1,
@@ -316,6 +317,7 @@ class MemoryStore:
                 desired_operation = excluded.desired_operation,
                 desired_revision = excluded.desired_revision,
                 desired_generation = excluded.desired_generation,
+                desired_claim_token = NULL,
                 desired_index_fingerprint = NULL,
                 desired_index_profile = NULL,
                 status = excluded.status,
@@ -352,6 +354,7 @@ class MemoryStore:
                 target_generation = excluded.target_generation,
                 status = excluded.status,
                 available_at = excluded.available_at,
+                claim_token = NULL,
                 claimed_at = NULL,
                 last_error_type = NULL,
                 expires_at = NULL,
@@ -404,9 +407,11 @@ class MemoryStore:
         }
         for column_name, ddl in (
             ("desired_generation", "INTEGER NOT NULL DEFAULT 1"),
+            ("desired_claim_token", "TEXT"),
             ("desired_index_fingerprint", "TEXT"),
             ("desired_index_profile", "TEXT"),
             ("applied_generation", "INTEGER"),
+            ("applied_claim_token", "TEXT"),
         ):
             if column_name not in state_columns:
                 connection.execute(
@@ -484,6 +489,7 @@ class MemoryStore:
             "source_id",
             "generation",
             "target_generation",
+            "claim_token",
             "index_fingerprint",
             "index_profile",
             "expires_at",
@@ -536,6 +542,7 @@ class MemoryStore:
                 generation INTEGER NOT NULL,
                 target_generation INTEGER,
                 status TEXT NOT NULL,
+                claim_token TEXT,
                 index_fingerprint TEXT,
                 index_profile TEXT,
                 attempts INTEGER NOT NULL DEFAULT 0,
@@ -583,10 +590,10 @@ class MemoryStore:
                 INSERT INTO context_index_outbox_v2(
                     job_id, schema_version, episode_id, source, source_id,
                     operation, desired_revision, generation,
-                    target_generation, status, index_fingerprint,
+                    target_generation, status, claim_token, index_fingerprint,
                     index_profile, attempts, available_at, claimed_at,
                     last_error_type, expires_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     self._context_index_job_id(
@@ -605,6 +612,7 @@ class MemoryStore:
                     row.get("target_generation")
                     or (state["applied_generation"] if state is not None else None),
                     ContextIndexStatus.PENDING.value,
+                    row.get("claim_token"),
                     row.get("index_fingerprint"),
                     row.get("index_profile"),
                     int(row.get("attempts") or 0),
@@ -901,10 +909,12 @@ class MemoryStore:
                         desired_operation TEXT NOT NULL,
                         desired_revision TEXT NOT NULL,
                         desired_generation INTEGER NOT NULL DEFAULT 1,
+                        desired_claim_token TEXT,
                         desired_index_fingerprint TEXT,
                         desired_index_profile TEXT,
                         applied_revision TEXT,
                         applied_generation INTEGER,
+                        applied_claim_token TEXT,
                         status TEXT NOT NULL,
                         index_fingerprint TEXT,
                         index_profile TEXT,
@@ -927,6 +937,7 @@ class MemoryStore:
                         generation INTEGER NOT NULL,
                         target_generation INTEGER,
                         status TEXT NOT NULL,
+                        claim_token TEXT,
                         index_fingerprint TEXT,
                         index_profile TEXT,
                         attempts INTEGER NOT NULL DEFAULT 0,
@@ -1953,14 +1964,15 @@ class MemoryStore:
         index_fingerprint: str,
         index_profile: str,
         lease_seconds: int = 120,
-    ) -> bool:
+    ) -> str | None:
         timestamp = datetime.now(UTC)
+        claim_token = uuid4().hex
         now_iso = timestamp.isoformat()
         lease_until = (
             timestamp + timedelta(seconds=max(10, min(lease_seconds, 3600)))
         ).isoformat()
 
-        def _claim() -> bool:
+        def _claim() -> str | None:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 state = connection.execute(
@@ -1978,16 +1990,16 @@ class MemoryStore:
                     (episode_id, generation),
                 ).fetchone()
                 if job is None:
-                    return False
+                    return None
                 if state is not None and (
                     state["desired_operation"] != operation.value
                     or state["desired_revision"] != desired_revision
                     or int(state["desired_generation"]) != generation
                     or state["status"] == ContextIndexStatus.NOT_REQUESTED.value
                 ):
-                    return False
+                    return None
                 if state is None and operation is not ContextIndexOperation.DELETE:
-                    return False
+                    return None
                 claimable = job["status"] in {
                     ContextIndexStatus.PENDING.value,
                     ContextIndexStatus.FAILED.value,
@@ -1996,11 +2008,11 @@ class MemoryStore:
                     and str(job["available_at"]) <= now_iso
                 )
                 if not claimable:
-                    return False
+                    return None
                 cursor = connection.execute(
                     """
                     UPDATE context_index_outbox
-                    SET status = ?, index_fingerprint = ?,
+                    SET status = ?, claim_token = ?, index_fingerprint = ?,
                         index_profile = ?, claimed_at = ?,
                         available_at = ?, expires_at = NULL,
                         updated_at = ?
@@ -2012,6 +2024,7 @@ class MemoryStore:
                     """,
                     (
                         ContextIndexStatus.CLAIMED.value,
+                        claim_token,
                         index_fingerprint,
                         index_profile,
                         now_iso,
@@ -2026,24 +2039,26 @@ class MemoryStore:
                     ),
                 )
                 if not cursor.rowcount:
-                    return False
+                    return None
                 if state is not None:
                     connection.execute(
                         """
                         UPDATE context_index_state
-                        SET status = ?, desired_index_fingerprint = ?,
+                    SET status = ?, desired_claim_token = ?,
+                        desired_index_fingerprint = ?,
                             desired_index_profile = ?, updated_at = ?
                         WHERE episode_id = ?
                         """,
                         (
                             ContextIndexStatus.CLAIMED.value,
+                        claim_token,
                             index_fingerprint,
                             index_profile,
                             now_iso,
                             episode_id,
                         ),
                     )
-                return True
+                return claim_token
 
         return await asyncio.to_thread(_claim)
 
@@ -2054,6 +2069,7 @@ class MemoryStore:
         operation: ContextIndexOperation,
         desired_revision: str,
         generation: int,
+        claim_token: str,
         index_fingerprint: str,
         index_profile: str,
         vector_spaces: tuple[str, ...] = (),
@@ -2087,6 +2103,7 @@ class MemoryStore:
                           AND operation = ?
                           AND desired_revision = ?
                           AND generation = ?
+                          AND claim_token = ?
                           AND index_fingerprint = ?
                           AND index_profile = ?
                         """,
@@ -2099,6 +2116,7 @@ class MemoryStore:
                             operation.value,
                             desired_revision,
                             generation,
+                            claim_token,
                             index_fingerprint,
                             index_profile,
                         ),
@@ -2109,6 +2127,7 @@ class MemoryStore:
                     or state["desired_operation"] != operation.value
                     or state["desired_revision"] != desired_revision
                     or int(state["desired_generation"]) != generation
+                    or state["desired_claim_token"] != claim_token
                     or state["desired_index_fingerprint"] != index_fingerprint
                     or state["desired_index_profile"] != index_profile
                     or state["status"] != ContextIndexStatus.CLAIMED.value
@@ -2189,7 +2208,8 @@ class MemoryStore:
                 connection.execute(
                     """
                     UPDATE context_index_state
-                    SET applied_revision = ?, applied_generation = ?, status = ?,
+                    SET applied_revision = ?, applied_generation = ?,
+                        applied_claim_token = ?, status = ?,
                         index_fingerprint = ?, index_profile = ?,
                         vector_spaces_json = ?, last_error_type = NULL,
                         updated_at = ?
@@ -2198,6 +2218,7 @@ class MemoryStore:
                     (
                         desired_revision,
                         generation,
+                        claim_token,
                         terminal_status.value,
                         index_fingerprint,
                         index_profile,
@@ -2213,6 +2234,7 @@ class MemoryStore:
                         last_error_type = NULL, expires_at = ?, updated_at = ?
                     WHERE episode_id = ?
                       AND generation = ?
+                      AND claim_token = ?
                     """,
                     (
                         ContextIndexStatus.APPLIED.value,
@@ -2221,6 +2243,7 @@ class MemoryStore:
                         timestamp,
                         episode_id,
                         generation,
+                        claim_token,
                     ),
                 )
                 connection.execute(
@@ -2253,6 +2276,7 @@ class MemoryStore:
         operation: ContextIndexOperation,
         desired_revision: str,
         generation: int,
+        claim_token: str,
         index_fingerprint: str,
         index_profile: str,
         error_type: str,
@@ -2265,7 +2289,8 @@ class MemoryStore:
                 state = connection.execute(
                     """
                     SELECT desired_operation, desired_revision,
-                           desired_generation, desired_index_fingerprint,
+                           desired_generation, desired_claim_token,
+                           desired_index_fingerprint,
                            desired_index_profile, status
                     FROM context_index_state
                     WHERE episode_id = ?
@@ -2281,6 +2306,7 @@ class MemoryStore:
                             available_at = ?, updated_at = ?
                         WHERE episode_id = ?
                           AND generation = ?
+                          AND claim_token = ?
                           AND index_fingerprint = ?
                           AND index_profile = ?
                         """,
@@ -2291,6 +2317,7 @@ class MemoryStore:
                             timestamp,
                             episode_id,
                             generation,
+                            claim_token,
                             index_fingerprint,
                             index_profile,
                         ),
@@ -2301,6 +2328,7 @@ class MemoryStore:
                     or state["desired_operation"] != operation.value
                     or state["desired_revision"] != desired_revision
                     or int(state["desired_generation"]) != generation
+                    or state["desired_claim_token"] != claim_token
                     or state["desired_index_fingerprint"] != index_fingerprint
                     or state["desired_index_profile"] != index_profile
                     or state["status"] != ContextIndexStatus.CLAIMED.value
@@ -2327,6 +2355,7 @@ class MemoryStore:
                         last_error_type = ?, claimed_at = NULL,
                         available_at = ?, updated_at = ?
                     WHERE episode_id = ? AND generation = ?
+                      AND claim_token = ?
                     """,
                     (
                         ContextIndexStatus.FAILED.value,
@@ -2335,6 +2364,7 @@ class MemoryStore:
                         timestamp,
                         episode_id,
                         generation,
+                        claim_token,
                     ),
                 )
                 return cursor.rowcount > 0
@@ -4991,6 +5021,7 @@ class MemoryStore:
                 else None
             ),
             status=ContextIndexStatus(row["status"]),
+            claim_token=row["claim_token"],
             index_fingerprint=row["index_fingerprint"],
             index_profile=row["index_profile"],
             attempts=int(row["attempts"]),
@@ -5021,6 +5052,7 @@ class MemoryStore:
             desired_operation=ContextIndexOperation(row["desired_operation"]),
             desired_revision=row["desired_revision"],
             desired_generation=int(row["desired_generation"]),
+            desired_claim_token=row["desired_claim_token"],
             desired_index_fingerprint=row["desired_index_fingerprint"],
             desired_index_profile=row["desired_index_profile"],
             applied_revision=row["applied_revision"],
@@ -5029,6 +5061,7 @@ class MemoryStore:
                 if row["applied_generation"] is not None
                 else None
             ),
+            applied_claim_token=row["applied_claim_token"],
             status=ContextIndexStatus(row["status"]),
             index_fingerprint=row["index_fingerprint"],
             index_profile=row["index_profile"],

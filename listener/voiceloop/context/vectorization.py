@@ -179,8 +179,10 @@ class ContextEpisodeVectorizer:
                     index_fingerprint=resolved_index_hash,
                     index_profile=resolved_profile,
                 )
+            resolved_claim_token = claimed
         else:
             resolved_generation = generation or 1
+            resolved_claim_token = "standalone"
         try:
             await self.qdrant.upsert_memory(
                 source=episode.source,
@@ -195,6 +197,7 @@ class ContextEpisodeVectorizer:
                     "vector_index_hash": resolved_index_hash,
                     "index_profile": resolved_profile,
                     "index_generation": resolved_generation,
+                    "index_claim_token": resolved_claim_token,
                     "started_at": episode.started_at.isoformat(),
                     "ended_at": episode.ended_at.isoformat(),
                     "time": episode.started_at.isoformat(),
@@ -216,6 +219,9 @@ class ContextEpisodeVectorizer:
                 memory_type="context_episode",
                 content_hash=episode.content_hash,
                 expires_at=episode.expires_at,
+                point_revision=(
+                    f"{resolved_generation}:{resolved_claim_token}"
+                ),
             )
             verifier = getattr(self.qdrant, "has_memory", None)
             if callable(verifier):
@@ -226,7 +232,11 @@ class ContextEpisodeVectorizer:
                     metadata_match={
                         "vector_index_hash": resolved_index_hash,
                         "index_generation": str(resolved_generation),
+                        "index_claim_token": resolved_claim_token,
                     },
+                    point_revision=(
+                        f"{resolved_generation}:{resolved_claim_token}"
+                    ),
                 )
                 if inspect.isawaitable(verified):
                     verified = await verified
@@ -245,6 +255,7 @@ class ContextEpisodeVectorizer:
                     is ContextIndexOperation.UPSERT
                     and current.desired_revision == episode.content_hash
                     and current.desired_generation == resolved_generation
+                    and current.desired_claim_token == resolved_claim_token
                     and current.desired_index_fingerprint
                     == resolved_index_hash
                     and current.desired_index_profile == resolved_profile
@@ -256,6 +267,7 @@ class ContextEpisodeVectorizer:
                         operation=ContextIndexOperation.UPSERT,
                         desired_revision=episode.content_hash,
                         generation=resolved_generation,
+                        claim_token=resolved_claim_token,
                         index_fingerprint=resolved_index_hash,
                         index_profile=resolved_profile,
                         error_type=type(exc).__name__,
@@ -274,6 +286,7 @@ class ContextEpisodeVectorizer:
                                 content_hash=episode.content_hash,
                                 index_fingerprint=resolved_index_hash,
                                 index_generation=resolved_generation,
+                                claim_token=resolved_claim_token,
                             )
                             if inspect.isawaitable(cleaned):
                                 await cleaned
@@ -286,10 +299,28 @@ class ContextEpisodeVectorizer:
                 operation=ContextIndexOperation.UPSERT,
                 desired_revision=episode.content_hash,
                 generation=resolved_generation,
+                claim_token=resolved_claim_token,
                 index_fingerprint=resolved_index_hash,
                 index_profile=resolved_profile,
                 vector_spaces=vector_names,
             )
+            if applied and resolved_generation > 1:
+                prune_older = getattr(
+                    self.qdrant,
+                    "delete_memory_through_generation",
+                    None,
+                )
+                if callable(prune_older):
+                    try:
+                        pruned = prune_older(
+                            source=episode.source,
+                            source_id=episode.source_id,
+                            max_generation=resolved_generation - 1,
+                        )
+                        if inspect.isawaitable(pruned):
+                            await pruned
+                    except Exception:
+                        pass
             if not applied:
                 cleanup = getattr(
                     self.qdrant,
@@ -303,6 +334,7 @@ class ContextEpisodeVectorizer:
                         content_hash=episode.content_hash,
                         index_fingerprint=resolved_index_hash,
                         index_generation=resolved_generation,
+                        claim_token=resolved_claim_token,
                     )
                 current = await self.memory.get_context_index_state(
                     episode.episode_id
@@ -392,6 +424,7 @@ class ContextEpisodeIndexer:
             limit=limit,
             index_profile="context-index-delete-v1",
         )
+        deleted += await self._verify_applied_delete_jobs(limit=limit)
         episodes = await self.memory.list_context_episodes(
             limit=limit,
             offset=offset,
@@ -500,14 +533,27 @@ class ContextEpisodeIndexer:
             )
             if state is None:
                 return "superseded", collection_ready
-        if collection_ready and await self.qdrant.has_memory(
+        metadata_match = {
+            "vector_index_hash": vector_index_hash,
+            "index_generation": str(state.desired_generation),
+        }
+        if state.desired_claim_token:
+            metadata_match["index_claim_token"] = state.desired_claim_token
+        point_revision = (
+            f"{state.desired_generation}:{state.desired_claim_token}"
+            if state.desired_claim_token
+            else str(state.desired_generation)
+        )
+        if (
+            collection_ready
+            and state.desired_claim_token
+            and await self.qdrant.has_memory(
             source=episode.source,
             source_id=episode.source_id,
             content_hash=episode.content_hash,
-            metadata_match={
-                "vector_index_hash": vector_index_hash,
-                "index_generation": str(state.desired_generation),
-            },
+            metadata_match=metadata_match,
+            point_revision=point_revision,
+            )
         ):
             if (
                 state.status is ContextIndexStatus.APPLIED
@@ -516,7 +562,7 @@ class ContextEpisodeIndexer:
                 and state.index_profile == index_profile
             ):
                 return "already_indexed", collection_ready
-            claimed = await self.memory.claim_context_index_job(
+            claim_token = await self.memory.claim_context_index_job(
                 episode_id=episode.episode_id,
                 operation=ContextIndexOperation.UPSERT,
                 desired_revision=episode.content_hash,
@@ -524,13 +570,14 @@ class ContextEpisodeIndexer:
                 index_fingerprint=vector_index_hash,
                 index_profile=index_profile,
             )
-            if not claimed:
+            if not claim_token:
                 return "superseded", collection_ready
             applied = await self.memory.mark_context_index_applied(
                 episode_id=episode.episode_id,
                 operation=ContextIndexOperation.UPSERT,
                 desired_revision=episode.content_hash,
                 generation=state.desired_generation,
+                claim_token=claim_token,
                 index_fingerprint=vector_index_hash,
                 index_profile=index_profile,
                 vector_spaces=tuple(documents),
@@ -583,6 +630,7 @@ class ContextEpisodeIndexer:
                 ).encode()
             ).hexdigest()
         )
+        claim_token = state.desired_claim_token or ""
         if state.status is not ContextIndexStatus.CLAIMED:
             claimed = await self.memory.claim_context_index_job(
                 episode_id=episode.episode_id,
@@ -594,11 +642,15 @@ class ContextEpisodeIndexer:
             )
             if not claimed:
                 return
+            claim_token = claimed
+        if not claim_token:
+            return
         await self.memory.mark_context_index_failed(
             episode_id=episode.episode_id,
             operation=ContextIndexOperation.UPSERT,
             desired_revision=episode.content_hash,
             generation=state.desired_generation,
+            claim_token=claim_token,
             index_fingerprint=fingerprint,
             index_profile=index_profile,
             error_type=error_type,
@@ -648,6 +700,7 @@ class ContextEpisodeIndexer:
             )
             if not claimed:
                 continue
+            claim_token = claimed
             try:
                 removed = await self.qdrant.delete_memory_through_generation(
                     source=source,
@@ -661,6 +714,7 @@ class ContextEpisodeIndexer:
                     operation=job.operation,
                     desired_revision=job.desired_revision,
                     generation=job.generation,
+                    claim_token=claim_token,
                     index_fingerprint=fingerprint,
                     index_profile=index_profile,
                     error_type=type(exc).__name__,
@@ -671,11 +725,28 @@ class ContextEpisodeIndexer:
                 operation=job.operation,
                 desired_revision=job.desired_revision,
                 generation=job.generation,
+                claim_token=claim_token,
                 index_fingerprint=fingerprint,
                 index_profile=index_profile,
             ) and removed:
                 deleted += 1
         return deleted, failed
+
+    async def _verify_applied_delete_jobs(self, *, limit: int) -> int:
+        jobs = await self.memory.list_context_index_jobs(
+            operation=ContextIndexOperation.DELETE,
+            statuses=(ContextIndexStatus.APPLIED,),
+            limit=limit,
+        )
+        deleted = 0
+        for job in jobs:
+            if await self.qdrant.delete_memory_through_generation(
+                source=job.source,
+                source_id=job.source_id,
+                max_generation=job.target_generation,
+            ):
+                deleted += 1
+        return deleted
 
     async def _complete_source_hashes(
         self,

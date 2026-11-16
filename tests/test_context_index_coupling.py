@@ -40,7 +40,7 @@ class QdrantStub:
     collection_name = "voiceloop_context_episodes_v1"
 
     def __init__(self) -> None:
-        self.points: dict[tuple[str, str], tuple[str, str, int]] = {}
+        self.points: dict[tuple[str, str, str], tuple[str, str, int]] = {}
         self.upsert_count = 0
         self.deleted: list[tuple[str, str]] = []
         self.fail_upsert = False
@@ -58,8 +58,9 @@ class QdrantStub:
         source_id,
         content_hash,
         metadata_match,
+        point_revision=None,
     ):
-        point = self.points.get((source, source_id))
+        point = self.points.get((source, source_id, str(point_revision or "")))
         if point is None or point[:2] != (
             content_hash,
             metadata_match["vector_index_hash"],
@@ -78,19 +79,26 @@ class QdrantStub:
         source_id,
         content_hash,
         metadata,
+        point_revision=None,
         **_kwargs,
     ):
         if self.fail_upsert:
             raise RuntimeError("synthetic qdrant outage")
-        self.points[(source, source_id)] = (
+        self.points[(source, source_id, str(point_revision or ""))] = (
             content_hash,
             metadata["vector_index_hash"],
             metadata["index_generation"],
         )
         self.upsert_count += 1
 
-    async def delete_memory(self, *, source: str, source_id: str) -> None:
-        self.points.pop((source, source_id), None)
+    async def delete_memory(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        point_revision=None,
+    ) -> None:
+        self.points.pop((source, source_id, str(point_revision or "")), None)
         self.deleted.append((source, source_id))
 
     async def delete_memory_if_matches(
@@ -101,8 +109,15 @@ class QdrantStub:
         content_hash: str,
         index_fingerprint: str,
         index_generation: int,
+        claim_token: str = "",
     ) -> bool:
-        point = self.points.get((source, source_id))
+        revision = (
+            f"{index_generation}:{claim_token}"
+            if index_generation is not None and claim_token
+            else str(index_generation or "")
+        )
+        key = (source, source_id, revision)
+        point = self.points.get(key)
         if point is None or point[0] != content_hash:
             return False
         if index_fingerprint and point[1] != index_fingerprint:
@@ -111,7 +126,7 @@ class QdrantStub:
             return False
         if index_generation is not None and point[2] != index_generation:
             return False
-        self.points.pop((source, source_id), None)
+        self.points.pop(key, None)
         self.deleted.append((source, source_id))
         return True
 
@@ -122,14 +137,36 @@ class QdrantStub:
         source_id: str,
         max_generation: int | None,
     ) -> bool:
-        point = self.points.get((source, source_id))
-        if point is None:
-            return False
-        if max_generation is not None and point[2] > max_generation:
-            return False
-        self.points.pop((source, source_id), None)
-        self.deleted.append((source, source_id))
-        return True
+        keys = [
+            key
+            for key, point in self.points.items()
+            if key[:2] == (source, source_id)
+            and (
+                (max_generation is None and key[2] == "")
+                or (
+                    max_generation is not None
+                    and point[2] <= max_generation
+                )
+            )
+        ]
+        for key in keys:
+            self.points.pop(key, None)
+        if keys:
+            self.deleted.append((source, source_id))
+        return bool(keys)
+
+    def latest_point(
+        self,
+        *,
+        source: str,
+        source_id: str,
+    ) -> tuple[str, str, int]:
+        matches = [
+            point
+            for key, point in self.points.items()
+            if key[:2] == (source, source_id)
+        ]
+        return max(matches, key=lambda point: point[2])
 
 
 async def seeded_episode(
@@ -297,6 +334,7 @@ async def test_stale_completion_cannot_overwrite_new_desired_revision(tmp_path) 
         operation=ContextIndexOperation.UPSERT,
         desired_revision=first.content_hash,
         generation=first_state.desired_generation,
+        claim_token="stale-claim",
         index_fingerprint="a" * 64,
         index_profile="test-profile",
         vector_spaces=("semantic",),
@@ -500,7 +538,7 @@ async def test_hard_delete_preserves_durable_qdrant_delete_job(tmp_path) -> None
     assert jobs[0].source_id == episode.source_id
 
     qdrant = QdrantStub()
-    qdrant.points[(episode.source, episode.source_id)] = (
+    qdrant.points[(episode.source, episode.source_id, "1")] = (
         episode.content_hash,
         "old-fingerprint",
         1,
@@ -513,7 +551,10 @@ async def test_hard_delete_preserves_durable_qdrant_delete_job(tmp_path) -> None
     ).index(dry_run=False)
 
     assert report.deleted == 1
-    assert (episode.source, episode.source_id) not in qdrant.points
+    assert not any(
+        key[:2] == (episode.source, episode.source_id)
+        for key in qdrant.points
+    )
     assert (await store.context_index_summary())["outbox_ready"] == 0
 
 
@@ -663,7 +704,9 @@ async def test_opt_out_deletes_crash_window_remote_point(tmp_path) -> None:
     state = await store.get_context_index_state(episode.episode_id)
     assert state is not None
     qdrant = QdrantStub()
-    qdrant.points[(episode.source, episode.source_id)] = (
+    qdrant.points[
+        (episode.source, episode.source_id, str(state.desired_generation))
+    ] = (
         episode.content_hash,
         "remote-before-sql-apply",
         state.desired_generation,
@@ -718,7 +761,9 @@ async def test_opt_out_targets_latest_unapplied_remote_generation(
         index_fingerprint=crash_fingerprint,
         index_profile="crashed-profile",
     )
-    qdrant.points[(episode.source, episode.source_id)] = (
+    qdrant.points[
+        (episode.source, episode.source_id, str(pending.desired_generation))
+    ] = (
         episode.content_hash,
         crash_fingerprint,
         pending.desired_generation,
@@ -767,7 +812,10 @@ async def test_opt_out_deletes_older_projection_when_latest_write_never_landed(
         qdrant=qdrant,  # type: ignore[arg-type]
         primary_collection="voiceloop_memory",
     ).index(dry_run=False)
-    old_point = qdrant.points[(episode.source, episode.source_id)]
+    old_point = qdrant.latest_point(
+        source=episode.source,
+        source_id=episode.source_id,
+    )
     assert await store.request_context_episode_reindex(episode.episode_id)
     newest = await store.get_context_index_state(episode.episode_id)
     assert newest is not None
@@ -832,7 +880,10 @@ async def test_late_delete_cannot_remove_restored_generation(tmp_path) -> None:
 
     await initial.index(dry_run=False)
     state = await store.get_context_index_state(episode.episode_id)
-    point = qdrant.points[(episode.source, episode.source_id)]
+    point = qdrant.latest_point(
+        source=episode.source,
+        source_id=episode.source_id,
+    )
 
     assert state is not None
     assert state.desired_operation is ContextIndexOperation.UPSERT
@@ -938,6 +989,49 @@ async def test_timeout_after_remote_commit_is_compensated_after_opt_out(
 
 
 @pytest.mark.asyncio
+async def test_applied_delete_job_reconciles_late_remote_residue(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+    qdrant = QdrantStub()
+    indexer = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+    await indexer.index(dry_run=False)
+    await store.upsert_context_episode(
+        episode.model_copy(
+            update={
+                "metadata": {"vectorize": False},
+                "updated_at": datetime.now(UTC),
+            }
+        )
+    )
+    await indexer.index(dry_run=False)
+    applied_jobs = await store.list_context_index_jobs(
+        operation=ContextIndexOperation.DELETE,
+        statuses=(ContextIndexStatus.APPLIED,),
+    )
+    assert len(applied_jobs) == 1
+    target = applied_jobs[0].target_generation
+    assert target is not None
+    qdrant.points[(episode.source, episode.source_id, str(target))] = (
+        episode.content_hash,
+        "late-residue",
+        target,
+    )
+
+    report = await indexer.index(dry_run=False)
+
+    assert report.deleted == 1
+    assert qdrant.points == {}
+
+
+@pytest.mark.asyncio
 async def test_concurrent_embedding_profiles_use_single_claim(tmp_path) -> None:
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
@@ -975,7 +1069,10 @@ async def test_concurrent_embedding_profiles_use_single_claim(tmp_path) -> None:
     qdrant.release.set()
     first_report = await first_task
     state = await store.get_context_index_state(episode.episode_id)
-    point = qdrant.points[(episode.source, episode.source_id)]
+    point = qdrant.latest_point(
+        source=episode.source,
+        source_id=episode.source_id,
+    )
 
     assert first_report.indexed == 1
     assert second_report.indexed == 0
@@ -1058,11 +1155,18 @@ async def test_lease_takeover_cannot_report_applied_after_point_is_removed(
     second_report = await second_task
     state = await store.get_context_index_state(episode.episode_id)
 
-    assert second_report.failed == 1
+    assert second_report.failed == 0
+    assert second_report.indexed == 1
     assert state is not None
-    assert state.status is ContextIndexStatus.FAILED
-    assert qdrant.points == {}
-    assert (await store.context_index_summary())["outbox_ready"] == 1
+    assert state.status is ContextIndexStatus.APPLIED
+    assert state.index_profile and state.index_profile.endswith(":embedding-b")
+    point = qdrant.latest_point(
+        source=episode.source,
+        source_id=episode.source_id,
+    )
+    assert point[1] == state.index_fingerprint
+    assert len(qdrant.points) == 1
+    assert (await store.context_index_summary())["outbox_ready"] == 0
 
 
 @pytest.mark.asyncio
@@ -1073,7 +1177,7 @@ async def test_claim_is_atomic_for_concurrent_workers(tmp_path) -> None:
     state = await store.get_context_index_state(episode.episode_id)
     assert state is not None
 
-    async def claim(worker: str) -> bool:
+    async def claim(worker: str) -> str | None:
         return await store.claim_context_index_job(
             episode_id=episode.episode_id,
             operation=ContextIndexOperation.UPSERT,
@@ -1085,7 +1189,7 @@ async def test_claim_is_atomic_for_concurrent_workers(tmp_path) -> None:
 
     claimed = await asyncio.gather(claim("a"), claim("b"))
 
-    assert sum(claimed) == 1
+    assert sum(bool(token) for token in claimed) == 1
 
 
 @pytest.mark.asyncio
@@ -1138,6 +1242,7 @@ async def test_expired_lease_can_be_reclaimed_by_new_embedding_profile(
         operation=ContextIndexOperation.UPSERT,
         desired_revision=episode.content_hash,
         generation=state.desired_generation,
+        claim_token=final.desired_claim_token or "",
         index_fingerprint=final.index_fingerprint or "",
         index_profile=final.index_profile or "",
         error_type="LateWorkerFailure",

@@ -175,6 +175,7 @@ class QdrantVectorStore:
                     "content_hash",
                     "embedding_prefix_policy",
                     "embedding_input_kind",
+                    "metadata.index_claim_token",
                 ):
                     await self.client.create_payload_index(
                         collection_name=self.collection_name,
@@ -185,6 +186,11 @@ class QdrantVectorStore:
                     collection_name=self.collection_name,
                     field_name="expires_at",
                     field_schema=models.PayloadSchemaType.DATETIME,
+                )
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="metadata.index_generation",
+                    field_schema=models.PayloadSchemaType.INTEGER,
                 )
             else:
                 info = await self.client.get_collection(self.collection_name)
@@ -214,6 +220,7 @@ class QdrantVectorStore:
                     "content_hash",
                     "embedding_prefix_policy",
                     "embedding_input_kind",
+                    "metadata.index_claim_token",
                 ):
                     await self.client.create_payload_index(
                         collection_name=self.collection_name,
@@ -224,6 +231,11 @@ class QdrantVectorStore:
                     collection_name=self.collection_name,
                     field_name="expires_at",
                     field_schema=models.PayloadSchemaType.DATETIME,
+                )
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="metadata.index_generation",
+                    field_schema=models.PayloadSchemaType.INTEGER,
                 )
             self._dimension = dimension
         except QdrantMemoryError:
@@ -240,10 +252,11 @@ class QdrantVectorStore:
         source_id: str,
         content_hash: str | None = None,
         metadata_match: Mapping[str, str] | None = None,
+        point_revision: str | None = None,
     ) -> bool:
         if not self.enabled:
             return False
-        point_id = self._point_id(source, source_id)
+        point_id = self._point_id(source, source_id, point_revision)
         try:
             records = await self.client.retrieve(
                 collection_name=self.collection_name,
@@ -328,6 +341,7 @@ class QdrantVectorStore:
         *,
         source: str,
         source_id: str,
+        point_revision: str | None = None,
     ) -> dict[str, Any] | None:
         """Odczyt payloadu bez wektorów.
 
@@ -340,7 +354,7 @@ class QdrantVectorStore:
         try:
             records = await self.client.retrieve(
                 collection_name=self.collection_name,
-                ids=[self._point_id(source, source_id)],
+                ids=[self._point_id(source, source_id, point_revision)],
                 with_payload=True,
                 with_vectors=False,
             )
@@ -357,7 +371,13 @@ class QdrantVectorStore:
         payload = getattr(records[0], "payload", None)
         return dict(payload) if isinstance(payload, dict) else None
 
-    async def delete_memory(self, *, source: str, source_id: str) -> None:
+    async def delete_memory(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        point_revision: str | None = None,
+    ) -> None:
         if not self.enabled:
             return
         try:
@@ -366,7 +386,7 @@ class QdrantVectorStore:
             await self.client.delete(
                 collection_name=self.collection_name,
                 points_selector=models.PointIdsList(
-                    points=[self._point_id(source, source_id)]
+                    points=[self._point_id(source, source_id, point_revision)]
                 ),
                 wait=True,
             )
@@ -383,6 +403,7 @@ class QdrantVectorStore:
         content_hash: str,
         index_fingerprint: str = "",
         index_generation: int | None = None,
+        claim_token: str = "",
     ) -> bool:
         """Delete only the stale projection version written by this worker."""
 
@@ -391,7 +412,19 @@ class QdrantVectorStore:
         try:
             if not await self.client.collection_exists(self.collection_name):
                 return False
-            point_id = self._point_id(source, source_id)
+            point_id = self._point_id(
+                source,
+                source_id,
+                (
+                    f"{index_generation}:{claim_token}"
+                    if index_generation is not None and claim_token
+                    else (
+                        str(index_generation)
+                        if index_generation is not None
+                        else None
+                    )
+                ),
+            )
             conditions: list[models.Condition] = [
                 models.HasIdCondition(has_id=[point_id]),
                 models.FieldCondition(
@@ -419,6 +452,13 @@ class QdrantVectorStore:
                     models.FieldCondition(
                         key="metadata.index_generation",
                         match=models.MatchValue(value=index_generation),
+                    )
+                )
+            if claim_token:
+                conditions.append(
+                    models.FieldCondition(
+                        key="metadata.index_claim_token",
+                        match=models.MatchValue(value=claim_token),
                     )
                 )
             selector_filter = models.Filter(must=conditions)
@@ -455,7 +495,6 @@ class QdrantVectorStore:
         try:
             if not await self.client.collection_exists(self.collection_name):
                 return False
-            point_id = self._point_id(source, source_id)
             version_conditions: list[models.Condition] = [
                 models.IsEmptyCondition(
                     is_empty=models.PayloadField(
@@ -471,7 +510,16 @@ class QdrantVectorStore:
                     )
                 )
             selector_filter = models.Filter(
-                must=[models.HasIdCondition(has_id=[point_id])],
+                must=[
+                    models.FieldCondition(
+                        key="source",
+                        match=models.MatchValue(value=source),
+                    ),
+                    models.FieldCondition(
+                        key="source_id",
+                        match=models.MatchValue(value=source_id),
+                    ),
+                ],
                 min_should=models.MinShould(
                     conditions=version_conditions,
                     min_count=1,
@@ -509,6 +557,7 @@ class QdrantVectorStore:
         content_hash: str | None = None,
         ttl_seconds: int | float | None = None,
         expires_at: datetime | str | None = None,
+        point_revision: str | None = None,
     ) -> None:
         if not self.enabled:
             return
@@ -592,7 +641,7 @@ class QdrantVectorStore:
                 wait=True,
                 points=[
                     models.PointStruct(
-                        id=self._point_id(source, source_id),
+                        id=self._point_id(source, source_id, point_revision),
                         vector=clean_vectors,
                         payload=payload,
                     )
@@ -898,5 +947,10 @@ class QdrantVectorStore:
         return value.astimezone(UTC)
 
     @staticmethod
-    def _point_id(source: str, source_id: str) -> str:
-        return str(uuid5(NAMESPACE_URL, f"voiceloop:{source}:{source_id}"))
+    def _point_id(
+        source: str,
+        source_id: str,
+        point_revision: str | None = None,
+    ) -> str:
+        suffix = f":{point_revision}" if point_revision is not None else ""
+        return str(uuid5(NAMESPACE_URL, f"voiceloop:{source}:{source_id}{suffix}"))

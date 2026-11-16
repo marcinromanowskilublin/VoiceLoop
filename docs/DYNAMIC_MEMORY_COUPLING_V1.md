@@ -67,7 +67,8 @@ Upsert albo tombstone epizodu zapisuje stan indeksu i outbox w tej samej
 transakcji SQLite. Indexer:
 
 - pracuje at-least-once i idempotentnie;
-- używa lease/claim oraz CAS na generacji, fingerprintcie i profilu;
+- używa lease/claim z unikalnym tokenem oraz CAS na generacji, tokenie,
+  fingerprintcie i profilu;
 - nie uznaje awarii Qdrant za pustą kolekcję;
 - odrzuca spóźnione zakończenie starej rewizji;
 - warunkowo usuwa wyłącznie tę generację Qdrant, do której należał job;
@@ -80,6 +81,11 @@ Migracja tworzy zadania dla starszych epizodów i przebudowuje wcześniejszy
 wariant outboxa z kaskadowym FK. Hard delete rekordu kanonicznego nie usuwa
 oczekującego zamiaru usunięcia Qdrant. Terminalne joby dostają 30-dniowy TTL
 i podlegają retencji.
+
+Każda generacja i próba claimu ma osobny point ID w Qdrant. Spóźniony worker
+nie może nadpisać punktu bieżącej próby. Odczyt dopuszcza tylko
+`applied_generation`, fingerprint i claim token zapisane w SQLite; starsze
+punkty są nieserwowalne i czyszczone przez indexer.
 
 Nie uruchomiono automatycznego workera. Przetwarzanie pozostaje jawne przez
 `index-context-episodes --apply`.

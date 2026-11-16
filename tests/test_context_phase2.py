@@ -43,8 +43,15 @@ async def test_lifecycle_prunes_qdrant_before_local_tombstone(tmp_path) -> None:
         def __init__(self) -> None:
             self.deleted: list[tuple[str, str]] = []
 
-        async def delete_memory(self, *, source: str, source_id: str) -> None:
+        async def delete_memory_through_generation(
+            self,
+            *,
+            source: str,
+            source_id: str,
+            max_generation,
+        ) -> bool:
             self.deleted.append((source, source_id))
+            return True
 
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
@@ -87,7 +94,7 @@ async def test_lifecycle_fails_closed_when_qdrant_delete_fails(tmp_path) -> None
     class BrokenQdrant:
         enabled = True
 
-        async def delete_memory(self, **_kwargs) -> None:
+        async def delete_memory_through_generation(self, **_kwargs) -> bool:
             raise RuntimeError("qdrant down")
 
     store = MemoryStore(tmp_path / "voice.db")
@@ -554,6 +561,7 @@ async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> 
             source_id,
             content_hash,
             metadata_match,
+            point_revision=None,
         ):
             point = self.points.get((source, source_id))
             return point == (content_hash, metadata_match["vector_index_hash"])

@@ -82,6 +82,7 @@ class ContextIndexJobV1(BaseModel):
     generation: int = Field(ge=1)
     target_generation: int | None = Field(default=None, ge=1)
     status: ContextIndexStatus
+    claim_token: str | None = Field(default=None, max_length=64)
     index_fingerprint: str | None = Field(default=None, max_length=64)
     index_profile: str | None = Field(default=None, max_length=240)
     attempts: int = Field(default=0, ge=0)
@@ -118,10 +119,12 @@ class ContextIndexStateV1(BaseModel):
     desired_operation: ContextIndexOperation
     desired_revision: str = Field(min_length=1, max_length=64)
     desired_generation: int = Field(ge=1)
+    desired_claim_token: str | None = Field(default=None, max_length=64)
     desired_index_fingerprint: str | None = Field(default=None, max_length=64)
     desired_index_profile: str | None = Field(default=None, max_length=240)
     applied_revision: str | None = Field(default=None, max_length=64)
     applied_generation: int | None = Field(default=None, ge=1)
+    applied_claim_token: str | None = Field(default=None, max_length=64)
     status: ContextIndexStatus
     index_fingerprint: str | None = Field(default=None, max_length=64)
     index_profile: str | None = Field(default=None, max_length=240)

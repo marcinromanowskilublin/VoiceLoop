@@ -34,9 +34,13 @@ class ContextLifecycleService:
         if episode is None or episode.deleted_at is not None:
             return False
         if self.qdrant is not None and self.qdrant.enabled:
-            await self.qdrant.delete_memory(
+            state = await self.memory.get_context_index_state(episode_id)
+            await self.qdrant.delete_memory_through_generation(
                 source=episode.source,
                 source_id=episode.source_id,
+                max_generation=(
+                    state.desired_generation if state is not None else None
+                ),
             )
         tombstoned = await self.memory.tombstone_context_episode(episode_id)
         if tombstoned and self.qdrant is not None and self.qdrant.enabled:
@@ -68,9 +72,15 @@ class ContextLifecycleService:
         qdrant_deleted = 0
         if self.qdrant is not None and self.qdrant.enabled:
             for episode in expired_episodes:
-                await self.qdrant.delete_memory(
+                state = await self.memory.get_context_index_state(
+                    episode.episode_id
+                )
+                await self.qdrant.delete_memory_through_generation(
                     source=episode.source,
                     source_id=episode.source_id,
+                    max_generation=(
+                        state.desired_generation if state is not None else None
+                    ),
                 )
                 qdrant_deleted += 1
         applied = await self.memory.prune_expired_context_records(
@@ -116,6 +126,7 @@ class ContextLifecycleService:
             operation=ContextIndexOperation.DELETE,
             desired_revision=episode.content_hash,
             generation=state.desired_generation,
+            claim_token=claimed,
             index_fingerprint=fingerprint,
             index_profile=profile,
         )

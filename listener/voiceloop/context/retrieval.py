@@ -18,6 +18,7 @@ from ..memory_vectorization import (
 )
 from .schema import (
     ContextEventV1,
+    ContextIndexOperation,
     ContextItemV1,
     ContextPackV1,
 )
@@ -816,6 +817,7 @@ class TimeFirstRetriever:
         if not isinstance(episode_id, str) or not episode_id:
             return None
         episode = await self.memory.get_context_episode(episode_id)
+        index_state = await self.memory.get_context_index_state(episode_id)
         now = datetime.now(UTC)
         if (
             episode is None
@@ -826,6 +828,35 @@ class TimeFirstRetriever:
             or not _range_matches(episode.started_at, episode.ended_at, plan)
         ):
             return None
+        hit_generation = metadata.get("index_generation")
+        if index_state is not None:
+            if (
+                index_state.desired_operation
+                is not ContextIndexOperation.UPSERT
+            ):
+                return None
+            if index_state.applied_generation is not None:
+                if str(hit_generation or "") != str(
+                    index_state.applied_generation
+                ):
+                    return None
+                if (
+                    index_state.index_fingerprint
+                    and metadata.get("vector_index_hash")
+                    != index_state.index_fingerprint
+                ):
+                    return None
+                if (
+                    index_state.applied_claim_token
+                    and metadata.get("index_claim_token")
+                    != index_state.applied_claim_token
+                ):
+                    return None
+            elif hit_generation is not None:
+                # A generated point is not serving evidence until SQL records
+                # the matching applied generation. Generation-less legacy
+                # points retain the older hash/source compatibility path.
+                return None
         source_hashes = metadata.get("source_event_hashes")
         if not isinstance(source_hashes, dict):
             return None
