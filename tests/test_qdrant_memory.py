@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from qdrant_client import AsyncQdrantClient
 
 from voiceloop.qdrant_memory import (
     VECTOR_NAMES,
@@ -103,6 +104,37 @@ async def test_qdrant_conditional_delete_matches_exact_index_version(
     assert conditions[2].match.value == "index-v1"
     assert conditions[3].key == "metadata.index_generation"
     assert conditions[3].match.value == 7
+
+
+@pytest.mark.asyncio
+async def test_qdrant_conditional_delete_removes_legacy_point_without_generation(
+    tmp_path,
+) -> None:
+    client = AsyncQdrantClient(location=":memory:")
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,
+    )
+    await store.upsert_memory(
+        source="timeline",
+        source_id="legacy",
+        title="Legacy",
+        content="Legacy content",
+        vectors={"semantic": [1.0, 0.0]},
+        metadata={"vector_index_hash": "legacy-index"},
+        content_hash="legacy-content",
+    )
+
+    deleted = await store.delete_memory_if_matches(
+        source="timeline",
+        source_id="legacy",
+        content_hash="legacy-content",
+        index_generation=None,
+    )
+
+    assert deleted is True
+    assert await store.has_memory(source="timeline", source_id="legacy") is False
+    await store.close()
 
 
 def test_qdrant_private_data_requires_loopback_endpoint(tmp_path) -> None:

@@ -280,10 +280,7 @@ class MemoryStore:
             )
         target_generation = None
         if resolved_operation is ContextIndexOperation.DELETE and current is not None:
-            target_generation = (
-                current["applied_generation"]
-                or current["desired_generation"]
-            )
+            target_generation = current["desired_generation"]
 
         connection.execute(
             """
@@ -2018,7 +2015,7 @@ class MemoryStore:
                     or int(state["desired_generation"]) != generation
                     or state["desired_index_fingerprint"] != index_fingerprint
                     or state["desired_index_profile"] != index_profile
-                    or state["status"] == ContextIndexStatus.NOT_REQUESTED.value
+                    or state["status"] != ContextIndexStatus.CLAIMED.value
                 ):
                     connection.execute(
                         """
@@ -2210,7 +2207,7 @@ class MemoryStore:
                     or int(state["desired_generation"]) != generation
                     or state["desired_index_fingerprint"] != index_fingerprint
                     or state["desired_index_profile"] != index_profile
-                    or state["status"] == ContextIndexStatus.NOT_REQUESTED.value
+                    or state["status"] != ContextIndexStatus.CLAIMED.value
                 ):
                     return False
                 connection.execute(

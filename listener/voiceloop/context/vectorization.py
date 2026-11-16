@@ -382,7 +382,10 @@ class ContextEpisodeIndexer:
             deleted=deleted,
             not_requested=not_requested,
             failed=failed,
-            outbox_pending=index_summary.get("outbox_ready", 0),
+            outbox_pending=(
+                index_summary.get("outbox_ready", 0)
+                + index_summary.get("outbox_claimed", 0)
+            ),
         )
 
     async def _index_one(
@@ -421,13 +424,7 @@ class ContextEpisodeIndexer:
             source_event_hashes=source_event_hashes,
             index_profile=index_profile,
         )
-        if state.status is ContextIndexStatus.CLAIMED:
-            if (
-                state.desired_index_fingerprint != vector_index_hash
-                or state.desired_index_profile != index_profile
-            ):
-                return "superseded", collection_ready
-        elif state.status is ContextIndexStatus.APPLIED and (
+        if state.status is ContextIndexStatus.APPLIED and (
             state.index_fingerprint != vector_index_hash
             or state.index_profile != index_profile
         ):
@@ -444,7 +441,10 @@ class ContextEpisodeIndexer:
             source=episode.source,
             source_id=episode.source_id,
             content_hash=episode.content_hash,
-            metadata_match={"vector_index_hash": vector_index_hash},
+            metadata_match={
+                "vector_index_hash": vector_index_hash,
+                "index_generation": str(state.desired_generation),
+            },
         ):
             if (
                 state.status is ContextIndexStatus.APPLIED
@@ -586,15 +586,11 @@ class ContextEpisodeIndexer:
             if not claimed:
                 continue
             try:
-                await self.qdrant.delete_memory_if_matches(
+                removed = await self.qdrant.delete_memory_if_matches(
                     source=source,
                     source_id=source_id,
                     content_hash=job.desired_revision,
-                    index_fingerprint=(
-                        state.index_fingerprint
-                        if state is not None and state.index_fingerprint
-                        else ""
-                    ),
+                    index_fingerprint="",
                     index_generation=job.target_generation,
                 )
             except Exception as exc:
@@ -616,7 +612,7 @@ class ContextEpisodeIndexer:
                 generation=job.generation,
                 index_fingerprint=fingerprint,
                 index_profile=index_profile,
-            ):
+            ) and removed:
                 deleted += 1
         return deleted, failed
 

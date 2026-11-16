@@ -408,8 +408,8 @@ class QdrantVectorStore:
                 )
             if index_generation is None:
                 conditions.append(
-                    models.IsNullCondition(
-                        is_null=models.PayloadField(
+                    models.IsEmptyCondition(
+                        is_empty=models.PayloadField(
                             key="metadata.index_generation"
                         )
                     )

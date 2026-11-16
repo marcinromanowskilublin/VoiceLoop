@@ -60,9 +60,15 @@ class QdrantStub:
         metadata_match,
     ):
         point = self.points.get((source, source_id))
-        return point is not None and point[:2] == (
+        if point is None or point[:2] != (
             content_hash,
             metadata_match["vector_index_hash"],
+        ):
+            return False
+        expected_generation = metadata_match.get("index_generation")
+        return (
+            expected_generation is None
+            or str(point[2]) == str(expected_generation)
         )
 
     async def upsert_memory(
@@ -100,6 +106,8 @@ class QdrantStub:
         if point is None or point[0] != content_hash:
             return False
         if index_fingerprint and point[1] != index_fingerprint:
+            return False
+        if index_generation is None and point[2] is not None:
             return False
         if index_generation is not None and point[2] != index_generation:
             return False
@@ -178,7 +186,7 @@ async def test_vectorize_false_is_explicitly_not_requested(tmp_path) -> None:
     assert pending.status is ContextIndexStatus.PENDING
     assert len(jobs) == 1
     assert jobs[0].operation is ContextIndexOperation.DELETE
-    assert report.deleted == 1
+    assert report.deleted == 0
     assert state is not None
     assert state.status is ContextIndexStatus.NOT_REQUESTED
     assert await store.list_context_index_jobs() == []
@@ -668,6 +676,68 @@ async def test_opt_out_deletes_crash_window_remote_point(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_opt_out_targets_latest_unapplied_remote_generation(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+    qdrant = QdrantStub()
+    await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub("embedding-a"),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+
+    assert await store.request_context_episode_reindex(episode.episode_id)
+    pending = await store.get_context_index_state(episode.episode_id)
+    assert pending is not None
+    crash_fingerprint = "c" * 64
+    assert await store.claim_context_index_job(
+        episode_id=episode.episode_id,
+        operation=ContextIndexOperation.UPSERT,
+        desired_revision=episode.content_hash,
+        generation=pending.desired_generation,
+        index_fingerprint=crash_fingerprint,
+        index_profile="crashed-profile",
+    )
+    qdrant.points[(episode.source, episode.source_id)] = (
+        episode.content_hash,
+        crash_fingerprint,
+        pending.desired_generation,
+    )
+
+    await store.upsert_context_episode(
+        episode.model_copy(
+            update={
+                "metadata": {"vectorize": False},
+                "updated_at": datetime.now(UTC),
+            }
+        )
+    )
+    delete_state = await store.get_context_index_state(episode.episode_id)
+    assert delete_state is not None
+    delete_jobs = await store.list_context_index_jobs(
+        operation=ContextIndexOperation.DELETE,
+    )
+    assert delete_jobs[0].target_generation == pending.desired_generation
+
+    report = await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+
+    assert report.deleted == 1
+    assert qdrant.points == {}
+    final = await store.get_context_index_state(episode.episode_id)
+    assert final is not None
+    assert final.status is ContextIndexStatus.NOT_REQUESTED
+
+
+@pytest.mark.asyncio
 async def test_late_delete_cannot_remove_restored_generation(tmp_path) -> None:
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
@@ -763,6 +833,66 @@ async def test_concurrent_embedding_profiles_use_single_claim(tmp_path) -> None:
     assert state.index_profile and state.index_profile.endswith(":embedding-a")
     assert point[1] == state.index_fingerprint
     assert point[2] == state.applied_generation
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_can_be_reclaimed_by_new_embedding_profile(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+    state = await store.get_context_index_state(episode.episode_id)
+    assert state is not None
+    assert await store.claim_context_index_job(
+        episode_id=episode.episode_id,
+        operation=ContextIndexOperation.UPSERT,
+        desired_revision=episode.content_hash,
+        generation=state.desired_generation,
+        index_fingerprint="a" * 64,
+        index_profile="expired-profile-a",
+        lease_seconds=10,
+    )
+    with store._connect() as connection:
+        connection.execute(
+            """
+            UPDATE context_index_outbox
+            SET available_at = ?
+            WHERE episode_id = ? AND generation = ?
+            """,
+            (
+                (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+                episode.episode_id,
+                state.desired_generation,
+            ),
+        )
+
+    qdrant = QdrantStub()
+    report = await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub("embedding-b"),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+    final = await store.get_context_index_state(episode.episode_id)
+
+    assert report.indexed == 1
+    assert final is not None
+    assert final.status is ContextIndexStatus.APPLIED
+    assert final.index_profile and final.index_profile.endswith(":embedding-b")
+    stale_failure = await store.mark_context_index_failed(
+        episode_id=episode.episode_id,
+        operation=ContextIndexOperation.UPSERT,
+        desired_revision=episode.content_hash,
+        generation=state.desired_generation,
+        index_fingerprint=final.index_fingerprint or "",
+        index_profile=final.index_profile or "",
+        error_type="LateWorkerFailure",
+    )
+    assert stale_failure is False
+    assert (
+        await store.get_context_index_state(episode.episode_id)
+    ).status is ContextIndexStatus.APPLIED
 
 
 @pytest.mark.asyncio
