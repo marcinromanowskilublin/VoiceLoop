@@ -721,11 +721,23 @@ class TimeFirstRetriever:
                         if len(results) >= limit:
                             break
                 else:
-                    fused: dict[tuple[str, str], dict[str, object]] = {}
+                    fused: dict[tuple[str, ...], dict[str, object]] = {}
                     for axis, hits in zip(active_axes, hit_groups, strict=True):
                         weight = query_axis_weights[axis]
                         for rank, hit in enumerate(hits, start=1):
-                            key = (str(hit.source), str(hit.source_id))
+                            metadata = (
+                                hit.metadata
+                                if isinstance(hit.metadata, dict)
+                                else {}
+                            )
+                            key = (
+                                str(hit.source),
+                                str(hit.source_id),
+                                str(metadata.get("episode_id") or ""),
+                                str(metadata.get("content_hash") or ""),
+                                str(metadata.get("index_generation") or ""),
+                                str(metadata.get("index_claim_token") or ""),
+                            )
                             entry = fused.setdefault(
                                 key,
                                 {

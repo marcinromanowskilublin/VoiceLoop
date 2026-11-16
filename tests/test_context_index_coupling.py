@@ -243,6 +243,10 @@ async def test_vectorize_false_is_explicitly_not_requested(tmp_path) -> None:
     assert state is not None
     assert state.status is ContextIndexStatus.NOT_REQUESTED
     assert await store.list_context_index_jobs() == []
+    coverage = await store.context_episode_vector_coverage()
+    assert coverage["not_requested"] == 1
+    assert coverage["pending"] == 0
+    assert coverage["delete_pending"] == 0
 
 
 @pytest.mark.asyncio

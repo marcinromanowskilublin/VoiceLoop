@@ -7,7 +7,15 @@ import pytest
 
 from voiceloop.context.adaptive_retrieval import AdaptiveHybridRetriever
 from voiceloop.context.policy import resolve_retrieval_policy
-from voiceloop.context.schema import ContextEpisodeV1, ContextEventV1
+from voiceloop.context.retrieval import (
+    TimeFirstRetriever,
+    build_time_first_query,
+)
+from voiceloop.context.schema import (
+    ContextEpisodeV1,
+    ContextEventV1,
+    ContextIndexOperation,
+)
 from voiceloop.memory import MemoryStore
 
 DAY = datetime(2026, 11, 15, 12, tzinfo=UTC)
@@ -263,3 +271,93 @@ async def test_unbounded_policy_is_shadow_guarded_without_vector_search(
     assert run.trace.serving is False
     assert embeddings.calls == []
     assert qdrant.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stale_generation_cannot_hide_live_generation_in_wave_fusion(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode, base_hit = await add_episode(
+        store,
+        source_id="versioned",
+        summary="Ustaliliśmy żywą wersję decyzji.",
+        minute=0,
+    )
+    state = await store.get_context_index_state(episode.episode_id)
+    assert state is not None
+    fingerprint = "f" * 64
+    profile = "test-profile"
+    claim_token = await store.claim_context_index_job(
+        episode_id=episode.episode_id,
+        operation=ContextIndexOperation.UPSERT,
+        desired_revision=episode.content_hash,
+        generation=state.desired_generation,
+        index_fingerprint=fingerprint,
+        index_profile=profile,
+    )
+    assert claim_token
+    assert await store.mark_context_index_applied(
+        episode_id=episode.episode_id,
+        operation=ContextIndexOperation.UPSERT,
+        desired_revision=episode.content_hash,
+        generation=state.desired_generation,
+        claim_token=claim_token,
+        index_fingerprint=fingerprint,
+        index_profile=profile,
+        vector_spaces=("semantic",),
+    )
+    live_metadata = {
+        **base_hit.metadata,
+        "index_generation": state.desired_generation,
+        "index_claim_token": claim_token,
+        "vector_index_hash": fingerprint,
+    }
+    stale_hit = SimpleNamespace(
+        **{
+            **base_hit.__dict__,
+            "score": 0.99,
+            "metadata": {
+                **live_metadata,
+                "index_generation": 0,
+                "index_claim_token": "stale",
+                "vector_index_hash": "stale",
+            },
+        }
+    )
+    live_hit = SimpleNamespace(
+        **{
+            **base_hit.__dict__,
+            "score": 0.80,
+            "metadata": live_metadata,
+        }
+    )
+    query = "Jaką decyzję podjęliśmy wczoraj?"
+    plan = build_time_first_query(query, now=DAY + timedelta(days=1))
+    policy = resolve_retrieval_policy(
+        query,
+        domain_hint="rpg",
+        risk="high",
+        time_bounded=True,
+    )
+    retriever = TimeFirstRetriever(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=QdrantStub(
+            {
+                "semantic": [stale_hit, live_hit],
+                "decision": [stale_hit, live_hit],
+            }
+        ),  # type: ignore[arg-type]
+        scout_mode="cascade_2_2_1",
+        policy=policy,
+    )
+
+    pack = await retriever.retrieve_vector_candidates(
+        query,
+        query_plan=plan,
+        limit=2,
+    )
+
+    assert [item.source_id for item in pack.items] == [episode.source_id]

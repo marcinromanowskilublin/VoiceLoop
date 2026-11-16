@@ -1818,7 +1818,7 @@ class MemoryStore:
                         SUM(
                             CASE
                                 WHEN s.desired_operation = 'delete'
-                                 AND s.status <> 'applied'
+                                 AND s.status NOT IN ('applied', 'not_requested')
                                 THEN 1 ELSE 0
                             END
                         ) AS delete_pending,
