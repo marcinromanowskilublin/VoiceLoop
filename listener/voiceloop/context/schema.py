@@ -53,6 +53,73 @@ class ForegroundConfidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ContextIndexOperation(StrEnum):
+    UPSERT = "upsert"
+    DELETE = "delete"
+
+
+class ContextIndexStatus(StrEnum):
+    NOT_REQUESTED = "not_requested"
+    PENDING = "pending"
+    APPLIED = "applied"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+
+
+class ContextIndexJobV1(BaseModel):
+    """Transactional SQL outbox entry for a derived context index."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    job_id: str = Field(min_length=24, max_length=64)
+    episode_id: str = Field(min_length=1, max_length=120)
+    operation: ContextIndexOperation
+    desired_revision: str = Field(min_length=1, max_length=64)
+    status: ContextIndexStatus
+    attempts: int = Field(default=0, ge=0)
+    available_at: datetime
+    claimed_at: datetime | None = None
+    last_error_type: str | None = Field(default=None, max_length=120)
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator("available_at", "claimed_at", "created_at", "updated_at")
+    @classmethod
+    def _aware_index_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("index timestamps must be timezone-aware")
+        return value.astimezone(UTC)
+
+
+class ContextIndexStateV1(BaseModel):
+    """Desired and applied revisions for the rebuildable vector projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    episode_id: str = Field(min_length=1, max_length=120)
+    desired_operation: ContextIndexOperation
+    desired_revision: str = Field(min_length=1, max_length=64)
+    applied_revision: str | None = Field(default=None, max_length=64)
+    status: ContextIndexStatus
+    index_fingerprint: str | None = Field(default=None, max_length=64)
+    index_profile: str | None = Field(default=None, max_length=240)
+    vector_spaces: tuple[str, ...] = ()
+    attempts: int = Field(default=0, ge=0)
+    last_error_type: str | None = Field(default=None, max_length=120)
+    updated_at: datetime
+
+    @field_validator("updated_at")
+    @classmethod
+    def _aware_state_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("index state timestamp must be timezone-aware")
+        return value.astimezone(UTC)
+
+
 class ContextItemV1(BaseModel):
     """One bounded, non-executable context item selected for a model turn."""
 

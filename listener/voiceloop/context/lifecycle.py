@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ..memory import MemoryStore
 from ..qdrant_memory import QdrantVectorStore
+from .schema import ContextIndexOperation
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,10 @@ class ContextLifecycleService:
                 source=episode.source,
                 source_id=episode.source_id,
             )
-        return await self.memory.tombstone_context_episode(episode_id)
+        tombstoned = await self.memory.tombstone_context_episode(episode_id)
+        if tombstoned and self.qdrant is not None and self.qdrant.enabled:
+            await self._mark_direct_delete_applied(episode)
+        return tombstoned
 
     async def prune_expired(
         self,
@@ -72,9 +77,28 @@ class ContextLifecycleService:
             now=cutoff,
             dry_run=False,
         )
+        if self.qdrant is not None and self.qdrant.enabled:
+            for episode in expired_episodes:
+                await self._mark_direct_delete_applied(episode)
         return ContextPruneReport(
             events=applied["events"],
             episodes=applied["episodes"],
             qdrant_deleted=qdrant_deleted,
             dry_run=False,
+        )
+
+    async def _mark_direct_delete_applied(self, episode) -> None:
+        profile = "context-lifecycle-direct-delete-v1"
+        fingerprint = hashlib.sha256(
+            (
+                f"{profile}:{episode.episode_id}:"
+                f"{episode.content_hash}"
+            ).encode()
+        ).hexdigest()
+        await self.memory.mark_context_index_applied(
+            episode_id=episode.episode_id,
+            operation=ContextIndexOperation.DELETE,
+            desired_revision=episode.content_hash,
+            index_fingerprint=fingerprint,
+            index_profile=profile,
         )
