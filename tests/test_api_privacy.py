@@ -100,7 +100,11 @@ async def test_dual_track_demonstrator_is_token_protected_and_read_only() -> Non
                 }
             ),
             context_index_summary=AsyncMock(
-                return_value={"applied": 1, "outbox_ready": 0}
+                return_value={
+                    "applied": 1,
+                    "outbox_ready": 0,
+                    "outbox_claimed": 0,
+                }
             ),
             context_dual_track_summary=AsyncMock(
                 return_value={
@@ -122,12 +126,26 @@ async def test_dual_track_demonstrator_is_token_protected_and_read_only() -> Non
             status_response = await client.get("/api/v1/context/dual-track/status")
             traces_response = await client.get("/api/v1/context/dual-track/traces")
             write_response = await client.post("/api/v1/context/dual-track/status")
+            app.state.services.memory.context_index_summary.return_value = {
+                "claimed": 1,
+                "outbox_ready": 0,
+                "outbox_claimed": 1,
+            }
+            claimed_response = await client.get(
+                "/api/v1/context/dual-track/status"
+            )
 
         assert status_response.status_code == 200
         assert status_response.json()["serving"] is False
         assert status_response.json()["coverage"]["indexed"] == 1
         assert status_response.json()["coverage"]["collection_points"] == 1
         assert status_response.json()["coverage"]["consistent"] is True
+        assert claimed_response.status_code == 200
+        assert (
+            claimed_response.json()["coverage"]["revision_state_clean"]
+            is False
+        )
+        assert claimed_response.json()["coverage"]["consistent"] is False
         assert traces_response.status_code == 200
         assert traces_response.json()[0]["verdict"] == "agreement"
         assert write_response.status_code == 405

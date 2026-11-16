@@ -202,13 +202,15 @@ uruchamia monitorowania pulpitu.
 `ContextLifecycleService.prune_expired()` jest dry-run domyślnie:
 
 1. wylicza wygasłe rekordy;
-2. przy jawnym `dry_run=false` usuwa powiązane punkty Qdrant;
-3. dopiero po sukcesie Qdranta zakłada tombstone w SQLite;
-4. usuwa projekcję FTS;
+2. przy jawnym `dry_run=false` zakłada tombstone w SQLite, usuwa projekcję FTS
+   i zapisuje wersjonowany job `delete` w tej samej transakcji;
+3. claimuje post-tombstone generation fence i usuwa z Qdrant wyłącznie
+   odpowiadające mu lub starsze generacje;
+4. oznacza job jako `applied` albo `failed` do ponowienia;
 5. pozostawia rekord kanoniczny do audytu.
 
-Awaria Qdranta zatrzymuje lokalną część operacji. Niedostępny magazyn nie jest
-traktowany jak „punktu nie ma”.
+Awaria Qdranta nie cofa kanonicznego tombstone. Pozostawia jawny, retryowalny
+stan `failed`; niedostępny magazyn nie jest traktowany jak „punktu nie ma”.
 
 ## Konfiguracja
 
@@ -254,7 +256,8 @@ obu torów i delty. Nie ma kodu, który na podstawie raportu zmienia flagę.
 - błąd Screenpipe → recall może kontynuować na lokalnym timeline i Qdrancie;
 - błąd embeddingu/Qdranta przy odczycie → brak semantic scout, bez wyjątku do
   wykonania akcji;
-- błąd Qdranta przy usuwaniu → brak lokalnego tombstone;
+- błąd Qdranta przy usuwaniu → lokalny tombstone zostaje, a delete job
+  przechodzi do `failed` i czeka na retry;
 - brak epizodu SQL, inna tożsamość/hash, usunięcie lub wygaśnięcie → odrzucenie
   kandydata semantycznego;
 - brak/zmiana/usunięcie/wygaśnięcie źródłowego zdarzenia → odrzucenie kandydata;
@@ -315,7 +318,7 @@ cd listener
 ```
 
 Testy obejmują idempotencję, FTS, timeline, epizody, paginację Screenpipe,
-scoping sesji, dry-run retencji, fail-closed Qdrant, encje z review gate, oba
+scoping sesji, dry-run retencji, retryowalny delete Qdrant, encje z review gate, oba
 magazyny spotkań, foreground, selektywne wektory, lazy reserve axis, izolowany
 indexer, arbiter, limit współbieżności, trwałe trace’y oraz metryki.
 Testy integralności obejmują także stare/brakujące źródła, tożsamość i wersje

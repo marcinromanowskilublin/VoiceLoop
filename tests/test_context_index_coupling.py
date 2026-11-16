@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from voiceloop.context.lifecycle import ContextLifecycleService
 from voiceloop.context.schema import (
     ContextEpisodeV1,
     ContextEventV1,
@@ -671,6 +672,48 @@ async def test_tombstone_during_remote_upsert_compensates_stale_point(
 
 
 @pytest.mark.asyncio
+async def test_stale_cleanup_failure_does_not_fail_newer_pending_job(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store, summary="Wersja pierwsza.")
+
+    class CleanupFailureQdrant(QdrantStub):
+        async def upsert_memory(self, **kwargs):
+            await super().upsert_memory(**kwargs)
+            await store.upsert_context_episode(
+                ContextEpisodeV1(
+                    episode_id=episode.episode_id,
+                    source=episode.source,
+                    source_id=episode.source_id,
+                    started_at=episode.started_at,
+                    ended_at=episode.ended_at,
+                    summary="Wersja druga.",
+                    source_event_ids=episode.source_event_ids,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+
+        async def delete_memory_if_matches(self, **_kwargs):
+            raise RuntimeError("cleanup unavailable")
+
+    report = await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=CleanupFailureQdrant(),  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+    state = await store.get_context_index_state(episode.episode_id)
+
+    assert report.failed == 0
+    assert report.outbox_pending == 1
+    assert state is not None
+    assert state.status is ContextIndexStatus.PENDING
+    assert state.desired_revision != episode.content_hash
+
+
+@pytest.mark.asyncio
 async def test_migration_rebuilds_legacy_outbox_without_cascade_fk(
     tmp_path,
 ) -> None:
@@ -941,6 +984,65 @@ async def test_late_delete_cannot_remove_restored_generation(tmp_path) -> None:
     assert state.status is ContextIndexStatus.APPLIED
     assert point[2] == state.applied_generation
     assert point[1] == state.index_fingerprint
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_delete_uses_post_tombstone_generation_fence(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+
+    class RestoreDuringLifecycleDelete(QdrantStub):
+        armed = False
+        restored = False
+
+        async def delete_memory_through_generation(self, **kwargs):
+            if self.armed and not self.restored:
+                self.restored = True
+                await store.upsert_context_episode(
+                    episode.model_copy(
+                        update={
+                            "deleted_at": None,
+                            "updated_at": datetime.now(UTC),
+                        }
+                    )
+                )
+                await ContextEpisodeIndexer(
+                    memory=store,
+                    embeddings=EmbeddingsStub("restored-model"),  # type: ignore[arg-type]
+                    qdrant=self,  # type: ignore[arg-type]
+                    primary_collection="voiceloop_memory",
+                ).index(dry_run=False)
+            return await super().delete_memory_through_generation(**kwargs)
+
+    qdrant = RestoreDuringLifecycleDelete()
+    await ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub("initial-model"),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    ).index(dry_run=False)
+    qdrant.armed = True
+
+    tombstoned = await ContextLifecycleService(
+        memory=store,
+        qdrant=qdrant,  # type: ignore[arg-type]
+    ).tombstone_episode(episode.episode_id)
+    state = await store.get_context_index_state(episode.episode_id)
+    stored = await store.get_context_episode(episode.episode_id)
+    point = qdrant.latest_point(
+        source=episode.source,
+        source_id=episode.source_id,
+    )
+
+    assert tombstoned is True
+    assert stored is not None and stored.deleted_at is None
+    assert state is not None
+    assert state.desired_operation is ContextIndexOperation.UPSERT
+    assert state.status is ContextIndexStatus.APPLIED
+    assert point[2] == state.applied_generation
 
 
 @pytest.mark.asyncio

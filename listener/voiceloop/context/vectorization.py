@@ -354,14 +354,22 @@ class ContextEpisodeVectorizer:
                     None,
                 )
                 if callable(cleanup):
-                    await cleanup(
-                        source=episode.source,
-                        source_id=episode.source_id,
-                        content_hash=episode.content_hash,
-                        index_fingerprint=resolved_index_hash,
-                        index_generation=resolved_generation,
-                        claim_token=resolved_claim_token,
-                    )
+                    try:
+                        cleaned = cleanup(
+                            source=episode.source,
+                            source_id=episode.source_id,
+                            content_hash=episode.content_hash,
+                            index_fingerprint=resolved_index_hash,
+                            index_generation=resolved_generation,
+                            claim_token=resolved_claim_token,
+                        )
+                        if inspect.isawaitable(cleaned):
+                            await cleaned
+                    except Exception:
+                        # Cleanup belongs to the superseded attempt. Its
+                        # failure must not be attributed to the currently
+                        # desired generation.
+                        pass
                 return EpisodeVectorizationResult(
                     episode_id=episode.episode_id,
                     vector_spaces=(),

@@ -1153,6 +1153,7 @@ async def context_dual_track_status(
         and coverage["delete_pending"] == 0
         and coverage["untracked"] == 0
         and index_state.get("outbox_ready", 0) == 0
+        and index_state.get("outbox_claimed", 0) == 0
     )
     coverage = {
         **coverage,

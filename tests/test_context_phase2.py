@@ -21,6 +21,7 @@ from voiceloop.context.retrieval import TimeFirstRetriever
 from voiceloop.context.schema import (
     ContextEpisodeV1,
     ContextEventV1,
+    ContextIndexStatus,
     ContextItemV1,
     ContextPackV1,
     ContextScope,
@@ -90,7 +91,9 @@ async def test_lifecycle_prunes_qdrant_before_local_tombstone(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_fails_closed_when_qdrant_delete_fails(tmp_path) -> None:
+async def test_lifecycle_tombstones_and_retries_when_qdrant_delete_fails(
+    tmp_path,
+) -> None:
     class BrokenQdrant:
         enabled = True
 
@@ -122,7 +125,10 @@ async def test_lifecycle_fails_closed_when_qdrant_delete_fails(tmp_path) -> None
             dry_run=False,
         )
     stored = await store.get_context_episode(episode.episode_id)
-    assert stored is not None and stored.deleted_at is None
+    state = await store.get_context_index_state(episode.episode_id)
+    assert stored is not None and stored.deleted_at is not None
+    assert state is not None
+    assert state.status is ContextIndexStatus.FAILED
 
 
 @pytest.mark.asyncio
