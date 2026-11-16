@@ -145,6 +145,45 @@ async def test_qdrant_conditional_delete_removes_legacy_point_without_generation
     await store.close()
 
 
+@pytest.mark.asyncio
+async def test_qdrant_delete_preserves_full_240_character_source_id(
+    tmp_path,
+) -> None:
+    client = AsyncQdrantClient(location=":memory:")
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,
+    )
+    source_id = "x" * 240
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Payload indexes have no effect",
+            category=UserWarning,
+        )
+        await store.upsert_memory(
+            source="timeline",
+            source_id=source_id,
+            title="Long ID",
+            content="Private content",
+            vectors={"semantic": [1.0, 0.0]},
+            content_hash="long-id-content",
+        )
+
+    deleted = await store.delete_memory_through_generation(
+        source="timeline",
+        source_id=source_id,
+        max_generation=1,
+    )
+
+    assert deleted is True
+    assert await store.has_memory(
+        source="timeline",
+        source_id=source_id,
+    ) is False
+    await store.close()
+
+
 def test_qdrant_private_data_requires_loopback_endpoint(tmp_path) -> None:
     local = QdrantVectorStore(
         Settings(

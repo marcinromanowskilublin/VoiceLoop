@@ -235,6 +235,18 @@ class MemoryStore:
             "SELECT * FROM context_index_state WHERE episode_id = ?",
             (episode_id,),
         ).fetchone()
+        generation_row = connection.execute(
+            """
+            SELECT last_generation FROM context_index_generation
+            WHERE episode_id = ?
+            """,
+            (episode_id,),
+        ).fetchone()
+        persisted_generation = (
+            int(generation_row["last_generation"])
+            if generation_row is not None
+            else 0
+        )
         resolved_operation = (
             ContextIndexOperation.DELETE
             if operation is ContextIndexOperation.UPSERT
@@ -274,14 +286,7 @@ class MemoryStore:
             if current["status"] == ContextIndexStatus.CLAIMED.value:
                 return
         else:
-            counter = connection.execute(
-                """
-                SELECT last_generation FROM context_index_generation
-                WHERE episode_id = ?
-                """,
-                (episode_id,),
-            ).fetchone()
-            last_generation = int(counter["last_generation"]) if counter else 0
+            last_generation = persisted_generation
             if current is not None:
                 last_generation = max(
                     last_generation,
@@ -305,6 +310,8 @@ class MemoryStore:
         target_generation = None
         if resolved_operation is ContextIndexOperation.DELETE and current is not None:
             target_generation = current["desired_generation"]
+        elif resolved_operation is ContextIndexOperation.DELETE:
+            target_generation = persisted_generation or None
 
         connection.execute(
             """
@@ -1901,14 +1908,19 @@ class MemoryStore:
                 conditions.append("operation = ?")
                 parameters.append(operation.value)
             parameters.append(safe_limit)
+            order_column = (
+                "updated_at"
+                if set(selected_statuses) == {ContextIndexStatus.APPLIED}
+                else "created_at"
+            )
             with self._connect() as connection:
                 return connection.execute(
                     """
                     SELECT * FROM context_index_outbox
                     WHERE """
                     + " AND ".join(conditions)
-                    + """
-                    ORDER BY created_at ASC, job_id ASC
+                    + f"""
+                    ORDER BY {order_column} ASC, job_id ASC
                     LIMIT ?
                     """,
                     parameters,
@@ -2086,6 +2098,7 @@ class MemoryStore:
 
         def _mark() -> bool:
             with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 state = connection.execute(
                     """
                     SELECT * FROM context_index_state
@@ -2140,6 +2153,7 @@ class MemoryStore:
                           AND operation = ?
                           AND desired_revision = ?
                           AND generation = ?
+                          AND claim_token = ?
                           AND status <> ?
                         """,
                         (
@@ -2150,6 +2164,7 @@ class MemoryStore:
                             operation.value,
                             desired_revision,
                             generation,
+                            claim_token,
                             ContextIndexStatus.APPLIED.value,
                         ),
                     )
@@ -2286,6 +2301,7 @@ class MemoryStore:
 
         def _mark() -> bool:
             with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 state = connection.execute(
                     """
                     SELECT desired_operation, desired_revision,
@@ -2403,6 +2419,27 @@ class MemoryStore:
                 return cursor.rowcount > 0
 
         return await asyncio.to_thread(_mark)
+
+    async def touch_context_index_job(
+        self,
+        *,
+        episode_id: str,
+        generation: int,
+    ) -> None:
+        timestamp = _now_iso()
+
+        def _touch() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET updated_at = ?
+                    WHERE episode_id = ? AND generation = ?
+                    """,
+                    (timestamp, episode_id, generation),
+                )
+
+        await asyncio.to_thread(_touch)
 
     async def prune_context_index_outbox(
         self,

@@ -544,6 +544,54 @@ class QdrantVectorStore:
                 f"{type(exc).__name__}"
             ) from exc
 
+    async def delete_memory_other_claims(
+        self,
+        *,
+        source: str,
+        source_id: str,
+        generation: int,
+        keep_claim_token: str,
+    ) -> None:
+        """Remove orphan attempts from the applied generation."""
+
+        if not self.enabled:
+            return
+        try:
+            if not await self.client.collection_exists(self.collection_name):
+                return
+            selector_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source",
+                        match=models.MatchValue(value=source),
+                    ),
+                    models.FieldCondition(
+                        key="source_id",
+                        match=models.MatchValue(value=source_id),
+                    ),
+                    models.FieldCondition(
+                        key="metadata.index_generation",
+                        match=models.MatchValue(value=generation),
+                    ),
+                ],
+                must_not=[
+                    models.FieldCondition(
+                        key="metadata.index_claim_token",
+                        match=models.MatchValue(value=keep_claim_token),
+                    )
+                ],
+            )
+            await self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(filter=selector_filter),
+                wait=True,
+            )
+        except Exception as exc:
+            raise QdrantMemoryError(
+                "Nie udało się usunąć osieroconych prób Qdrant: "
+                f"{type(exc).__name__}"
+            ) from exc
+
     async def upsert_memory(
         self,
         *,
@@ -605,7 +653,7 @@ class QdrantVectorStore:
         provenance.setdefault("embedding_prefix", EMBEDDING_DOCUMENT_PREFIX)
         payload: dict[str, Any] = {
             "source": source[:80],
-            "source_id": source_id[:200],
+            "source_id": source_id,
             "title": title[:1000],
             "content": content[:20000],
             "memory_type": memory_type[:80],

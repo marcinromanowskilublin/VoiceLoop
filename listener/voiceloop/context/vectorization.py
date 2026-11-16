@@ -292,6 +292,14 @@ class ContextEpisodeVectorizer:
                                 await cleaned
                         except Exception:
                             pass
+                    return EpisodeVectorizationResult(
+                        episode_id=episode.episode_id,
+                        vector_spaces=(),
+                        indexed=False,
+                        reason="superseded",
+                        index_fingerprint=resolved_index_hash,
+                        index_profile=resolved_profile,
+                    )
             raise
         if self.memory is not None:
             applied = await self.memory.mark_context_index_applied(
@@ -304,6 +312,24 @@ class ContextEpisodeVectorizer:
                 index_profile=resolved_profile,
                 vector_spaces=vector_names,
             )
+            if applied:
+                prune_attempts = getattr(
+                    self.qdrant,
+                    "delete_memory_other_claims",
+                    None,
+                )
+                if callable(prune_attempts):
+                    try:
+                        pruned_attempts = prune_attempts(
+                            source=episode.source,
+                            source_id=episode.source_id,
+                            generation=resolved_generation,
+                            keep_claim_token=resolved_claim_token,
+                        )
+                        if inspect.isawaitable(pruned_attempts):
+                            await pruned_attempts
+                    except Exception:
+                        pass
             if applied and resolved_generation > 1:
                 prune_older = getattr(
                     self.qdrant,
@@ -562,29 +588,6 @@ class ContextEpisodeIndexer:
                 and state.index_profile == index_profile
             ):
                 return "already_indexed", collection_ready
-            claim_token = await self.memory.claim_context_index_job(
-                episode_id=episode.episode_id,
-                operation=ContextIndexOperation.UPSERT,
-                desired_revision=episode.content_hash,
-                generation=state.desired_generation,
-                index_fingerprint=vector_index_hash,
-                index_profile=index_profile,
-            )
-            if not claim_token:
-                return "superseded", collection_ready
-            applied = await self.memory.mark_context_index_applied(
-                episode_id=episode.episode_id,
-                operation=ContextIndexOperation.UPSERT,
-                desired_revision=episode.content_hash,
-                generation=state.desired_generation,
-                claim_token=claim_token,
-                index_fingerprint=vector_index_hash,
-                index_profile=index_profile,
-                vector_spaces=tuple(documents),
-            )
-            if applied:
-                return "already_indexed", collection_ready
-            return "superseded", collection_ready
         if state.status is ContextIndexStatus.APPLIED:
             if not await self.memory.request_context_episode_reindex(
                 episode.episode_id
@@ -740,12 +743,20 @@ class ContextEpisodeIndexer:
         )
         deleted = 0
         for job in jobs:
-            if await self.qdrant.delete_memory_through_generation(
-                source=job.source,
-                source_id=job.source_id,
-                max_generation=job.target_generation,
-            ):
-                deleted += 1
+            try:
+                if await self.qdrant.delete_memory_through_generation(
+                    source=job.source,
+                    source_id=job.source_id,
+                    max_generation=job.target_generation,
+                ):
+                    deleted += 1
+            except Exception:
+                pass
+            finally:
+                await self.memory.touch_context_index_job(
+                    episode_id=job.episode_id,
+                    generation=job.generation,
+                )
         return deleted
 
     async def _complete_source_hashes(
