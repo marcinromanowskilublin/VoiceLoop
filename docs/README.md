@@ -19,6 +19,9 @@ like current runtime behavior.
 
 ## Context, memory and evaluation
 
+- [Dynamic Memory Coupling V1](DYNAMIC_MEMORY_COUPLING_V1.md) — engineering
+  status, transactional SQL→Qdrant index state, adaptive shadow policy,
+  rollout gates and a Windows test checklist.
 - [Context Timeline V1](CONTEXT_TIMELINE_V1.md) — time-first local context,
   explicit adapters, SQL-verified semantic candidates, CLI operations and
   rollout limits. Includes legacy-index compatibility requirements.

@@ -20,6 +20,9 @@ docelowego komputera.
 - [ ] Wykonać kopię bazy SQLite i snapshot kolekcji Qdrant przed indeksowaniem.
 - [ ] Uruchomić indexer najpierw bez `--apply` i przejrzeć liczby.
 - [ ] Określić dopuszczalny budżet P95, CPU/RAM i liczbę równoległych pomiarów.
+- [ ] Po indeksowaniu sprawdzić desired/applied revision, pusty outbox oraz brak
+  `failed`, `delete_pending` i `untracked` według checklisty
+  [Dynamic Memory Coupling V1](DYNAMIC_MEMORY_COUPLING_V1.md).
 
 ## Decyzje człowieka wymagane przed oceną jakości
 
@@ -63,3 +66,4 @@ docelowego komputera.
 | 6. README i diagramy | zakończony | Repo przedstawia VoiceLoop jako local-first context layer; głos jest jednym z adapterów; trzy SVG opisują prawdziwe granice dual-track i czasu. | Wykonać ręczny przegląd renderowania, dostępności i publicznych sformułowań powyżej. |
 | 7. Publiczny pakiet dowodów | zakończony | Jedna komenda uruchamia bez sieci realny SQLite i silnik Qdrant local, indeksuje dane idempotentnie, mierzy FTS/RRF5/2+2+1, pokazuje agreement/conflict/abstention/unbounded, a prawdziwy `CommandExecutor.submit()` zapisuje `awaiting_confirmation` bez wywołania instrumentowanego handlera. CI publikuje JSON, Markdown i HTML jako artefakt. | Traktować pięć pomiarów czasu tylko jako smoke-run, zebrać liczby na docelowym Windows, nagrać narrację demonstratora i dopiero po scaleniu opublikować wybrany release/tag. |
 | 8. Przybliżony czas i ownership telemetrii | zakończony | Wspólny parser buduje bounded plan i jeden `search_text` dla polskich form względnych. Cascade zapisuje role przed retrieval i przekazuje ownership zamiast dublować zapis dual-track; standalone runner nadal zapisuje je domyślnie. Summary agreguje precyzję czasu, bramkę relewancji i rolę epistemiczną bez treści. | Na prywatnych przykładach zatwierdzić szerokości przybliżonych okien, progi pewności i znaczenie nowych rozkładów; kod ich nie promuje automatycznie. |
+| 9. Dynamic Memory Coupling | fundament shadow | Transakcyjny outbox i desired/applied state ujawniają dryf indeksu; time-first używa izolowanej kolekcji; deterministyczne profile Windows/RPG sterują budżetem adaptacyjnej kaskady; metryki rozdzielają source recall, hit rate, nDCG i false positives. | Uruchomić prywatne raporty per domena, zatwierdzić budżety i scope; legacy planner nie został przełączony. |

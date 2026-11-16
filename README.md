@@ -53,6 +53,9 @@ as text, but the durable value is the context layer built between sources.
 - Explicit ingest, migration, retention and evaluation commands.
 - A default-off dual-track prototype that compares five-axis RRF with a 2+2+1
   cascade in an isolated collection.
+- Transactional desired/applied index state and an outbox make SQL→Qdrant
+  drift visible and retryable. A policy-controlled FTS/vector retriever is
+  available for shadow evaluation only.
 - Controlled action proposals behind local schemas, risk policy and
   confirmation. Retrieved context cannot grant authority.
 
@@ -81,6 +84,7 @@ keeps a real RRF5 miss in the failure analysis.
 - [Committed evaluation card](docs/evaluation/context-evidence-v1/report.md)
 - [Case study and interpretation](docs/PORTFOLIO_CASE_STUDY.md)
 - [Evidence-pack release notes](docs/CONTEXT_EVIDENCE_RELEASE_V1.md)
+- [Dynamic Memory Coupling V1 engineering plan](docs/DYNAMIC_MEMORY_COUPLING_V1.md)
 
 CI regenerates the evidence after the Windows quality job and uploads
 `context-evidence-<sha>`. Synthetic lexical embeddings make the run
