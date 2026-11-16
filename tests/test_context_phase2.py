@@ -624,7 +624,12 @@ async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> 
         "total": 1,
         "indexed": 1,
         "sql_marked": 1,
+        "eligible": 1,
         "pending": 0,
+        "failed": 0,
+        "not_requested": 0,
+        "delete_pending": 0,
+        "untracked": 0,
     }
 
 

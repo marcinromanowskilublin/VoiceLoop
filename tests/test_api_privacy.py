@@ -88,11 +88,19 @@ async def test_dual_track_demonstrator_is_token_protected_and_read_only() -> Non
         memory=SimpleNamespace(
             context_episode_vector_coverage=AsyncMock(
                 return_value={
-                    "total": 2,
+                    "total": 1,
                     "indexed": 1,
                     "sql_marked": 1,
-                    "pending": 1,
+                    "eligible": 1,
+                    "pending": 0,
+                    "failed": 0,
+                    "not_requested": 0,
+                    "delete_pending": 0,
+                    "untracked": 0,
                 }
+            ),
+            context_index_summary=AsyncMock(
+                return_value={"applied": 1, "outbox_ready": 0}
             ),
             context_dual_track_summary=AsyncMock(
                 return_value={

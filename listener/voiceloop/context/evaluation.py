@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Literal
@@ -46,6 +47,11 @@ class ContextRetrievalScoreV1(BaseModel):
     provenance_complete: bool
     observed_axes: tuple[str, ...]
     expected_axes_present: bool
+    expected_source_count: int = Field(ge=0)
+    relevant_retrieved_count: int = Field(ge=0)
+    precision_at_k: float = Field(ge=0.0, le=1.0)
+    source_recall_at_k: float = Field(ge=0.0, le=1.0)
+    ndcg_at_k: float = Field(ge=0.0, le=1.0)
 
 
 class ContextRetrievalMetricsV1(BaseModel):
@@ -55,8 +61,13 @@ class ContextRetrievalMetricsV1(BaseModel):
     sample_count: int = Field(ge=0)
     k: int = Field(ge=1, le=100)
     recall_at_k: float = Field(ge=0.0, le=1.0)
+    hit_rate_at_k: float = Field(ge=0.0, le=1.0)
+    precision_at_k: float = Field(ge=0.0, le=1.0)
+    ndcg_at_k: float = Field(ge=0.0, le=1.0)
     mean_reciprocal_rank: float = Field(ge=0.0, le=1.0)
     abstention_accuracy: float = Field(ge=0.0, le=1.0)
+    answerability_accuracy: float = Field(ge=0.0, le=1.0)
+    false_positive_rate: float = Field(ge=0.0, le=1.0)
     provenance_coverage: float = Field(ge=0.0, le=1.0)
     reserve_axis_coverage: float = Field(ge=0.0, le=1.0)
 
@@ -96,6 +107,16 @@ async def evaluate_context_retrieval(
             )
         )
         negative = not relevant
+        relevant_retrieved = sum(
+            1 for source_id in dict.fromkeys(predicted) if source_id in relevant
+        )
+        precision = relevant_retrieved / safe_k
+        source_recall = (
+            relevant_retrieved / len(relevant) if relevant else 0.0
+        )
+        gains = [1.0 if source_id in relevant else 0.0 for source_id in predicted]
+        ideal = [1.0] * min(len(relevant), safe_k)
+        ndcg = _dcg(gains) / _dcg(ideal) if ideal else 0.0
         scores.append(
             ContextRetrievalScoreV1(
                 example_id=record.example_id,
@@ -105,30 +126,80 @@ async def evaluate_context_retrieval(
                 hit_at_k=first_rank is not None,
                 abstention_correct=(not items if negative else first_rank is not None),
                 provenance_complete=bool(items)
-                and all(item.source and item.source_id for item in items),
+                and all(
+                    item.source
+                    and item.source_id
+                    and item.content_hash
+                    and item.selection_reason
+                    for item in items
+                ),
                 observed_axes=observed_axes,
                 expected_axes_present=set(record.expected_axes).issubset(observed_axes),
+                expected_source_count=len(relevant),
+                relevant_retrieved_count=relevant_retrieved,
+                precision_at_k=precision,
+                source_recall_at_k=source_recall,
+                ndcg_at_k=ndcg,
             )
         )
+    positive_scores = [
+        score
+        for record, score in zip(records, scores, strict=True)
+        if record.expected_source_ids
+    ]
+    negative_scores = [
+        score
+        for record, score in zip(records, scores, strict=True)
+        if not record.expected_source_ids
+    ]
+    result_scores = [score for score in scores if score.predicted_source_ids]
+    answerability = [
+        score.hit_at_k if record.expected_source_ids else not score.predicted_source_ids
+        for record, score in zip(records, scores, strict=True)
+    ]
     metrics = ContextRetrievalMetricsV1(
         sample_count=len(scores),
         k=safe_k,
         recall_at_k=_mean(
+            [score.source_recall_at_k for score in positive_scores]
+        ),
+        hit_rate_at_k=_mean(
+            [1.0 if score.hit_at_k else 0.0 for score in positive_scores]
+        ),
+        precision_at_k=_mean(
+            [score.precision_at_k for score in positive_scores]
+        ),
+        ndcg_at_k=_mean([score.ndcg_at_k for score in positive_scores]),
+        mean_reciprocal_rank=_mean(
+            [score.reciprocal_rank for score in positive_scores]
+        ),
+        abstention_accuracy=_mean(
             [
-                1.0 if score.hit_at_k else 0.0
-                for record, score in zip(records, scores, strict=True)
-                if record.expected_source_ids
+                1.0 if not score.predicted_source_ids else 0.0
+                for score in negative_scores
             ]
         ),
-        mean_reciprocal_rank=_mean([score.reciprocal_rank for score in scores]),
-        abstention_accuracy=_mean(
-            [1.0 if score.abstention_correct else 0.0 for score in scores]
+        answerability_accuracy=_mean(
+            [1.0 if correct else 0.0 for correct in answerability]
+        ),
+        false_positive_rate=_mean(
+            [
+                1.0 if score.predicted_source_ids else 0.0
+                for score in negative_scores
+            ]
         ),
         provenance_coverage=_mean(
-            [1.0 if score.provenance_complete else 0.0 for score in scores]
+            [
+                1.0 if score.provenance_complete else 0.0
+                for score in result_scores
+            ]
         ),
         reserve_axis_coverage=_mean(
-            [1.0 if score.expected_axes_present else 0.0 for score in scores]
+            [
+                1.0 if score.expected_axes_present else 0.0
+                for record, score in zip(records, scores, strict=True)
+                if record.expected_axes
+            ]
         ),
     )
     return scores, metrics
@@ -338,3 +409,10 @@ async def evaluate_context_dual_track(
 
 def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def _dcg(gains: Sequence[float]) -> float:
+    return sum(
+        gain / math.log2(index + 1)
+        for index, gain in enumerate(gains, start=1)
+    )

@@ -1,5 +1,10 @@
 """Typed, non-executable context contracts and deterministic assembly."""
 
+from .adaptive_retrieval import (
+    AdaptiveHybridRetriever,
+    AdaptiveRetrievalRun,
+    AdaptiveRetrievalTraceV1,
+)
 from .assembler import ContextAssembler, ContextBudgets
 from .entities import (
     ContextEntityKind,
@@ -8,6 +13,7 @@ from .entities import (
     stable_entity_id,
 )
 from .episodes import activity_bucket, group_events_into_episodes
+from .policy import RetrievalPolicyV1, resolve_retrieval_policy
 from .retrieval import (
     TimeFirstQueryPlan,
     TimeFirstRetriever,
@@ -40,6 +46,9 @@ from .shadow_statements import (
 )
 
 __all__ = [
+    "AdaptiveHybridRetriever",
+    "AdaptiveRetrievalRun",
+    "AdaptiveRetrievalTraceV1",
     "AtomicClaimProposal",
     "ContextAssembler",
     "ContextBudgets",
@@ -53,6 +62,7 @@ __all__ = [
     "ContextTrust",
     "ForegroundConfidence",
     "ResolvedEntity",
+    "RetrievalPolicyV1",
     "TemporalRoleV1",
     "TemporalStatementShadowV1",
     "TimeFirstQueryPlan",
@@ -67,6 +77,7 @@ __all__ = [
     "comparative_shadow_question",
     "content_hash_for",
     "normalize_context_text",
+    "resolve_retrieval_policy",
     "shadow_relevance_gate",
     "stable_context_id",
     "stable_episode_id",

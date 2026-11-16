@@ -1422,23 +1422,62 @@ class MemoryStore:
                         COUNT(*) AS total,
                         SUM(
                             CASE
-                                WHEN vector_spaces_json <> '[]' THEN 1
+                                WHEN e.vector_spaces_json <> '[]' THEN 1
                                 ELSE 0
                             END
-                        ) AS indexed
-                    FROM context_episodes
-                    WHERE deleted_at IS NULL
-                      AND (expires_at IS NULL OR expires_at > ?)
+                        ) AS sql_marked,
+                        SUM(
+                            CASE
+                                WHEN s.status = 'applied'
+                                 AND s.desired_operation = 'upsert'
+                                 AND s.applied_revision = s.desired_revision
+                                THEN 1 ELSE 0
+                            END
+                        ) AS indexed,
+                        SUM(
+                            CASE WHEN s.status = 'not_requested'
+                                THEN 1 ELSE 0 END
+                        ) AS not_requested,
+                        SUM(
+                            CASE WHEN s.status = 'failed'
+                                THEN 1 ELSE 0 END
+                        ) AS failed,
+                        SUM(
+                            CASE
+                                WHEN s.desired_operation = 'delete'
+                                 AND s.status <> 'applied'
+                                THEN 1 ELSE 0
+                            END
+                        ) AS delete_pending,
+                        SUM(
+                            CASE WHEN s.episode_id IS NULL
+                                THEN 1 ELSE 0 END
+                        ) AS untracked
+                    FROM context_episodes e
+                    LEFT JOIN context_index_state s
+                      ON s.episode_id = e.episode_id
+                    WHERE e.deleted_at IS NULL
+                      AND (e.expires_at IS NULL OR e.expires_at > ?)
                     """,
                     (_now_iso(),),
                 ).fetchone()
             total = int(row["total"] or 0)
             indexed = int(row["indexed"] or 0)
+            not_requested = int(row["not_requested"] or 0)
+            failed = int(row["failed"] or 0)
+            delete_pending = int(row["delete_pending"] or 0)
+            untracked = int(row["untracked"] or 0)
+            eligible = max(0, total - not_requested)
             return {
                 "total": total,
                 "indexed": indexed,
-                "sql_marked": indexed,
-                "pending": max(0, total - indexed),
+                "sql_marked": int(row["sql_marked"] or 0),
+                "eligible": eligible,
+                "pending": max(0, eligible - indexed),
+                "failed": failed,
+                "not_requested": not_requested,
+                "delete_pending": delete_pending,
+                "untracked": untracked,
             }
 
         return await asyncio.to_thread(_coverage)
