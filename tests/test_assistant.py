@@ -335,6 +335,7 @@ def test_shadow_analysis_failure_has_no_live_side_effect(tmp_path, monkeypatch) 
     async def scenario() -> None:
         memory = MemoryStore(tmp_path / "voice.db")
         await memory.initialize()
+        qdrant = QdrantStub()
         assistant = _assistant(
             memory,
             router=RouterStub(),
@@ -342,7 +343,8 @@ def test_shadow_analysis_failure_has_no_live_side_effect(tmp_path, monkeypatch) 
             executor=ExecutorStub(memory),
             tts=TTSStub(),
             embeddings=EmbeddingsStub(),
-            qdrant=QdrantStub(),
+            qdrant=qdrant,
+            context_qdrant=qdrant,
             context_cascade_shadow_enabled=True,
         )
         request = CommandRequest(text="Co ustaliliśmy wczoraj?")
@@ -531,6 +533,7 @@ def test_available_cascade_owns_single_temporal_role_write(
             tts=TTSStub(),
             embeddings=EmbeddingsStub(),
             qdrant=qdrant,
+            context_qdrant=qdrant,
             context_cascade_shadow_enabled=True,
             context_cascade_shadow_timeout_seconds=0.1,
             dual_track_runner=runner,

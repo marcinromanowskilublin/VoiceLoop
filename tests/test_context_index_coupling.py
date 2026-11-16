@@ -896,6 +896,48 @@ async def test_late_upsert_after_completed_opt_out_is_compensated(
 
 
 @pytest.mark.asyncio
+async def test_timeout_after_remote_commit_is_compensated_after_opt_out(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+
+    class CommitThenTimeout(QdrantStub):
+        async def upsert_memory(self, **kwargs):
+            await super().upsert_memory(**kwargs)
+            await store.upsert_context_episode(
+                episode.model_copy(
+                    update={
+                        "metadata": {"vectorize": False},
+                        "updated_at": datetime.now(UTC),
+                    }
+                )
+            )
+            raise TimeoutError("response lost after remote commit")
+
+    qdrant = CommitThenTimeout()
+    indexer = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+
+    report = await indexer.index(dry_run=False)
+
+    assert report.failed == 1
+    assert qdrant.points == {}
+    pending = await store.get_context_index_state(episode.episode_id)
+    assert pending is not None
+    assert pending.desired_operation is ContextIndexOperation.DELETE
+    await indexer.index(dry_run=False)
+    final = await store.get_context_index_state(episode.episode_id)
+    assert final is not None
+    assert final.status is ContextIndexStatus.NOT_REQUESTED
+
+
+@pytest.mark.asyncio
 async def test_concurrent_embedding_profiles_use_single_claim(tmp_path) -> None:
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
@@ -942,6 +984,85 @@ async def test_concurrent_embedding_profiles_use_single_claim(tmp_path) -> None:
     assert state.index_profile and state.index_profile.endswith(":embedding-a")
     assert point[1] == state.index_fingerprint
     assert point[2] == state.applied_generation
+
+
+@pytest.mark.asyncio
+async def test_lease_takeover_cannot_report_applied_after_point_is_removed(
+    tmp_path,
+) -> None:
+    store = MemoryStore(tmp_path / "voice.db")
+    await store.initialize()
+    episode = await seeded_episode(store)
+
+    class ReverseCompletionQdrant(QdrantStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.a_claimed = asyncio.Event()
+            self.release_a = asyncio.Event()
+            self.b_written = asyncio.Event()
+            self.release_b_verify = asyncio.Event()
+            self.b_fingerprint = ""
+
+        async def upsert_memory(self, **kwargs):
+            profile = kwargs["metadata"]["index_profile"]
+            if profile.endswith(":embedding-a"):
+                self.a_claimed.set()
+                await self.release_a.wait()
+            await super().upsert_memory(**kwargs)
+            if profile.endswith(":embedding-b"):
+                self.b_fingerprint = kwargs["metadata"]["vector_index_hash"]
+
+        async def has_memory(self, **kwargs):
+            if (
+                self.b_fingerprint
+                and kwargs["metadata_match"]["vector_index_hash"]
+                == self.b_fingerprint
+            ):
+                self.b_written.set()
+                await self.release_b_verify.wait()
+            return await super().has_memory(**kwargs)
+
+    qdrant = ReverseCompletionQdrant()
+    first = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub("embedding-a"),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+    second = ContextEpisodeIndexer(
+        memory=store,
+        embeddings=EmbeddingsStub("embedding-b"),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+        primary_collection="voiceloop_memory",
+    )
+
+    first_task = asyncio.create_task(first.index(dry_run=False))
+    await qdrant.a_claimed.wait()
+    with store._connect() as connection:
+        connection.execute(
+            """
+            UPDATE context_index_outbox
+            SET available_at = ?
+            WHERE episode_id = ?
+            """,
+            (
+                (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+                episode.episode_id,
+            ),
+        )
+    second_task = asyncio.create_task(second.index(dry_run=False))
+    await qdrant.b_written.wait()
+    qdrant.release_a.set()
+    await first_task
+    qdrant.release_b_verify.set()
+    second_report = await second_task
+    state = await store.get_context_index_state(episode.episode_id)
+
+    assert second_report.failed == 1
+    assert state is not None
+    assert state.status is ContextIndexStatus.FAILED
+    assert qdrant.points == {}
+    assert (await store.context_index_summary())["outbox_ready"] == 1
 
 
 @pytest.mark.asyncio

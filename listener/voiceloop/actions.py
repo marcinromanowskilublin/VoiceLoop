@@ -216,7 +216,7 @@ class ActionRegistry:
         self.web_search = web_search or WebSearchClient(settings)
         self.embeddings = embeddings
         self.qdrant = qdrant
-        self.context_qdrant = context_qdrant or qdrant
+        self.context_qdrant = context_qdrant
         self.manual_memory = manual_memory
         self._last_web_sources: dict[str, Any] | None = None
         self._current_process: asyncio.subprocess.Process | None = None

@@ -217,17 +217,68 @@ class ContextEpisodeVectorizer:
                 content_hash=episode.content_hash,
                 expires_at=episode.expires_at,
             )
+            verifier = getattr(self.qdrant, "has_memory", None)
+            if callable(verifier):
+                verified = verifier(
+                    source=episode.source,
+                    source_id=episode.source_id,
+                    content_hash=episode.content_hash,
+                    metadata_match={
+                        "vector_index_hash": resolved_index_hash,
+                        "index_generation": str(resolved_generation),
+                    },
+                )
+                if inspect.isawaitable(verified):
+                    verified = await verified
+                if verified is False:
+                    raise ContextEpisodeIndexError(
+                        "Qdrant post-write verification failed."
+                    )
         except Exception as exc:
             if self.memory is not None:
-                await self.memory.mark_context_index_failed(
-                    episode_id=episode.episode_id,
-                    operation=ContextIndexOperation.UPSERT,
-                    desired_revision=episode.content_hash,
-                    generation=resolved_generation,
-                    index_fingerprint=resolved_index_hash,
-                    index_profile=resolved_profile,
-                    error_type=type(exc).__name__,
+                current = await self.memory.get_context_index_state(
+                    episode.episode_id
                 )
+                claim_is_current = (
+                    current is not None
+                    and current.desired_operation
+                    is ContextIndexOperation.UPSERT
+                    and current.desired_revision == episode.content_hash
+                    and current.desired_generation == resolved_generation
+                    and current.desired_index_fingerprint
+                    == resolved_index_hash
+                    and current.desired_index_profile == resolved_profile
+                    and current.status is ContextIndexStatus.CLAIMED
+                )
+                if claim_is_current:
+                    await self.memory.mark_context_index_failed(
+                        episode_id=episode.episode_id,
+                        operation=ContextIndexOperation.UPSERT,
+                        desired_revision=episode.content_hash,
+                        generation=resolved_generation,
+                        index_fingerprint=resolved_index_hash,
+                        index_profile=resolved_profile,
+                        error_type=type(exc).__name__,
+                    )
+                else:
+                    cleanup = getattr(
+                        self.qdrant,
+                        "delete_memory_if_matches",
+                        None,
+                    )
+                    if callable(cleanup):
+                        try:
+                            cleaned = cleanup(
+                                source=episode.source,
+                                source_id=episode.source_id,
+                                content_hash=episode.content_hash,
+                                index_fingerprint=resolved_index_hash,
+                                index_generation=resolved_generation,
+                            )
+                            if inspect.isawaitable(cleaned):
+                                await cleaned
+                        except Exception:
+                            pass
             raise
         if self.memory is not None:
             applied = await self.memory.mark_context_index_applied(

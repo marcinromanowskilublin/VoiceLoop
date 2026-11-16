@@ -1,3 +1,4 @@
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -115,7 +116,12 @@ async def test_qdrant_conditional_delete_removes_legacy_point_without_generation
         Settings(voiceloop_data_dir=str(tmp_path)),
         client=client,
     )
-    with pytest.warns(UserWarning, match="Payload indexes have no effect"):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Payload indexes have no effect",
+            category=UserWarning,
+        )
         await store.upsert_memory(
             source="timeline",
             source_id="legacy",

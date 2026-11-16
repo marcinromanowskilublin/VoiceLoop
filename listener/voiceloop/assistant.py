@@ -155,7 +155,7 @@ class AssistantService:
         self.tts = tts
         self.embeddings = embeddings
         self.qdrant = qdrant
-        self.context_qdrant = context_qdrant or qdrant
+        self.context_qdrant = context_qdrant
         self.qdrant_shadow = qdrant_shadow
         self.capability_index = capability_index
         self.routing_v2 = routing_v2
