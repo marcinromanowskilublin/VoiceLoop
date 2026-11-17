@@ -25,6 +25,11 @@ All notable public changes to VoiceLoop are documented here.
   safety scenarios and a confirmation-only action-policy check.
 - CI-generated JSON, Markdown and HTML evidence artifacts plus a portfolio case
   study and release checklist.
+- Dynamic Memory Coupling V1 in shadow mode (`AdaptiveHybridRetriever` and
+  `RetrievalPolicyV1`), transactional SQLite→Qdrant index state and outbox with
+  monotonic generations, lease/claim tokens, model-fingerprint verification,
+  post-tombstone delete fences, and V2 retrieval metrics (source Recall@k,
+  HitRate@k, Precision@k, nDCG@k, positive-only MRR and false-positive rate).
 
 ### Fixed
 
@@ -63,6 +68,9 @@ All notable public changes to VoiceLoop are documented here.
 
 ### Verification
 
+- Dynamic Memory Coupling V1 checkpoint: Windows full suite
+  `1075 passed, 11 skipped`; Ruff passed; `pip-audit` found no known
+  vulnerabilities in the complete pinned lock.
 - Dual-track prototype checkpoint: Linux full suite `1005 passed, 3 skipped`;
   Ruff passed; `pip-audit` found no known vulnerabilities in the complete
   pinned lock. This still does not establish private-data quality or target

@@ -59,6 +59,9 @@ These contracts exist in code but do not grant execution authority.
 
 - [Public context evidence screenshot](img/voiceloop-context-evidence.png) —
   the committed deterministic SQLite/Qdrant integration report.
+- [Dynamic Memory Coupling V1](img/voiceloop-dynamic-memory-coupling.svg) —
+  transactional SQLite outbox, generation-fenced Qdrant points and domain-aware
+  retrieval policies across Windows and RPG profiles.
 - [Local context dual-track flow](img/voiceloop-dual-track-flow.svg) — local
   adapters, canonical SQL time, parallel retrieval and shadow evidence.
 - [Arbiter outcomes](img/voiceloop-arbiter-outcomes.svg) — deterministic

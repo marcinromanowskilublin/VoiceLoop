@@ -22,16 +22,23 @@ ranking, and preserve a separate local boundary for actions.
 ## What was built
 
 - canonical timeline events and episodes in SQLite;
+- transactional SQLite→Qdrant index state (`context_index_state` +
+  `context_index_outbox`) with monotonic generations, lease/claim tokens,
+  model-fingerprint verification and post-tombstone delete fences;
 - named-vector search in a derived Qdrant index;
-- SQL verification of source identity, content hashes, TTL and time range;
+- SQL verification of source identity, content hashes, TTL, time range,
+  applied generation and claim token;
 - parallel RRF5 and bounded 2+2+1 retrieval in an isolated shadow collection;
+- deterministic `RetrievalPolicyV1` and `AdaptiveHybridRetriever` that vary
+  FTS/vector weights, axis coverage and wave budgets across `windows`, `rpg`
+  and `general` profiles without weakening canonical SQL verification;
 - a deterministic `agreement` / `conflict` / `uncertain` arbiter;
 - expiring content-free traces;
 - local action schemas that can raise risk and require confirmation;
 - a read-only demonstrator and a reproducible public evidence command.
 
-The dual-track result does not enter the serving Context Pack and cannot
-authorize an action.
+The dual-track and adaptive hybrid results do not enter the serving Context Pack
+and cannot authorize an action.
 
 ## Reproduce the public evidence
 
@@ -68,12 +75,17 @@ The five-record fixture is deliberately small and synthetic:
 | FTS only | 1.000 | 1.000 | 1.000 | regenerated per run |
 | RRF5 | 0.750 | 0.500 | 1.000 | regenerated per run |
 | Cascade 2+2+1 | 1.000 | 0.833 | 1.000 | regenerated per run |
+| Adaptive hybrid | 1.000 | 1.000 | 1.000 | regenerated per run |
 
-This is not a claim that the cascade is better. On this lexical fixture FTS is
-both faster and stronger, while RRF5 misses the synthetic topic example. That
-failure is kept in the published report instead of being hidden. The result
-supports the current product decision: keep the candidate in shadow and collect
-representative private labels before discussing promotion.
+This is not a claim that the cascade or adaptive hybrid is universally better.
+On this lexical fixture FTS is both faster and stronger, while RRF5 misses the
+synthetic topic example. That failure is kept in the published report instead
+of being hidden. The report also verifies transactional index coupling
+(`consistent: true`) and deterministic domain policy profiles (`Windows exact`,
+`Windows exploration`, `RPG canon`, `RPG creative` — all with
+`serving_eligible: false`). The result supports the current product decision:
+keep candidates in shadow and collect representative private labels before
+discussing promotion.
 
 The timing columns contain five smoke-run observations from the machine that
 generated the artifact. They are useful for detecting gross regressions, not as

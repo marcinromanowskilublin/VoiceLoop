@@ -6,15 +6,26 @@
 - SQLite events/episodes: 5
 - Qdrant points: 5
 - Idempotent second index: true
+- Index coupling consistent: true
 - Promotion allowed: `false`
 
 ## Retrieval comparison
 
 | Track | Recall@3 | MRR | Negative abstention | Result provenance | Smoke P50 ms | Smoke P95 ms |
 |---|---:|---:|---:|---:|---:|---:|
-| FTS only | 1.000 | 1.000 | 1.000 | 1.000 | 1.511 | 1.877 |
-| RRF5 | 0.750 | 0.500 | 1.000 | 1.000 | 9.728 | 10.883 |
-| Cascade 2+2+1 | 1.000 | 0.833 | 1.000 | 1.000 | 10.176 | 14.271 |
+| FTS only | 1.000 | 1.000 | 1.000 | 1.000 | 1.729 | 1.899 |
+| RRF5 | 0.750 | 0.500 | 1.000 | 1.000 | 12.837 | 13.439 |
+| Cascade 2+2+1 | 1.000 | 0.833 | 1.000 | 1.000 | 11.461 | 28.733 |
+| Adaptive hybrid | 1.000 | 1.000 | 1.000 | 1.000 | 12.687 | 14.637 |
+
+## Dynamic policy profiles
+
+| Profile | Strategy | FTS weight | Vector weight | Max axes (qmax) | Serving eligible |
+|---|---|---:|---:|---:|---|
+| Windows exact operation | `exact_only` | 0.900 | 0.100 | 2 | `false` |
+| Windows architectural exploration | `fts_then_cascade` | 0.550 | 0.450 | 3 | `false` |
+| RPG canonical fact | `fts_then_cascade` | 0.720 | 0.280 | 4 | `false` |
+| RPG creative association | `hybrid_cascade` | 0.250 | 0.750 | 5 | `false` |
 
 ## Observable outcomes
 
@@ -39,6 +50,7 @@
 - **fts_only:** no misses in this synthetic fixture
 - **rrf5:** topic:miss
 - **cascade_2_2_1:** no misses in this synthetic fixture
+- **adaptive_hybrid:** no misses in this synthetic fixture
 
 ## What this does not prove
 

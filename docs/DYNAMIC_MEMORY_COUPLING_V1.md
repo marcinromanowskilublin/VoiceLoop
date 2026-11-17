@@ -7,6 +7,8 @@ adaptacyjna polityka wyszukiwania, ewaluacja i bezpieczny rollout.
 **Niezmienna granica:** pamięć pozostaje kontekstem. Nie tworzy `action_id`,
 nie obniża ryzyka i nie zastępuje potwierdzenia.
 
+![Dynamic Memory Coupling V1 architecture showing transactional SQLite outbox state, generation-fenced Qdrant vectors, domain-aware RetrievalPolicyV1 profiles and SQL-hydrated ContextPackV1](img/voiceloop-dynamic-memory-coupling.svg)
+
 ## Werdykt po rewizji
 
 Kierunek jest technicznie sensowny, przyszłościowy i rozwijalny pod trzema

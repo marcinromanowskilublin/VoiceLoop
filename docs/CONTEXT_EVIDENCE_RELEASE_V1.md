@@ -7,8 +7,11 @@
 - deterministic public fixture with five timeline events and episodes;
 - real SQLite writes, FTS reads and source provenance;
 - real `qdrant-client` local engine with five named-vector points;
-- idempotent second indexing pass;
-- FTS-only, RRF5 and cascade 2+2+1 comparison;
+- idempotent second indexing pass and verified transactional SQL→Qdrant index
+  coupling (`consistent: true`);
+- FTS-only, RRF5, cascade 2+2+1 and adaptive hybrid comparison;
+- deterministic domain policy profiles (`windows` exact/exploratory, `rpg`
+  canon/creative);
 - agreement, conflict, bounded abstention and unbounded rejection scenarios;
 - local action-policy example that raises risk and requires confirmation without
   executing a handler;
