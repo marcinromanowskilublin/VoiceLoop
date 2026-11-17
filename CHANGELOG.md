@@ -30,6 +30,11 @@ All notable public changes to VoiceLoop are documented here.
   monotonic generations, lease/claim tokens, model-fingerprint verification,
   post-tombstone delete fences, and V2 retrieval metrics (source Recall@k,
   HitRate@k, Precision@k, nDCG@k, positive-only MRR and false-positive rate).
+- Safety evaluation and claims register that distinguish implemented controls,
+  regression evidence, reproducible synthetic measurements, private quality
+  gates and unestablished clinical or deployment claims.
+- Light portfolio diagrams for the implemented SQLite/cascade boundary and the
+  explicitly labeled multi-environment adapter direction.
 
 ### Fixed
 
