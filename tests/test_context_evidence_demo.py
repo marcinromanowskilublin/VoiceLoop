@@ -35,6 +35,9 @@ async def test_public_context_evidence_runs_real_sqlite_and_qdrant(
     assert report["ingest"]["episodes"] == 5
     assert report["ingest"]["idempotent"] is True
     assert report["ingest"]["second_index"]["already_indexed"] == 5
+    assert report["ingest"]["index_coupling"]["consistent"] is True
+    assert report["evaluation"]["adaptive_hybrid"]["recall_at_k"] == 1.0
+    assert len(report["evaluation"]["domain_profiles"]) == 4
     assert report["evaluation"]["promotion_allowed"] is False
 
     scenarios = {item["name"]: item for item in report["scenarios"]}

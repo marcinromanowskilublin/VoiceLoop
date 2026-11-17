@@ -207,6 +207,7 @@ class ActionRegistry:
         embeddings: OpenAICompatibleEmbeddingClient | None = None,
         qdrant: QdrantVectorStore | None = None,
         manual_memory: ManualMemoryService | None = None,
+        context_qdrant: QdrantVectorStore | None = None,
     ) -> None:
         self.settings = settings
         self.memory = memory
@@ -215,6 +216,7 @@ class ActionRegistry:
         self.web_search = web_search or WebSearchClient(settings)
         self.embeddings = embeddings
         self.qdrant = qdrant
+        self.context_qdrant = context_qdrant
         self.manual_memory = manual_memory
         self._last_web_sources: dict[str, Any] | None = None
         self._current_process: asyncio.subprocess.Process | None = None
@@ -2930,7 +2932,7 @@ class ActionRegistry:
                 memory=self.memory,
                 screenpipe=self.screenpipe,
                 embeddings=self.embeddings,
-                qdrant=self.qdrant,
+                qdrant=self.context_qdrant,
             )
             try:
                 timeline_pack = await retriever.retrieve(query, limit=10)
@@ -2938,7 +2940,7 @@ class ActionRegistry:
                 timeline_pack = await TimeFirstRetriever(
                     memory=self.memory,
                     embeddings=self.embeddings,
-                    qdrant=self.qdrant,
+                    qdrant=self.context_qdrant,
                 ).retrieve(query, limit=10)
             # An empty time-bounded answer must not fall through to an unbounded
             # vector/lexical lookup that could return evidence from another day.

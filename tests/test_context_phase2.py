@@ -21,6 +21,7 @@ from voiceloop.context.retrieval import TimeFirstRetriever
 from voiceloop.context.schema import (
     ContextEpisodeV1,
     ContextEventV1,
+    ContextIndexStatus,
     ContextItemV1,
     ContextPackV1,
     ContextScope,
@@ -43,8 +44,15 @@ async def test_lifecycle_prunes_qdrant_before_local_tombstone(tmp_path) -> None:
         def __init__(self) -> None:
             self.deleted: list[tuple[str, str]] = []
 
-        async def delete_memory(self, *, source: str, source_id: str) -> None:
+        async def delete_memory_through_generation(
+            self,
+            *,
+            source: str,
+            source_id: str,
+            max_generation,
+        ) -> bool:
             self.deleted.append((source, source_id))
+            return True
 
     store = MemoryStore(tmp_path / "voice.db")
     await store.initialize()
@@ -83,11 +91,13 @@ async def test_lifecycle_prunes_qdrant_before_local_tombstone(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_fails_closed_when_qdrant_delete_fails(tmp_path) -> None:
+async def test_lifecycle_tombstones_and_retries_when_qdrant_delete_fails(
+    tmp_path,
+) -> None:
     class BrokenQdrant:
         enabled = True
 
-        async def delete_memory(self, **_kwargs) -> None:
+        async def delete_memory_through_generation(self, **_kwargs) -> bool:
             raise RuntimeError("qdrant down")
 
     store = MemoryStore(tmp_path / "voice.db")
@@ -115,7 +125,10 @@ async def test_lifecycle_fails_closed_when_qdrant_delete_fails(tmp_path) -> None
             dry_run=False,
         )
     stored = await store.get_context_episode(episode.episode_id)
-    assert stored is not None and stored.deleted_at is None
+    state = await store.get_context_index_state(episode.episode_id)
+    assert stored is not None and stored.deleted_at is not None
+    assert state is not None
+    assert state.status is ContextIndexStatus.FAILED
 
 
 @pytest.mark.asyncio
@@ -554,6 +567,7 @@ async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> 
             source_id,
             content_hash,
             metadata_match,
+            point_revision=None,
         ):
             point = self.points.get((source, source_id))
             return point == (content_hash, metadata_match["vector_index_hash"])
@@ -624,7 +638,12 @@ async def test_episode_indexer_is_isolated_explicit_and_idempotent(tmp_path) -> 
         "total": 1,
         "indexed": 1,
         "sql_marked": 1,
+        "eligible": 1,
         "pending": 0,
+        "failed": 0,
+        "not_requested": 0,
+        "delete_pending": 0,
+        "untracked": 0,
     }
 
 

@@ -14,15 +14,22 @@ from pathlib import Path
 from ..actions import ActionRegistry
 from ..behavior_digest import LocalBehaviorDigestClient
 from ..capability_index import CapabilityIndex, CapabilityIndexError
+from ..context.adaptive_retrieval import AdaptiveHybridRetriever
 from ..context.documents import DocumentAccessError, DocumentTimelineIngestor
 from ..context.dual_track import DualTrackRunner
 from ..context.evaluation import (
     ContextRetrievalEvalRecordV1,
     evaluate_context_dual_track,
+    evaluate_context_retrieval,
 )
 from ..context.lifecycle import ContextLifecycleService
+from ..context.policy import POLICY_VERSION
 from ..context.projection import MemoryTimelineMigrator
-from ..context.vectorization import ContextEpisodeIndexer, ContextEpisodeIndexError
+from ..context.vectorization import (
+    ContextEpisodeIndexer,
+    ContextEpisodeIndexError,
+    EpisodeIndexingReport,
+)
 from ..embeddings import (
     EmbeddingUnavailableError,
     OpenAICompatibleEmbeddingClient,
@@ -472,6 +479,24 @@ def build_parser() -> argparse.ArgumentParser:
     context_report.add_argument("--database", type=Path)
     context_report.add_argument("--k", type=int, default=8)
     context_report.add_argument(
+        "--eval-now",
+        type=datetime.fromisoformat,
+        help="Jawny czas ISO-8601 dla względnych zapytań bez observed_at.",
+    )
+
+    adaptive_report = subparsers.add_parser(
+        "report-adaptive-context-retrieval",
+        help="Oceń shadow Dynamic Memory Coupling na prywatnym gold secie.",
+    )
+    adaptive_report.add_argument("--gold", type=Path, required=True)
+    adaptive_report.add_argument("--database", type=Path)
+    adaptive_report.add_argument("--k", type=int, default=8)
+    adaptive_report.add_argument(
+        "--domain",
+        choices=("general", "windows", "rpg"),
+        default="general",
+    )
+    adaptive_report.add_argument(
         "--eval-now",
         type=datetime.fromisoformat,
         help="Jawny czas ISO-8601 dla względnych zapytań bez observed_at.",
@@ -1799,12 +1824,14 @@ async def _run_async(args: argparse.Namespace) -> int:
             )
         )
         try:
-            report = await ContextEpisodeIndexer(
+            indexer = ContextEpisodeIndexer(
                 memory=memory,
                 embeddings=embeddings,
                 qdrant=episode_qdrant,
                 primary_collection=settings.qdrant_collection,
-            ).index(
+            )
+            report = await _run_context_indexer(
+                indexer,
                 limit=args.limit,
                 offset=args.offset,
                 dry_run=not args.apply,
@@ -1882,6 +1909,103 @@ async def _run_async(args: argparse.Namespace) -> int:
         payload["collection"] = settings.qdrant_context_episode_collection
         print(json.dumps(payload, ensure_ascii=False))
         return 0
+    if args.command == "report-adaptive-context-retrieval":
+        gold_path = args.gold.resolve()
+        records = read_jsonl(gold_path, ContextRetrievalEvalRecordV1)
+        if not records:
+            raise ValueError(f"Brak prywatnych przykładów gold w pliku: {gold_path}")
+        memory = await _context_memory_store(args, settings)
+        embeddings = OpenAICompatibleEmbeddingClient(
+            base_url=(settings.local_embeddings_base_url or settings.lm_studio_base_url),
+            api_key=(settings.local_embeddings_api_key or settings.lm_studio_api_key),
+            model=settings.local_embeddings_model,
+            timeout_seconds=settings.local_embeddings_timeout_seconds,
+            enabled=settings.local_embeddings_enabled,
+        )
+        episode_qdrant = QdrantVectorStore(
+            settings.model_copy(
+                update={
+                    "qdrant_collection": settings.qdrant_context_episode_collection,
+                }
+            )
+        )
+        retriever = AdaptiveHybridRetriever(
+            memory=memory,
+            embeddings=embeddings,
+            qdrant=episode_qdrant,
+        )
+        eval_now = args.eval_now or datetime.now(UTC)
+        if eval_now.tzinfo is None or eval_now.utcoffset() is None:
+            raise ValueError("--eval-now musi zawierać strefę czasową.")
+        runs = {}
+
+        async def _adaptive(record: ContextRetrievalEvalRecordV1, limit: int):
+            run = await retriever.retrieve(
+                record.query,
+                domain_hint=args.domain,
+                risk=record.risk,
+                now=record.observed_at or eval_now,
+                limit=limit,
+            )
+            runs[record.example_id] = run
+            return run.pack
+
+        try:
+            embeddings_health, qdrant_health = await asyncio.gather(
+                embeddings.health(),
+                episode_qdrant.health(),
+            )
+            _, metrics = await evaluate_context_retrieval(
+                records=records,
+                retrieve=_adaptive,
+                k=args.k,
+            )
+        finally:
+            await episode_qdrant.close()
+        policy_counts: dict[str, int] = {}
+        query_class_counts: dict[str, int] = {}
+        stop_reason_counts: dict[str, int] = {}
+        vector_expansions = 0
+        for run in runs.values():
+            policy_counts[run.policy.policy_id] = (
+                policy_counts.get(run.policy.policy_id, 0) + 1
+            )
+            query_class_counts[run.policy.query_class] = (
+                query_class_counts.get(run.policy.query_class, 0) + 1
+            )
+            stop_reason_counts[run.trace.stop_reason] = (
+                stop_reason_counts.get(run.trace.stop_reason, 0) + 1
+            )
+            if run.trace.vector_attempted:
+                vector_expansions += 1
+        payload = {
+            "schema_version": 1,
+            "policy_version": POLICY_VERSION,
+            "domain": args.domain,
+            "sample_count": len(records),
+            "k": metrics.k,
+            "metrics": metrics.model_dump(mode="json"),
+            "policy_counts": policy_counts,
+            "query_class_counts": query_class_counts,
+            "stop_reason_counts": stop_reason_counts,
+            "vector_expansion_rate": (
+                vector_expansions / len(records) if records else 0.0
+            ),
+            "provider_health": {
+                "embeddings": {
+                    "ok": embeddings_health[0],
+                    "detail": embeddings_health[1],
+                },
+                "episode_qdrant": {
+                    "ok": qdrant_health[0],
+                    "detail": qdrant_health[1],
+                },
+            },
+            "collection": settings.qdrant_context_episode_collection,
+            "promotion_allowed": False,
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
     raise ValueError("Nieznana komenda.")
 
 
@@ -1893,6 +2017,58 @@ async def _context_memory_store(
     memory = MemoryStore(database_path)
     await memory.initialize()
     return memory
+
+
+async def _run_context_indexer(
+    indexer: ContextEpisodeIndexer,
+    *,
+    limit: int,
+    offset: int,
+    dry_run: bool,
+) -> EpisodeIndexingReport:
+    if dry_run:
+        return await indexer.index(
+            limit=limit,
+            offset=offset,
+            dry_run=True,
+        )
+    totals = {
+        "considered": 0,
+        "indexed": 0,
+        "already_indexed": 0,
+        "deleted": 0,
+        "not_requested": 0,
+        "failed": 0,
+    }
+    last_report: EpisodeIndexingReport | None = None
+    for _ in range(1000):
+        report = await indexer.index(
+            limit=limit,
+            offset=offset,
+            dry_run=False,
+        )
+        last_report = report
+        for field in totals:
+            totals[field] += int(getattr(report, field))
+        if report.outbox_pending <= 0:
+            break
+        progress = report.indexed + report.already_indexed + report.deleted
+        if progress <= 0:
+            break
+        offset = 0
+    assert last_report is not None
+    return EpisodeIndexingReport(
+        collection=last_report.collection,
+        considered=totals["considered"],
+        indexed=totals["indexed"],
+        already_indexed=totals["already_indexed"],
+        would_index=0,
+        dry_run=False,
+        deleted=totals["deleted"],
+        not_requested=totals["not_requested"],
+        failed=totals["failed"],
+        outbox_pending=last_report.outbox_pending,
+    )
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:

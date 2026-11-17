@@ -13,6 +13,8 @@ windows, messages and local history.**
 
 ![VoiceLoop keeps bounded canonical time separate from approximate or missing time, and rejects unbounded dual-track measurement](docs/img/voiceloop-time-certainty.svg)
 
+![VoiceLoop Dynamic Memory Coupling V1 links transactional SQLite outbox state and generation-fenced Qdrant points with domain-aware retrieval policies across Windows and RPG profiles](docs/img/voiceloop-dynamic-memory-coupling.svg)
+
 ## Context first
 
 VoiceLoop is not another chatbot and it is not primarily a voice assistant. It
@@ -53,6 +55,9 @@ as text, but the durable value is the context layer built between sources.
 - Explicit ingest, migration, retention and evaluation commands.
 - A default-off dual-track prototype that compares five-axis RRF with a 2+2+1
   cascade in an isolated collection.
+- Transactional desired/applied index state and an outbox make SQL→Qdrant
+  drift visible and retryable. A policy-controlled FTS/vector retriever is
+  available for shadow evaluation only.
 - Controlled action proposals behind local schemas, risk policy and
   confirmation. Retrieved context cannot grant authority.
 
@@ -81,6 +86,7 @@ keeps a real RRF5 miss in the failure analysis.
 - [Committed evaluation card](docs/evaluation/context-evidence-v1/report.md)
 - [Case study and interpretation](docs/PORTFOLIO_CASE_STUDY.md)
 - [Evidence-pack release notes](docs/CONTEXT_EVIDENCE_RELEASE_V1.md)
+- [Dynamic Memory Coupling V1 engineering plan](docs/DYNAMIC_MEMORY_COUPLING_V1.md)
 
 CI regenerates the evidence after the Windows quality job and uploads
 `context-evidence-<sha>`. Synthetic lexical embeddings make the run
@@ -195,6 +201,12 @@ running; local configuration can override the defaults.
   2+2+1, conservative arbiter, expiring content-free traces and a read-only
   panel. It never selects serving context. Contract:
   [dual-track prototype](docs/DUAL_TRACK_CASCADE_PROTOTYPE.md).
+- Dynamic Memory Coupling V1 (`AdaptiveHybridRetriever` + `RetrievalPolicyV1`,
+  `serving=false`): transactional SQLite→Qdrant index state (`context_index_state`
+  + `context_index_outbox`) with monotonic generations, lease/claim tokens,
+  model-fingerprint verification and domain-aware FTS/vector weighting across
+  `general`, `windows` and `rpg` profiles. Contract:
+  [Dynamic Memory Coupling V1](docs/DYNAMIC_MEMORY_COUPLING_V1.md).
 - A larger set of specialized memory axes with explicit navigation and stopping
   rules. This remains a [design direction](docs/VECTOR_NAVIGATION_DESIGN.md),
   separate from the shadow measurer above.
@@ -418,6 +430,8 @@ The live checklist is maintained in
 
 - [Current architecture](docs/ARCHITECTURE_CURRENT.md)
 - [Architecture invariants](docs/ARCHITECTURE_INVARIANTS.md)
+- [Portfolio case study](docs/PORTFOLIO_CASE_STUDY.md)
+- [Dynamic Memory Coupling V1](docs/DYNAMIC_MEMORY_COUPLING_V1.md)
 - [Context Timeline V1](docs/CONTEXT_TIMELINE_V1.md)
 - [Cascade 2+2+1 and security boundary](docs/KASKADA_BEZPIECZENSTWO.md)
 - [Dual-track cascade prototype](docs/DUAL_TRACK_CASCADE_PROTOTYPE.md)

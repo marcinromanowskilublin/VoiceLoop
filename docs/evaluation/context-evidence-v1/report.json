@@ -2,7 +2,7 @@
   "schema_version": 1,
   "evidence_pack": "context-evidence-v1",
   "source_revision": "372b642",
-  "generated_at": "2026-10-20T02:44:08.455524+00:00",
+  "generated_at": "2026-11-17T02:42:17.360756+00:00",
   "observation_time": "2026-10-19T12:00:00+00:00",
   "data_class": "public_synthetic_only",
   "network_used": false,
@@ -11,7 +11,7 @@
     "derived_index": "Qdrant local mode",
     "embedding_model": "deterministic-lexical-hash-v1",
     "embedding_dimension": 192,
-    "sqlite_bytes": 372736,
+    "sqlite_bytes": 4096,
     "qdrant_points": 5
   },
   "ingest": {
@@ -23,7 +23,11 @@
       "indexed": 5,
       "already_indexed": 0,
       "would_index": 0,
-      "dry_run": false
+      "dry_run": false,
+      "deleted": 0,
+      "not_requested": 0,
+      "failed": 0,
+      "outbox_pending": 0
     },
     "second_index": {
       "collection": "demo_context_episodes",
@@ -31,9 +35,29 @@
       "indexed": 0,
       "already_indexed": 5,
       "would_index": 0,
-      "dry_run": false
+      "dry_run": false,
+      "deleted": 0,
+      "not_requested": 0,
+      "failed": 0,
+      "outbox_pending": 0
     },
-    "idempotent": true
+    "idempotent": true,
+    "index_coupling": {
+      "total": 5,
+      "indexed": 5,
+      "sql_marked": 5,
+      "eligible": 5,
+      "pending": 0,
+      "failed": 0,
+      "not_requested": 0,
+      "delete_pending": 0,
+      "untracked": 0,
+      "applied": 5,
+      "outbox_ready": 0,
+      "outbox_claimed": 0,
+      "collection_points": 5,
+      "consistent": true
+    }
   },
   "evaluation": {
     "records": 5,
@@ -47,7 +71,7 @@
       "mean_reciprocal_rank": 1.0,
       "negative_abstention_accuracy": 1.0,
       "provenance_coverage_on_results": 1.0,
-      "reserve_axis_coverage": 0.2
+      "reserve_axis_coverage": 0.0
     },
     "rrf5": {
       "schema_version": 1,
@@ -59,7 +83,7 @@
       "mean_reciprocal_rank": 0.5,
       "negative_abstention_accuracy": 1.0,
       "provenance_coverage_on_results": 1.0,
-      "reserve_axis_coverage": 0.2
+      "reserve_axis_coverage": 0.0
     },
     "cascade_2_2_1": {
       "schema_version": 1,
@@ -71,8 +95,74 @@
       "mean_reciprocal_rank": 0.8333333333333333,
       "negative_abstention_accuracy": 1.0,
       "provenance_coverage_on_results": 1.0,
-      "reserve_axis_coverage": 0.2
+      "reserve_axis_coverage": 0.0
     },
+    "adaptive_hybrid": {
+      "schema_version": 1,
+      "sample_count": 5,
+      "positive_count": 4,
+      "negative_count": 1,
+      "k": 3,
+      "recall_at_k": 1.0,
+      "mean_reciprocal_rank": 1.0,
+      "negative_abstention_accuracy": 1.0,
+      "provenance_coverage_on_results": 1.0,
+      "reserve_axis_coverage": 0.5
+    },
+    "domain_profiles": [
+      {
+        "label": "Windows exact operation",
+        "domain": "windows",
+        "query_class": "operational",
+        "strategy": "exact_only",
+        "fts_weight": 0.9,
+        "vector_weight": 0.09999999999999998,
+        "qmax": 2,
+        "max_waves": 1,
+        "min_axis_coverage": 1,
+        "require_canonical_sql": true,
+        "serving_eligible": false
+      },
+      {
+        "label": "Windows architectural exploration",
+        "domain": "windows",
+        "query_class": "exploratory",
+        "strategy": "fts_then_cascade",
+        "fts_weight": 0.55,
+        "vector_weight": 0.45,
+        "qmax": 3,
+        "max_waves": 2,
+        "min_axis_coverage": 1,
+        "require_canonical_sql": true,
+        "serving_eligible": false
+      },
+      {
+        "label": "RPG canonical fact",
+        "domain": "rpg",
+        "query_class": "factual",
+        "strategy": "fts_then_cascade",
+        "fts_weight": 0.72,
+        "vector_weight": 0.28,
+        "qmax": 4,
+        "max_waves": 2,
+        "min_axis_coverage": 1,
+        "require_canonical_sql": true,
+        "serving_eligible": false
+      },
+      {
+        "label": "RPG creative association",
+        "domain": "rpg",
+        "query_class": "creative",
+        "strategy": "hybrid_cascade",
+        "fts_weight": 0.25,
+        "vector_weight": 0.75,
+        "qmax": 5,
+        "max_waves": 3,
+        "min_axis_coverage": 2,
+        "require_canonical_sql": true,
+        "serving_eligible": false
+      }
+    ],
     "arbiter": {
       "verdict_counts": {
         "agreement": 2,
@@ -85,23 +175,28 @@
     "latency_ms": {
       "fts_only": {
         "count": 5,
-        "p50": 1.511,
-        "p95": 1.877
+        "p50": 1.729,
+        "p95": 1.899
       },
       "dual_track_wall": {
         "count": 5,
-        "p50": 11.074,
-        "p95": 14.658
+        "p50": 13.652,
+        "p95": 29.112
       },
       "rrf5_track": {
         "count": 5,
-        "p50": 9.728,
-        "p95": 10.883
+        "p50": 12.837,
+        "p95": 13.439
       },
       "cascade_track": {
         "count": 5,
-        "p50": 10.176,
-        "p95": 14.271
+        "p50": 11.461,
+        "p95": 28.733
+      },
+      "adaptive_track": {
+        "count": 5,
+        "p50": 12.687,
+        "p95": 14.637
       }
     },
     "failures": {
@@ -109,7 +204,8 @@
       "rrf5": [
         "topic:miss"
       ],
-      "cascade_2_2_1": []
+      "cascade_2_2_1": [],
+      "adaptive_hybrid": []
     },
     "promotion_allowed": false
   },

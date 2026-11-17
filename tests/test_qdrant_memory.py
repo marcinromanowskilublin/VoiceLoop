@@ -1,7 +1,9 @@
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from qdrant_client import AsyncQdrantClient, models
 
 from voiceloop.qdrant_memory import (
     VECTOR_NAMES,
@@ -69,6 +71,165 @@ async def test_qdrant_deletes_manual_memory_by_stable_point_id(tmp_path) -> None
     selector = client.delete.await_args.kwargs["points_selector"]
     assert selector.points == [store._point_id("manual_memory", "42")]
     assert client.delete.await_args.kwargs["wait"] is True
+
+
+@pytest.mark.asyncio
+async def test_qdrant_conditional_delete_matches_exact_index_version(
+    tmp_path,
+) -> None:
+    client = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True),
+        count=AsyncMock(return_value=SimpleNamespace(count=1)),
+        delete=AsyncMock(),
+    )
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,  # type: ignore[arg-type]
+    )
+
+    deleted = await store.delete_memory_if_matches(
+        source="timeline",
+        source_id="episode-1",
+        content_hash="content-v1",
+        index_fingerprint="index-v1",
+        index_generation=7,
+    )
+
+    assert deleted is True
+    selector = client.delete.await_args.kwargs["points_selector"]
+    conditions = selector.filter.must
+    assert conditions[0].has_id == [
+        store._point_id("timeline", "episode-1", "7")
+    ]
+    assert conditions[1].key == "content_hash"
+    assert conditions[1].match.value == "content-v1"
+    assert conditions[2].key == "metadata.vector_index_hash"
+    assert conditions[2].match.value == "index-v1"
+    assert conditions[3].key == "metadata.index_generation"
+    assert conditions[3].match.value == 7
+
+
+@pytest.mark.asyncio
+async def test_qdrant_conditional_delete_removes_legacy_point_without_generation(
+    tmp_path,
+) -> None:
+    client = AsyncQdrantClient(location=":memory:")
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,
+    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Payload indexes have no effect",
+            category=UserWarning,
+        )
+        await store.upsert_memory(
+            source="timeline",
+            source_id="legacy",
+            title="Legacy",
+            content="Legacy content",
+            vectors={"semantic": [1.0, 0.0]},
+            metadata={"vector_index_hash": "legacy-index"},
+            content_hash="legacy-content",
+        )
+
+    deleted = await store.delete_memory_through_generation(
+        source="timeline",
+        source_id="legacy",
+        max_generation=7,
+    )
+
+    assert deleted is True
+    assert await store.has_memory(source="timeline", source_id="legacy") is False
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_delete_preserves_full_240_character_source_id(
+    tmp_path,
+) -> None:
+    client = AsyncQdrantClient(location=":memory:")
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,
+    )
+    source_id = "x" * 240
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Payload indexes have no effect",
+            category=UserWarning,
+        )
+        await store.upsert_memory(
+            source="timeline",
+            source_id=source_id,
+            title="Long ID",
+            content="Private content",
+            vectors={"semantic": [1.0, 0.0]},
+            content_hash="long-id-content",
+        )
+
+    deleted = await store.delete_memory_through_generation(
+        source="timeline",
+        source_id=source_id,
+        max_generation=1,
+    )
+
+    assert deleted is True
+    assert await store.has_memory(
+        source="timeline",
+        source_id=source_id,
+    ) is False
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_delete_removes_legacy_truncated_payload_by_stable_id(
+    tmp_path,
+) -> None:
+    client = AsyncQdrantClient(location=":memory:")
+    store = QdrantVectorStore(
+        Settings(voiceloop_data_dir=str(tmp_path)),
+        client=client,
+    )
+    source_id = "y" * 240
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Payload indexes have no effect",
+            category=UserWarning,
+        )
+        await store.ensure_collection(2)
+    await client.upsert(
+        collection_name=store.collection_name,
+        points=[
+            models.PointStruct(
+                id=store._point_id("timeline", source_id),
+                vector={"semantic": [1.0, 0.0]},
+                payload={
+                    "source": "timeline",
+                    "source_id": source_id[:200],
+                    "content_hash": "legacy",
+                    "metadata": {},
+                },
+            )
+        ],
+        wait=True,
+    )
+
+    deleted = await store.delete_memory_through_generation(
+        source="timeline",
+        source_id=source_id,
+        max_generation=1,
+    )
+
+    assert deleted is True
+    assert await store.has_memory(
+        source="timeline",
+        source_id=source_id,
+    ) is False
+    await store.close()
 
 
 def test_qdrant_private_data_requires_loopback_endpoint(tmp_path) -> None:
@@ -141,7 +302,9 @@ async def test_qdrant_ensures_payload_indexes_on_existing_collection(tmp_path) -
         "content_hash",
         "embedding_prefix_policy",
         "embedding_input_kind",
+        "metadata.index_claim_token",
         "expires_at",
+        "metadata.index_generation",
     }
 
 

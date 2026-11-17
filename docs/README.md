@@ -19,6 +19,9 @@ like current runtime behavior.
 
 ## Context, memory and evaluation
 
+- [Dynamic Memory Coupling V1](DYNAMIC_MEMORY_COUPLING_V1.md) — engineering
+  status, transactional SQL→Qdrant index state, adaptive shadow policy,
+  rollout gates and a Windows test checklist.
 - [Context Timeline V1](CONTEXT_TIMELINE_V1.md) — time-first local context,
   explicit adapters, SQL-verified semantic candidates, CLI operations and
   rollout limits. Includes legacy-index compatibility requirements.
@@ -56,6 +59,9 @@ These contracts exist in code but do not grant execution authority.
 
 - [Public context evidence screenshot](img/voiceloop-context-evidence.png) —
   the committed deterministic SQLite/Qdrant integration report.
+- [Dynamic Memory Coupling V1](img/voiceloop-dynamic-memory-coupling.svg) —
+  transactional SQLite outbox, generation-fenced Qdrant points and domain-aware
+  retrieval policies across Windows and RPG profiles.
 - [Local context dual-track flow](img/voiceloop-dual-track-flow.svg) — local
   adapters, canonical SQL time, parallel retrieval and shadow evidence.
 - [Arbiter outcomes](img/voiceloop-arbiter-outcomes.svg) — deterministic

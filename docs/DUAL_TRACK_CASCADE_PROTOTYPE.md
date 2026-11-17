@@ -7,6 +7,11 @@ Prototyp odpowiada na jedno pytanie techniczne: czy ograniczona kaskada odzyskuj
 te same kanoniczne epizody co obecny pięcioosiowy Weighted RRF, przy mniejszej
 liczbie prób osi. Nie jest mechanizmem awansu kaskady do produkcji.
 
+Nowszy fundament [Dynamic Memory Coupling V1](DYNAMIC_MEMORY_COUPLING_V1.md)
+dodaje desired/applied index state, outbox, poprawione metryki oraz osobny
+adaptacyjny retriever shadow. Nie zmienia wyników ani kontraktu tego
+porównania RRF5 kontra stałe 2+2+1.
+
 ## Architektura
 
 ```text

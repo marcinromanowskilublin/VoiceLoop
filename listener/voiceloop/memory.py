@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from .context.entities import (
     ContextEntityCandidateV1,
@@ -19,7 +20,15 @@ from .context.entities import (
     ContextEntityV1,
     normalize_entity_text,
 )
-from .context.schema import ContextEpisodeV1, ContextEventV1, ForegroundConfidence
+from .context.schema import (
+    ContextEpisodeV1,
+    ContextEventV1,
+    ContextIndexJobV1,
+    ContextIndexOperation,
+    ContextIndexStateV1,
+    ContextIndexStatus,
+    ForegroundConfidence,
+)
 from .models import (
     ActionResult,
     CommandPlan,
@@ -182,6 +191,456 @@ class MemoryStore:
         connection.execute("PRAGMA busy_timeout=10000")
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
+
+    @staticmethod
+    def _context_index_job_id(
+        episode_id: str,
+        operation: ContextIndexOperation,
+        desired_revision: str,
+        generation: int,
+    ) -> str:
+        value = (
+            f"context-index-v2:{episode_id}:{generation}:"
+            f"{operation.value}:{desired_revision}"
+        )
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def _request_context_index(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        episode_id: str,
+        desired_revision: str,
+        operation: ContextIndexOperation,
+        vectorize_requested: bool = True,
+        now: str | None = None,
+        force: bool = False,
+    ) -> None:
+        """Record desired index state and its outbox job in the caller transaction."""
+
+        timestamp = now or _now_iso()
+        terminal_expiry = (
+            datetime.fromisoformat(timestamp) + timedelta(days=30)
+        ).isoformat()
+        episode_row = connection.execute(
+            """
+            SELECT source, source_id FROM context_episodes
+            WHERE episode_id = ?
+            """,
+            (episode_id,),
+        ).fetchone()
+        if episode_row is None:
+            raise ValueError(f"Unknown context episode: {episode_id}")
+        current = connection.execute(
+            "SELECT * FROM context_index_state WHERE episode_id = ?",
+            (episode_id,),
+        ).fetchone()
+        generation_row = connection.execute(
+            """
+            SELECT last_generation FROM context_index_generation
+            WHERE episode_id = ?
+            """,
+            (episode_id,),
+        ).fetchone()
+        persisted_generation = (
+            int(generation_row["last_generation"])
+            if generation_row is not None
+            else 0
+        )
+        resolved_operation = (
+            ContextIndexOperation.DELETE
+            if operation is ContextIndexOperation.UPSERT
+            and not vectorize_requested
+            else operation
+        )
+
+        already_applied = (
+            current is not None
+            and current["desired_operation"] == resolved_operation.value
+            and current["desired_revision"] == desired_revision
+            and current["applied_revision"] == desired_revision
+            and current["status"]
+            in {
+                ContextIndexStatus.APPLIED.value,
+                ContextIndexStatus.NOT_REQUESTED.value,
+            }
+        )
+        if already_applied and not force:
+            return
+
+        same_desired = (
+            not force
+            and
+            current is not None
+            and current["desired_operation"] == resolved_operation.value
+            and current["desired_revision"] == desired_revision
+            and current["status"]
+            in {
+                ContextIndexStatus.PENDING.value,
+                ContextIndexStatus.CLAIMED.value,
+                ContextIndexStatus.FAILED.value,
+            }
+        )
+        if same_desired:
+            generation = int(current["desired_generation"])
+            if current["status"] == ContextIndexStatus.CLAIMED.value:
+                return
+        else:
+            last_generation = persisted_generation
+            if current is not None:
+                last_generation = max(
+                    last_generation,
+                    int(current["desired_generation"]),
+                )
+            generation = last_generation + 1
+        connection.execute(
+            """
+            INSERT INTO context_index_generation(
+                episode_id, last_generation, updated_at
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(episode_id) DO UPDATE SET
+                last_generation = MAX(
+                    context_index_generation.last_generation,
+                    excluded.last_generation
+                ),
+                updated_at = excluded.updated_at
+            """,
+            (episode_id, generation, timestamp),
+        )
+        target_generation = None
+        if resolved_operation is ContextIndexOperation.DELETE and current is not None:
+            target_generation = current["desired_generation"]
+        elif resolved_operation is ContextIndexOperation.DELETE:
+            target_generation = persisted_generation or None
+
+        connection.execute(
+            """
+            INSERT INTO context_index_state(
+                episode_id, desired_operation, desired_revision,
+                desired_generation, applied_revision, applied_generation,
+                status, vector_spaces_json, updated_at
+            ) VALUES (?, ?, ?, ?, NULL, NULL, ?, '[]', ?)
+            ON CONFLICT(episode_id) DO UPDATE SET
+                desired_operation = excluded.desired_operation,
+                desired_revision = excluded.desired_revision,
+                desired_generation = excluded.desired_generation,
+                desired_claim_token = NULL,
+                desired_index_fingerprint = NULL,
+                desired_index_profile = NULL,
+                status = excluded.status,
+                last_error_type = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (
+                episode_id,
+                resolved_operation.value,
+                desired_revision,
+                generation,
+                ContextIndexStatus.PENDING.value,
+                timestamp,
+            ),
+        )
+        job_id = self._context_index_job_id(
+            episode_id,
+            resolved_operation,
+            desired_revision,
+            generation,
+        )
+        connection.execute(
+            """
+            INSERT INTO context_index_outbox(
+                job_id, episode_id, source, source_id, operation,
+                desired_revision, generation, target_generation, status,
+                available_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(episode_id, generation) DO UPDATE SET
+                source = excluded.source,
+                source_id = excluded.source_id,
+                operation = excluded.operation,
+                desired_revision = excluded.desired_revision,
+                target_generation = excluded.target_generation,
+                status = excluded.status,
+                available_at = excluded.available_at,
+                claim_token = NULL,
+                claimed_at = NULL,
+                last_error_type = NULL,
+                expires_at = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (
+                job_id,
+                episode_id,
+                str(episode_row["source"]),
+                str(episode_row["source_id"]),
+                resolved_operation.value,
+                desired_revision,
+                generation,
+                target_generation,
+                ContextIndexStatus.PENDING.value,
+                timestamp,
+                timestamp,
+                timestamp,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE context_index_outbox
+            SET status = ?, expires_at = ?, updated_at = ?
+            WHERE episode_id = ?
+              AND status IN (?, ?, ?)
+              AND generation <> ?
+            """,
+            (
+                ContextIndexStatus.SUPERSEDED.value,
+                terminal_expiry,
+                timestamp,
+                episode_id,
+                ContextIndexStatus.PENDING.value,
+                ContextIndexStatus.CLAIMED.value,
+                ContextIndexStatus.FAILED.value,
+                generation,
+            ),
+        )
+
+    def _migrate_context_index_schema(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        state_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(context_index_state)"
+            ).fetchall()
+        }
+        for column_name, ddl in (
+            ("desired_generation", "INTEGER NOT NULL DEFAULT 1"),
+            ("desired_claim_token", "TEXT"),
+            ("desired_index_fingerprint", "TEXT"),
+            ("desired_index_profile", "TEXT"),
+            ("applied_generation", "INTEGER"),
+            ("applied_claim_token", "TEXT"),
+        ):
+            if column_name not in state_columns:
+                connection.execute(
+                    "ALTER TABLE context_index_state "
+                    f"ADD COLUMN {column_name} {ddl}"
+                )
+        connection.execute(
+            """
+            UPDATE context_index_state
+            SET applied_generation = desired_generation
+            WHERE applied_revision IS NOT NULL
+              AND applied_generation IS NULL
+            """
+        )
+
+        def backfill_generation_counter() -> None:
+            generations: dict[str, int] = {}
+            for row in connection.execute(
+                """
+                SELECT episode_id, desired_generation AS generation
+                FROM context_index_state
+                """
+            ).fetchall():
+                episode_id = str(row["episode_id"])
+                generations[episode_id] = max(
+                    generations.get(episode_id, 0),
+                    int(row["generation"]),
+                )
+            outbox_names = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(context_index_outbox)"
+                ).fetchall()
+            }
+            if "generation" in outbox_names:
+                for row in connection.execute(
+                    """
+                    SELECT episode_id, MAX(generation) AS generation
+                    FROM context_index_outbox
+                    GROUP BY episode_id
+                    """
+                ).fetchall():
+                    episode_id = str(row["episode_id"])
+                    generations[episode_id] = max(
+                        generations.get(episode_id, 0),
+                        int(row["generation"]),
+                    )
+            timestamp = _now_iso()
+            connection.executemany(
+                """
+                INSERT INTO context_index_generation(
+                    episode_id, last_generation, updated_at
+                ) VALUES (?, ?, ?)
+                ON CONFLICT(episode_id) DO UPDATE SET
+                    last_generation = MAX(
+                        context_index_generation.last_generation,
+                        excluded.last_generation
+                    ),
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    (episode_id, generation, timestamp)
+                    for episode_id, generation in generations.items()
+                ),
+            )
+
+        outbox_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(context_index_outbox)"
+            ).fetchall()
+        }
+        required = {
+            "source",
+            "source_id",
+            "generation",
+            "target_generation",
+            "claim_token",
+            "index_fingerprint",
+            "index_profile",
+            "expires_at",
+        }
+        has_foreign_key = bool(
+            connection.execute(
+                "PRAGMA foreign_key_list(context_index_outbox)"
+            ).fetchall()
+        )
+        if not has_foreign_key and required.issubset(outbox_columns):
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_context_index_outbox_ready
+                ON context_index_outbox(status, available_at, created_at)
+                """
+            )
+            backfill_generation_counter()
+            return
+
+        old_rows = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT * FROM context_index_outbox
+                ORDER BY updated_at ASC, job_id ASC
+                """
+            ).fetchall()
+        ]
+        active = {
+            ContextIndexStatus.PENDING.value,
+            ContextIndexStatus.CLAIMED.value,
+            ContextIndexStatus.FAILED.value,
+        }
+        latest_active: dict[str, dict[str, Any]] = {}
+        for row in old_rows:
+            if row.get("status") in active:
+                latest_active[str(row["episode_id"])] = row
+
+        connection.execute("DROP TABLE IF EXISTS context_index_outbox_v2")
+        connection.execute(
+            """
+            CREATE TABLE context_index_outbox_v2 (
+                job_id TEXT PRIMARY KEY,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                episode_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                desired_revision TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                target_generation INTEGER,
+                status TEXT NOT NULL,
+                claim_token TEXT,
+                index_fingerprint TEXT,
+                index_profile TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                available_at TEXT NOT NULL,
+                claimed_at TEXT,
+                last_error_type TEXT,
+                expires_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(episode_id, generation)
+            )
+            """
+        )
+        backfill_generation_counter()
+        for episode_id, row in latest_active.items():
+            episode = connection.execute(
+                """
+                SELECT source, source_id FROM context_episodes
+                WHERE episode_id = ?
+                """,
+                (episode_id,),
+            ).fetchone()
+            state = connection.execute(
+                """
+                SELECT desired_generation, applied_generation
+                FROM context_index_state
+                WHERE episode_id = ?
+                """,
+                (episode_id,),
+            ).fetchone()
+            generation = int(
+                row.get("generation")
+                or (state["desired_generation"] if state is not None else 1)
+            )
+            source = str(
+                row.get("source")
+                or (episode["source"] if episode is not None else "unknown")
+            )
+            source_id = str(
+                row.get("source_id")
+                or (episode["source_id"] if episode is not None else episode_id)
+            )
+            connection.execute(
+                """
+                INSERT INTO context_index_outbox_v2(
+                    job_id, schema_version, episode_id, source, source_id,
+                    operation, desired_revision, generation,
+                    target_generation, status, claim_token, index_fingerprint,
+                    index_profile, attempts, available_at, claimed_at,
+                    last_error_type, expires_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self._context_index_job_id(
+                        episode_id,
+                        ContextIndexOperation(str(row["operation"])),
+                        str(row["desired_revision"]),
+                        generation,
+                    ),
+                    int(row.get("schema_version") or 1),
+                    episode_id,
+                    source,
+                    source_id,
+                    str(row["operation"]),
+                    str(row["desired_revision"]),
+                    generation,
+                    row.get("target_generation")
+                    or (state["applied_generation"] if state is not None else None),
+                    ContextIndexStatus.PENDING.value,
+                    row.get("claim_token"),
+                    row.get("index_fingerprint"),
+                    row.get("index_profile"),
+                    int(row.get("attempts") or 0),
+                    str(row["available_at"]),
+                    None,
+                    row.get("last_error_type"),
+                    None,
+                    str(row["created_at"]),
+                    str(row["updated_at"]),
+                ),
+            )
+        connection.execute("DROP TABLE context_index_outbox")
+        connection.execute(
+            "ALTER TABLE context_index_outbox_v2 RENAME TO context_index_outbox"
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_context_index_outbox_ready
+            ON context_index_outbox(status, available_at, created_at)
+            """
+        )
 
     async def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -451,6 +910,59 @@ class MemoryStore:
                         UNIQUE(source, source_id)
                     );
 
+                    CREATE TABLE IF NOT EXISTS context_index_state (
+                        episode_id TEXT PRIMARY KEY,
+                        schema_version INTEGER NOT NULL DEFAULT 1,
+                        desired_operation TEXT NOT NULL,
+                        desired_revision TEXT NOT NULL,
+                        desired_generation INTEGER NOT NULL DEFAULT 1,
+                        desired_claim_token TEXT,
+                        desired_index_fingerprint TEXT,
+                        desired_index_profile TEXT,
+                        applied_revision TEXT,
+                        applied_generation INTEGER,
+                        applied_claim_token TEXT,
+                        status TEXT NOT NULL,
+                        index_fingerprint TEXT,
+                        index_profile TEXT,
+                        vector_spaces_json TEXT NOT NULL DEFAULT '[]',
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        last_error_type TEXT,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY(episode_id) REFERENCES context_episodes(episode_id)
+                            ON DELETE CASCADE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_index_outbox (
+                        job_id TEXT PRIMARY KEY,
+                        schema_version INTEGER NOT NULL DEFAULT 1,
+                        episode_id TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        operation TEXT NOT NULL,
+                        desired_revision TEXT NOT NULL,
+                        generation INTEGER NOT NULL,
+                        target_generation INTEGER,
+                        status TEXT NOT NULL,
+                        claim_token TEXT,
+                        index_fingerprint TEXT,
+                        index_profile TEXT,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        available_at TEXT NOT NULL,
+                        claimed_at TEXT,
+                        last_error_type TEXT,
+                        expires_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(episode_id, generation)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_index_generation (
+                        episode_id TEXT PRIMARY KEY,
+                        last_generation INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+
                     CREATE TABLE IF NOT EXISTS context_entities (
                         entity_id TEXT PRIMARY KEY,
                         canonical TEXT NOT NULL,
@@ -465,6 +977,12 @@ class MemoryStore:
                         updated_at TEXT NOT NULL,
                         UNIQUE(kind, normalized_canonical)
                     );
+
+                    CREATE INDEX IF NOT EXISTS idx_context_index_outbox_ready
+                    ON context_index_outbox(status, available_at, created_at);
+
+                    CREATE INDEX IF NOT EXISTS idx_context_index_state_status
+                    ON context_index_state(status, updated_at);
 
                     CREATE TABLE IF NOT EXISTS context_entity_aliases (
                         entity_id TEXT NOT NULL,
@@ -728,6 +1246,35 @@ class MemoryStore:
                             "ALTER TABLE context_dual_track_traces "
                             f"ADD COLUMN {column_name} {ddl}"
                         )
+                self._migrate_context_index_schema(connection)
+                existing_episodes = connection.execute(
+                    """
+                    SELECT episode_id, content_hash, metadata_json,
+                           deleted_at, updated_at
+                    FROM context_episodes
+                    """
+                ).fetchall()
+                for episode_row in existing_episodes:
+                    try:
+                        metadata = json.loads(episode_row["metadata_json"] or "{}")
+                    except json.JSONDecodeError:
+                        metadata = {}
+                    operation = (
+                        ContextIndexOperation.DELETE
+                        if episode_row["deleted_at"] is not None
+                        else ContextIndexOperation.UPSERT
+                    )
+                    self._request_context_index(
+                        connection,
+                        episode_id=str(episode_row["episode_id"]),
+                        desired_revision=str(episode_row["content_hash"]),
+                        operation=operation,
+                        vectorize_requested=(
+                            not isinstance(metadata, dict)
+                            or metadata.get("vectorize") is not False
+                        ),
+                        now=str(episode_row["updated_at"]),
+                    )
                 connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_conversation_session
@@ -1067,6 +1614,14 @@ class MemoryStore:
                     (episode.source, episode.source_id),
                 ).fetchone()
                 assert row is not None
+                self._request_context_index(
+                    connection,
+                    episode_id=str(row["episode_id"]),
+                    desired_revision=str(row["content_hash"]),
+                    operation=ContextIndexOperation.UPSERT,
+                    vectorize_requested=episode.metadata.get("vectorize") is not False,
+                    now=str(row["updated_at"]),
+                )
                 if self._context_fts_enabled:
                     connection.execute(
                         "DELETE FROM context_episodes_fts WHERE episode_id = ?",
@@ -1240,26 +1795,722 @@ class MemoryStore:
                         COUNT(*) AS total,
                         SUM(
                             CASE
-                                WHEN vector_spaces_json <> '[]' THEN 1
+                                WHEN e.vector_spaces_json <> '[]' THEN 1
                                 ELSE 0
                             END
-                        ) AS indexed
-                    FROM context_episodes
-                    WHERE deleted_at IS NULL
-                      AND (expires_at IS NULL OR expires_at > ?)
+                        ) AS sql_marked,
+                        SUM(
+                            CASE
+                                WHEN s.status = 'applied'
+                                 AND s.desired_operation = 'upsert'
+                                 AND s.applied_revision = s.desired_revision
+                                THEN 1 ELSE 0
+                            END
+                        ) AS indexed,
+                        SUM(
+                            CASE WHEN s.status = 'not_requested'
+                                THEN 1 ELSE 0 END
+                        ) AS not_requested,
+                        SUM(
+                            CASE WHEN s.status = 'failed'
+                                THEN 1 ELSE 0 END
+                        ) AS failed,
+                        SUM(
+                            CASE
+                                WHEN s.desired_operation = 'delete'
+                                 AND s.status NOT IN ('applied', 'not_requested')
+                                THEN 1 ELSE 0
+                            END
+                        ) AS delete_pending,
+                        SUM(
+                            CASE WHEN s.episode_id IS NULL
+                                THEN 1 ELSE 0 END
+                        ) AS untracked
+                    FROM context_episodes e
+                    LEFT JOIN context_index_state s
+                      ON s.episode_id = e.episode_id
+                    WHERE e.deleted_at IS NULL
+                      AND (e.expires_at IS NULL OR e.expires_at > ?)
                     """,
                     (_now_iso(),),
                 ).fetchone()
             total = int(row["total"] or 0)
             indexed = int(row["indexed"] or 0)
+            not_requested = int(row["not_requested"] or 0)
+            failed = int(row["failed"] or 0)
+            delete_pending = int(row["delete_pending"] or 0)
+            untracked = int(row["untracked"] or 0)
+            eligible = max(0, total - not_requested)
             return {
                 "total": total,
                 "indexed": indexed,
-                "sql_marked": indexed,
-                "pending": max(0, total - indexed),
+                "sql_marked": int(row["sql_marked"] or 0),
+                "eligible": eligible,
+                "pending": max(0, eligible - indexed),
+                "failed": failed,
+                "not_requested": not_requested,
+                "delete_pending": delete_pending,
+                "untracked": untracked,
             }
 
         return await asyncio.to_thread(_coverage)
+
+    async def get_context_index_state(
+        self,
+        episode_id: str,
+    ) -> ContextIndexStateV1 | None:
+        def _get() -> sqlite3.Row | None:
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM context_index_state
+                    WHERE episode_id = ?
+                    """,
+                    (episode_id,),
+                ).fetchone()
+
+        row = await asyncio.to_thread(_get)
+        return self._context_index_state_from_row(row) if row is not None else None
+
+    async def list_context_index_jobs(
+        self,
+        *,
+        operation: ContextIndexOperation | None = None,
+        statuses: tuple[ContextIndexStatus, ...] = (
+            ContextIndexStatus.PENDING,
+            ContextIndexStatus.CLAIMED,
+            ContextIndexStatus.FAILED,
+        ),
+        limit: int = 200,
+        now: datetime | None = None,
+    ) -> list[ContextIndexJobV1]:
+        safe_limit = max(1, min(int(limit), 5000))
+        selected_statuses = tuple(dict.fromkeys(statuses))
+        if not selected_statuses:
+            return []
+        cutoff = self._aware_iso(now or datetime.now(UTC))
+
+        def _list() -> list[sqlite3.Row]:
+            placeholders = ",".join("?" for _ in selected_statuses)
+            conditions = [f"status IN ({placeholders})"]
+            parameters: list[Any] = [
+                *(status.value for status in selected_statuses),
+            ]
+            active_statuses = {
+                ContextIndexStatus.PENDING,
+                ContextIndexStatus.CLAIMED,
+                ContextIndexStatus.FAILED,
+            }
+            if set(selected_statuses).issubset(active_statuses):
+                conditions.append("available_at <= ?")
+                parameters.append(cutoff)
+            if operation is not None:
+                conditions.append("operation = ?")
+                parameters.append(operation.value)
+            parameters.append(safe_limit)
+            order_column = (
+                "updated_at"
+                if set(selected_statuses) == {ContextIndexStatus.APPLIED}
+                else "created_at"
+            )
+            with self._connect() as connection:
+                return connection.execute(
+                    """
+                    SELECT * FROM context_index_outbox
+                    WHERE """
+                    + " AND ".join(conditions)
+                    + f"""
+                    ORDER BY {order_column} ASC, job_id ASC
+                    LIMIT ?
+                    """,
+                    parameters,
+                ).fetchall()
+
+        rows = await asyncio.to_thread(_list)
+        return [self._context_index_job_from_row(row) for row in rows]
+
+    async def request_context_episode_reindex(self, episode_id: str) -> bool:
+        """Create a new generation for an explicit index-profile rebuild."""
+
+        timestamp = _now_iso()
+
+        def _request() -> bool:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT content_hash, metadata_json, deleted_at
+                    FROM context_episodes
+                    WHERE episode_id = ?
+                    """,
+                    (episode_id,),
+                ).fetchone()
+                if row is None or row["deleted_at"] is not None:
+                    return False
+                try:
+                    metadata = json.loads(row["metadata_json"] or "{}")
+                except json.JSONDecodeError:
+                    metadata = {}
+                self._request_context_index(
+                    connection,
+                    episode_id=episode_id,
+                    desired_revision=str(row["content_hash"]),
+                    operation=ContextIndexOperation.UPSERT,
+                    vectorize_requested=(
+                        not isinstance(metadata, dict)
+                        or metadata.get("vectorize") is not False
+                    ),
+                    now=timestamp,
+                    force=True,
+                )
+                return True
+
+        return await asyncio.to_thread(_request)
+
+    async def claim_context_index_job(
+        self,
+        *,
+        episode_id: str,
+        operation: ContextIndexOperation,
+        desired_revision: str,
+        generation: int,
+        index_fingerprint: str,
+        index_profile: str,
+        lease_seconds: int = 120,
+    ) -> str | None:
+        timestamp = datetime.now(UTC)
+        claim_token = uuid4().hex
+        now_iso = timestamp.isoformat()
+        lease_until = (
+            timestamp + timedelta(seconds=max(10, min(lease_seconds, 3600)))
+        ).isoformat()
+
+        def _claim() -> str | None:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                state = connection.execute(
+                    """
+                    SELECT * FROM context_index_state
+                    WHERE episode_id = ?
+                    """,
+                    (episode_id,),
+                ).fetchone()
+                job = connection.execute(
+                    """
+                    SELECT * FROM context_index_outbox
+                    WHERE episode_id = ? AND generation = ?
+                    """,
+                    (episode_id, generation),
+                ).fetchone()
+                if job is None:
+                    return None
+                if state is not None and (
+                    state["desired_operation"] != operation.value
+                    or state["desired_revision"] != desired_revision
+                    or int(state["desired_generation"]) != generation
+                    or state["status"] == ContextIndexStatus.NOT_REQUESTED.value
+                ):
+                    return None
+                if state is None and operation is not ContextIndexOperation.DELETE:
+                    return None
+                claimable = job["status"] in {
+                    ContextIndexStatus.PENDING.value,
+                    ContextIndexStatus.FAILED.value,
+                } or (
+                    job["status"] == ContextIndexStatus.CLAIMED.value
+                    and str(job["available_at"]) <= now_iso
+                )
+                if not claimable:
+                    return None
+                cursor = connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET status = ?, claim_token = ?, index_fingerprint = ?,
+                        index_profile = ?, claimed_at = ?,
+                        available_at = ?, expires_at = NULL,
+                        updated_at = ?
+                    WHERE episode_id = ? AND generation = ?
+                      AND (
+                          status IN (?, ?)
+                          OR (status = ? AND available_at <= ?)
+                      )
+                    """,
+                    (
+                        ContextIndexStatus.CLAIMED.value,
+                        claim_token,
+                        index_fingerprint,
+                        index_profile,
+                        now_iso,
+                        lease_until,
+                        now_iso,
+                        episode_id,
+                        generation,
+                        ContextIndexStatus.PENDING.value,
+                        ContextIndexStatus.FAILED.value,
+                        ContextIndexStatus.CLAIMED.value,
+                        now_iso,
+                    ),
+                )
+                if not cursor.rowcount:
+                    return None
+                if state is not None:
+                    connection.execute(
+                        """
+                        UPDATE context_index_state
+                    SET status = ?, desired_claim_token = ?,
+                        desired_index_fingerprint = ?,
+                            desired_index_profile = ?, updated_at = ?
+                        WHERE episode_id = ?
+                        """,
+                        (
+                            ContextIndexStatus.CLAIMED.value,
+                        claim_token,
+                            index_fingerprint,
+                            index_profile,
+                            now_iso,
+                            episode_id,
+                        ),
+                    )
+                return claim_token
+
+        return await asyncio.to_thread(_claim)
+
+    async def mark_context_index_applied(
+        self,
+        *,
+        episode_id: str,
+        operation: ContextIndexOperation,
+        desired_revision: str,
+        generation: int,
+        claim_token: str,
+        index_fingerprint: str,
+        index_profile: str,
+        vector_spaces: tuple[str, ...] = (),
+    ) -> bool:
+        timestamp = _now_iso()
+        terminal_expiry = (
+            datetime.fromisoformat(timestamp) + timedelta(days=30)
+        ).isoformat()
+        serialized_spaces = json.dumps(
+            vector_spaces,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+        def _mark() -> bool:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                state = connection.execute(
+                    """
+                    SELECT * FROM context_index_state
+                    WHERE episode_id = ?
+                    """,
+                    (episode_id,),
+                ).fetchone()
+                if state is None and operation is ContextIndexOperation.DELETE:
+                    cursor = connection.execute(
+                        """
+                        UPDATE context_index_outbox
+                        SET status = ?, claimed_at = COALESCE(claimed_at, ?),
+                            last_error_type = NULL, expires_at = ?, updated_at = ?
+                        WHERE episode_id = ?
+                          AND operation = ?
+                          AND desired_revision = ?
+                          AND generation = ?
+                          AND claim_token = ?
+                          AND index_fingerprint = ?
+                          AND index_profile = ?
+                          AND status = ?
+                        """,
+                        (
+                            ContextIndexStatus.APPLIED.value,
+                            timestamp,
+                            terminal_expiry,
+                            timestamp,
+                            episode_id,
+                            operation.value,
+                            desired_revision,
+                            generation,
+                            claim_token,
+                            index_fingerprint,
+                            index_profile,
+                            ContextIndexStatus.CLAIMED.value,
+                        ),
+                    )
+                    return cursor.rowcount > 0
+                if (
+                    state is None
+                    or state["desired_operation"] != operation.value
+                    or state["desired_revision"] != desired_revision
+                    or int(state["desired_generation"]) != generation
+                    or state["desired_claim_token"] != claim_token
+                    or state["desired_index_fingerprint"] != index_fingerprint
+                    or state["desired_index_profile"] != index_profile
+                    or state["status"] != ContextIndexStatus.CLAIMED.value
+                ):
+                    connection.execute(
+                        """
+                        UPDATE context_index_outbox
+                        SET status = ?, expires_at = ?, updated_at = ?
+                        WHERE episode_id = ?
+                          AND operation = ?
+                          AND desired_revision = ?
+                          AND generation = ?
+                          AND claim_token = ?
+                          AND status <> ?
+                        """,
+                        (
+                            ContextIndexStatus.SUPERSEDED.value,
+                            terminal_expiry,
+                            timestamp,
+                            episode_id,
+                            operation.value,
+                            desired_revision,
+                            generation,
+                            claim_token,
+                            ContextIndexStatus.APPLIED.value,
+                        ),
+                    )
+                    return False
+                terminal_status = ContextIndexStatus.APPLIED
+                if operation is ContextIndexOperation.UPSERT:
+                    cursor = connection.execute(
+                        """
+                        UPDATE context_episodes
+                        SET vector_spaces_json = ?, updated_at = ?
+                        WHERE episode_id = ?
+                          AND content_hash = ?
+                          AND deleted_at IS NULL
+                        """,
+                        (
+                            serialized_spaces,
+                            timestamp,
+                            episode_id,
+                            desired_revision,
+                        ),
+                    )
+                    if not cursor.rowcount:
+                        return False
+                else:
+                    episode_row = connection.execute(
+                        """
+                        SELECT metadata_json, deleted_at
+                        FROM context_episodes
+                        WHERE episode_id = ?
+                        """,
+                        (episode_id,),
+                    ).fetchone()
+                    if (
+                        episode_row is not None
+                        and episode_row["deleted_at"] is None
+                    ):
+                        try:
+                            metadata = json.loads(
+                                episode_row["metadata_json"] or "{}"
+                            )
+                        except json.JSONDecodeError:
+                            metadata = {}
+                        if (
+                            isinstance(metadata, dict)
+                            and metadata.get("vectorize") is False
+                        ):
+                            terminal_status = ContextIndexStatus.NOT_REQUESTED
+                    connection.execute(
+                        """
+                        UPDATE context_episodes
+                        SET vector_spaces_json = '[]', updated_at = ?
+                        WHERE episode_id = ?
+                        """,
+                        (timestamp, episode_id),
+                    )
+                connection.execute(
+                    """
+                    UPDATE context_index_state
+                    SET applied_revision = ?, applied_generation = ?,
+                        applied_claim_token = ?, status = ?,
+                        index_fingerprint = ?, index_profile = ?,
+                        vector_spaces_json = ?, last_error_type = NULL,
+                        updated_at = ?
+                    WHERE episode_id = ?
+                    """,
+                    (
+                        desired_revision,
+                        generation,
+                        claim_token,
+                        terminal_status.value,
+                        index_fingerprint,
+                        index_profile,
+                        serialized_spaces,
+                        timestamp,
+                        episode_id,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET status = ?, claimed_at = COALESCE(claimed_at, ?),
+                        last_error_type = NULL, expires_at = ?, updated_at = ?
+                    WHERE episode_id = ?
+                      AND generation = ?
+                      AND claim_token = ?
+                    """,
+                    (
+                        ContextIndexStatus.APPLIED.value,
+                        timestamp,
+                        terminal_expiry,
+                        timestamp,
+                        episode_id,
+                        generation,
+                        claim_token,
+                    ),
+                )
+                connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET status = ?, expires_at = ?, updated_at = ?
+                    WHERE episode_id = ?
+                      AND status IN (?, ?, ?)
+                      AND generation <> ?
+                    """,
+                    (
+                        ContextIndexStatus.SUPERSEDED.value,
+                        terminal_expiry,
+                        timestamp,
+                        episode_id,
+                        ContextIndexStatus.PENDING.value,
+                        ContextIndexStatus.CLAIMED.value,
+                        ContextIndexStatus.FAILED.value,
+                        generation,
+                    ),
+                )
+                return True
+
+        return await asyncio.to_thread(_mark)
+
+    async def mark_context_index_failed(
+        self,
+        *,
+        episode_id: str,
+        operation: ContextIndexOperation,
+        desired_revision: str,
+        generation: int,
+        claim_token: str,
+        index_fingerprint: str,
+        index_profile: str,
+        error_type: str,
+    ) -> bool:
+        timestamp = _now_iso()
+        safe_error = error_type[:120]
+
+        def _mark() -> bool:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                state = connection.execute(
+                    """
+                    SELECT desired_operation, desired_revision,
+                           desired_generation, desired_claim_token,
+                           desired_index_fingerprint,
+                           desired_index_profile, status
+                    FROM context_index_state
+                    WHERE episode_id = ?
+                    """,
+                    (episode_id,),
+                ).fetchone()
+                if state is None and operation is ContextIndexOperation.DELETE:
+                    cursor = connection.execute(
+                        """
+                        UPDATE context_index_outbox
+                        SET status = ?, attempts = attempts + 1,
+                            last_error_type = ?, claimed_at = NULL,
+                            available_at = ?, updated_at = ?
+                        WHERE episode_id = ?
+                          AND generation = ?
+                          AND claim_token = ?
+                          AND index_fingerprint = ?
+                          AND index_profile = ?
+                          AND status = ?
+                        """,
+                        (
+                            ContextIndexStatus.FAILED.value,
+                            safe_error,
+                            timestamp,
+                            timestamp,
+                            episode_id,
+                            generation,
+                            claim_token,
+                            index_fingerprint,
+                            index_profile,
+                            ContextIndexStatus.CLAIMED.value,
+                        ),
+                    )
+                    return cursor.rowcount > 0
+                if (
+                    state is None
+                    or state["desired_operation"] != operation.value
+                    or state["desired_revision"] != desired_revision
+                    or int(state["desired_generation"]) != generation
+                    or state["desired_claim_token"] != claim_token
+                    or state["desired_index_fingerprint"] != index_fingerprint
+                    or state["desired_index_profile"] != index_profile
+                    or state["status"] != ContextIndexStatus.CLAIMED.value
+                ):
+                    return False
+                connection.execute(
+                    """
+                    UPDATE context_index_state
+                    SET status = ?, attempts = attempts + 1,
+                        last_error_type = ?, updated_at = ?
+                    WHERE episode_id = ?
+                    """,
+                    (
+                        ContextIndexStatus.FAILED.value,
+                        safe_error,
+                        timestamp,
+                        episode_id,
+                    ),
+                )
+                cursor = connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET status = ?, attempts = attempts + 1,
+                        last_error_type = ?, claimed_at = NULL,
+                        available_at = ?, updated_at = ?
+                    WHERE episode_id = ? AND generation = ?
+                      AND claim_token = ?
+                    """,
+                    (
+                        ContextIndexStatus.FAILED.value,
+                        safe_error,
+                        timestamp,
+                        timestamp,
+                        episode_id,
+                        generation,
+                        claim_token,
+                    ),
+                )
+                return cursor.rowcount > 0
+
+        return await asyncio.to_thread(_mark)
+
+    async def mark_context_index_superseded(
+        self,
+        *,
+        episode_id: str,
+        generation: int,
+    ) -> bool:
+        timestamp = _now_iso()
+        expires_at = (
+            datetime.fromisoformat(timestamp) + timedelta(days=30)
+        ).isoformat()
+
+        def _mark() -> bool:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET status = ?, expires_at = ?, updated_at = ?
+                    WHERE episode_id = ? AND generation = ?
+                      AND status <> ?
+                    """,
+                    (
+                        ContextIndexStatus.SUPERSEDED.value,
+                        expires_at,
+                        timestamp,
+                        episode_id,
+                        generation,
+                        ContextIndexStatus.APPLIED.value,
+                    ),
+                )
+                return cursor.rowcount > 0
+
+        return await asyncio.to_thread(_mark)
+
+    async def touch_context_index_job(
+        self,
+        *,
+        episode_id: str,
+        generation: int,
+    ) -> None:
+        timestamp = _now_iso()
+
+        def _touch() -> None:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE context_index_outbox
+                    SET updated_at = ?
+                    WHERE episode_id = ? AND generation = ?
+                    """,
+                    (timestamp, episode_id, generation),
+                )
+
+        await asyncio.to_thread(_touch)
+
+    async def prune_context_index_outbox(
+        self,
+        *,
+        now: datetime | None = None,
+        dry_run: bool = True,
+    ) -> int:
+        cutoff = self._aware_iso(now or datetime.now(UTC))
+
+        def _prune() -> int:
+            with self._connect() as connection:
+                count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM context_index_outbox
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).fetchone()[0]
+                )
+                if not dry_run and count:
+                    connection.execute(
+                        """
+                        DELETE FROM context_index_outbox
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
+                        """,
+                        (cutoff,),
+                    )
+                return count
+
+        return await asyncio.to_thread(_prune)
+
+    async def context_index_summary(self) -> dict[str, int]:
+        def _summary() -> dict[str, int]:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT status, COUNT(*) AS count
+                    FROM context_index_state
+                    GROUP BY status
+                    """
+                ).fetchall()
+                outbox = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM context_index_outbox
+                    WHERE status IN (?, ?)
+                    """,
+                    (
+                        ContextIndexStatus.PENDING.value,
+                        ContextIndexStatus.FAILED.value,
+                    ),
+                ).fetchone()
+                claimed = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM context_index_outbox
+                    WHERE status = ?
+                    """,
+                    (ContextIndexStatus.CLAIMED.value,),
+                ).fetchone()
+            counts = {str(row["status"]): int(row["count"]) for row in rows}
+            counts["outbox_ready"] = int(outbox["count"] or 0)
+            counts["outbox_claimed"] = int(claimed["count"] or 0)
+            return counts
+
+        return await asyncio.to_thread(_summary)
 
     async def tombstone_context_episode(
         self,
@@ -1279,11 +2530,27 @@ class MemoryStore:
                     """,
                     (timestamp, timestamp, episode_id),
                 )
-                if cursor.rowcount and self._context_fts_enabled:
-                    connection.execute(
-                        "DELETE FROM context_episodes_fts WHERE episode_id = ?",
+                if cursor.rowcount:
+                    row = connection.execute(
+                        """
+                        SELECT content_hash FROM context_episodes
+                        WHERE episode_id = ?
+                        """,
                         (episode_id,),
+                    ).fetchone()
+                    assert row is not None
+                    self._request_context_index(
+                        connection,
+                        episode_id=episode_id,
+                        desired_revision=str(row["content_hash"]),
+                        operation=ContextIndexOperation.DELETE,
+                        now=timestamp,
                     )
+                    if self._context_fts_enabled:
+                        connection.execute(
+                            "DELETE FROM context_episodes_fts WHERE episode_id = ?",
+                            (episode_id,),
+                        )
                 return cursor.rowcount > 0
 
         return await asyncio.to_thread(_delete)
@@ -1309,7 +2576,7 @@ class MemoryStore:
                 ).fetchall()
                 episode_rows = connection.execute(
                     """
-                    SELECT episode_id FROM context_episodes
+                    SELECT episode_id, content_hash FROM context_episodes
                     WHERE deleted_at IS NULL
                       AND expires_at IS NOT NULL
                       AND expires_at <= ?
@@ -1341,6 +2608,14 @@ class MemoryStore:
                     """,
                     (cutoff, cutoff, cutoff),
                 )
+                for row in episode_rows:
+                    self._request_context_index(
+                        connection,
+                        episode_id=str(row["episode_id"]),
+                        desired_revision=str(row["content_hash"]),
+                        operation=ContextIndexOperation.DELETE,
+                        now=cutoff,
+                    )
                 if self._context_fts_enabled:
                     connection.executemany(
                         "DELETE FROM context_events_fts WHERE event_id = ?",
@@ -3292,6 +4567,10 @@ class MemoryStore:
                         "SELECT COUNT(*) FROM context_dual_track_traces "
                         "WHERE expires_at <= ?"
                     ),
+                    "context_index_outbox": (
+                        "SELECT COUNT(*) FROM context_index_outbox "
+                        "WHERE expires_at IS NOT NULL AND expires_at <= ?"
+                    ),
                     "command_events": (
                         "SELECT COUNT(*) FROM command_events "
                         "WHERE expires_at IS NOT NULL AND expires_at <= ?"
@@ -3355,16 +4634,24 @@ class MemoryStore:
                         (cutoff,),
                     ).fetchall()
                 ]
+                expired_episode_rows = connection.execute(
+                    """
+                    SELECT episode_id, content_hash FROM context_episodes
+                    WHERE expires_at IS NOT NULL AND expires_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
                 expired_episode_ids = [
-                    row["episode_id"]
-                    for row in connection.execute(
-                        """
-                        SELECT episode_id FROM context_episodes
-                        WHERE expires_at IS NOT NULL AND expires_at <= ?
-                        """,
-                        (cutoff,),
-                    ).fetchall()
+                    row["episode_id"] for row in expired_episode_rows
                 ]
+                for row in expired_episode_rows:
+                    self._request_context_index(
+                        connection,
+                        episode_id=str(row["episode_id"]),
+                        desired_revision=str(row["content_hash"]),
+                        operation=ContextIndexOperation.DELETE,
+                        now=cutoff,
+                    )
                 if self._context_fts_enabled:
                     connection.executemany(
                         "DELETE FROM context_events_fts WHERE event_id = ?",
@@ -3408,6 +4695,13 @@ class MemoryStore:
                         """
                         DELETE FROM context_dual_track_traces
                         WHERE expires_at <= ?
+                        """,
+                        (cutoff,),
+                    ).rowcount,
+                    "context_index_outbox": connection.execute(
+                        """
+                        DELETE FROM context_index_outbox
+                        WHERE expires_at IS NOT NULL AND expires_at <= ?
                         """,
                         (cutoff,),
                     ).rowcount,
@@ -3745,6 +5039,76 @@ class MemoryStore:
             status=row["status"],
             sensitivity=row["sensitivity"],
             created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @classmethod
+    def _context_index_job_from_row(
+        cls,
+        row: sqlite3.Row,
+    ) -> ContextIndexJobV1:
+        return ContextIndexJobV1(
+            schema_version=int(row["schema_version"]),
+            job_id=row["job_id"],
+            episode_id=row["episode_id"],
+            source=row["source"],
+            source_id=row["source_id"],
+            operation=ContextIndexOperation(row["operation"]),
+            desired_revision=row["desired_revision"],
+            generation=int(row["generation"]),
+            target_generation=(
+                int(row["target_generation"])
+                if row["target_generation"] is not None
+                else None
+            ),
+            status=ContextIndexStatus(row["status"]),
+            claim_token=row["claim_token"],
+            index_fingerprint=row["index_fingerprint"],
+            index_profile=row["index_profile"],
+            attempts=int(row["attempts"]),
+            available_at=datetime.fromisoformat(row["available_at"]),
+            claimed_at=(
+                datetime.fromisoformat(row["claimed_at"])
+                if row["claimed_at"]
+                else None
+            ),
+            last_error_type=row["last_error_type"],
+            expires_at=(
+                datetime.fromisoformat(row["expires_at"])
+                if row["expires_at"]
+                else None
+            ),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @classmethod
+    def _context_index_state_from_row(
+        cls,
+        row: sqlite3.Row,
+    ) -> ContextIndexStateV1:
+        return ContextIndexStateV1(
+            schema_version=int(row["schema_version"]),
+            episode_id=row["episode_id"],
+            desired_operation=ContextIndexOperation(row["desired_operation"]),
+            desired_revision=row["desired_revision"],
+            desired_generation=int(row["desired_generation"]),
+            desired_claim_token=row["desired_claim_token"],
+            desired_index_fingerprint=row["desired_index_fingerprint"],
+            desired_index_profile=row["desired_index_profile"],
+            applied_revision=row["applied_revision"],
+            applied_generation=(
+                int(row["applied_generation"])
+                if row["applied_generation"] is not None
+                else None
+            ),
+            applied_claim_token=row["applied_claim_token"],
+            status=ContextIndexStatus(row["status"]),
+            index_fingerprint=row["index_fingerprint"],
+            index_profile=row["index_profile"],
+            vector_spaces=cls._json_string_tuple(row["vector_spaces_json"]),
+            attempts=int(row["attempts"]),
+            last_error_type=row["last_error_type"],
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 

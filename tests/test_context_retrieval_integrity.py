@@ -182,6 +182,42 @@ async def test_empty_time_recall_never_falls_back_to_unbounded_search(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_timeline_recall_uses_isolated_episode_collection(tmp_path):
+    store = MemoryStore(tmp_path / "memory.db")
+    await store.initialize()
+    embeddings = Mock(enabled=True)
+    embeddings.accepts_private_text.return_value = True
+    embeddings.embed_queries = AsyncMock(return_value=[[1.0, 0.0]])
+    primary_qdrant = Mock(enabled=True)
+    primary_qdrant.accepts_private_data.return_value = True
+    primary_qdrant.search = AsyncMock(
+        side_effect=AssertionError("primary memory collection used")
+    )
+    episode_qdrant = Mock(enabled=True)
+    episode_qdrant.accepts_private_data.return_value = True
+    episode_qdrant.search = AsyncMock(return_value=[])
+    registry = ActionRegistry(
+        Settings(
+            voiceloop_data_dir=str(tmp_path),
+            context_timeline_recall_enabled=True,
+        ),
+        store,
+        Mock(),
+        embeddings=embeddings,
+        qdrant=primary_qdrant,
+        context_qdrant=episode_qdrant,
+    )
+
+    _, payload = await registry._recall(
+        {"query": "Co było wczoraj w nieistniejącym projekcie?"}
+    )
+
+    assert payload["retrieval"] == "timeline_v1"
+    episode_qdrant.search.assert_awaited()
+    primary_qdrant.search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_indexed_episode_carries_source_versions_for_retrieval(tmp_path):
     store, event, episode, _ = await seeded(tmp_path)
     embeddings = Mock(enabled=True)

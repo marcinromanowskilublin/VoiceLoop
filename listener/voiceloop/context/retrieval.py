@@ -18,6 +18,7 @@ from ..memory_vectorization import (
 )
 from .schema import (
     ContextEventV1,
+    ContextIndexOperation,
     ContextItemV1,
     ContextPackV1,
 )
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from ..memory import MemoryStore
     from ..qdrant_memory import QdrantVectorStore
     from ..screenpipe import ScreenpipeClient
+    from .policy import RetrievalPolicyV1
 
 _STOPWORDS = {
     "a",
@@ -263,17 +265,40 @@ class TimeFirstRetriever:
         qmax: int = 5,
         wave_size: int = 2,
         preferred_axes: tuple[str, ...] = (),
+        policy: RetrievalPolicyV1 | None = None,
     ) -> None:
         self.memory = memory
         self.screenpipe = screenpipe
         self.embeddings = embeddings
         self.qdrant = qdrant
-        self.min_exact_evidence = max(1, min(int(min_exact_evidence), 10))
+        self.policy = policy
+        resolved_min_evidence = (
+            policy.min_evidence if policy is not None else min_exact_evidence
+        )
+        self.min_exact_evidence = max(1, min(int(resolved_min_evidence), 10))
         self.scout_mode = scout_mode
-        self.qmax = max(1, min(int(qmax), len(MEMORY_VECTOR_NAMES)))
-        self.wave_size = max(1, min(int(wave_size), 2))
+        resolved_qmax = policy.qmax if policy is not None else qmax
+        resolved_wave_size = policy.wave_size if policy is not None else wave_size
+        self.qmax = max(1, min(int(resolved_qmax), len(MEMORY_VECTOR_NAMES)))
+        self.wave_size = max(1, min(int(resolved_wave_size), 2))
+        self.max_waves = (
+            policy.max_waves
+            if policy is not None
+            else len(MEMORY_VECTOR_NAMES)
+        )
+        self.min_axis_coverage = (
+            policy.min_axis_coverage if policy is not None else 1
+        )
+        self.candidate_multiplier = (
+            policy.candidate_multiplier if policy is not None else 3
+        )
         self.preferred_axes = tuple(
-            axis for axis in preferred_axes if axis in MEMORY_VECTOR_NAMES
+            axis
+            for axis in (
+                *(policy.preferred_axes if policy is not None else ()),
+                *preferred_axes,
+            )
+            if axis in MEMORY_VECTOR_NAMES
         )
         self.last_trace = CascadeTrace()
 
@@ -450,7 +475,11 @@ class TimeFirstRetriever:
                 limit=limit,
             )
         axes = (
-            "semantic",
+            *(
+                self.policy.selected_axes
+                if self.policy is not None
+                else ("semantic",)
+            ),
             *self.preferred_axes,
             *(axis for axis in plan.preferred_axes if axis in MEMORY_VECTOR_NAMES),
             *_reserve_axes_for(query),
@@ -473,7 +502,13 @@ class TimeFirstRetriever:
                     query_vectors={axis: vectors[0]},
                     vector_names=(axis,),
                     # Leave room for stale/orphaned candidates rejected by SQL checks.
-                    limit=min(30, max(10, (limit - len(results)) * 3)),
+                    limit=min(
+                        30,
+                        max(
+                            10,
+                            (limit - len(results)) * self.candidate_multiplier,
+                        ),
+                    ),
                     min_score=0.0,
                 )
                 for hit in hits:
@@ -529,8 +564,15 @@ class TimeFirstRetriever:
                 hits = await self.qdrant.search(
                     query_vectors=dict(zip(axes, vectors, strict=True)),
                     vector_names=axes,
-                    query_weights=memory_query_weights(query),
-                    limit=min(30, max(10, limit * 3)),
+                    query_weights=(
+                        self.policy.axis_weights
+                        if self.policy is not None
+                        else memory_query_weights(query)
+                    ),
+                    limit=min(
+                        30,
+                        max(10, limit * self.candidate_multiplier),
+                    ),
                     min_score=0.0,
                 )
                 queried = axes
@@ -583,10 +625,11 @@ class TimeFirstRetriever:
             if axis in MEMORY_VECTOR_NAMES and axis not in ordered:
                 ordered.append(axis)
         selected = ordered[: self.qmax]
-        return tuple(
+        waves = tuple(
             tuple(selected[index : index + self.wave_size])
             for index in range(0, len(selected), self.wave_size)
         )
+        return waves[: self.max_waves]
 
     async def _cascade_scout(
         self,
@@ -606,6 +649,12 @@ class TimeFirstRetriever:
         attempted: list[str] = []
         queried: list[str] = []
         completed_waves: list[tuple[str, ...]] = []
+        accepted_axes: set[str] = set()
+        query_axis_weights = (
+            self.policy.axis_weights
+            if self.policy is not None
+            else memory_query_weights(query)
+        )
         rejected = 0
         stop_reason = "axes_exhausted"
         try:
@@ -635,7 +684,14 @@ class TimeFirstRetriever:
                     self.qdrant.search(
                         query_vectors={axis: vector},
                         vector_names=(axis,),
-                        limit=min(30, max(10, (limit - len(results)) * 3)),
+                        limit=min(
+                            30,
+                            max(
+                                10,
+                                (limit - len(results))
+                                * self.candidate_multiplier,
+                            ),
+                        ),
                         min_score=0.0,
                     )
                     for axis, vector in zip(active_axes, vectors, strict=True)
@@ -643,26 +699,105 @@ class TimeFirstRetriever:
                 hit_groups = await asyncio.gather(*searches)
                 queried.extend(active_axes)
                 completed_waves.append(active_axes)
-                for axis, hits in zip(active_axes, hit_groups, strict=True):
-                    for hit in hits:
+                if self.policy is None:
+                    for axis, hits in zip(active_axes, hit_groups, strict=True):
+                        for hit in hits:
+                            item = await self._verified_episode_item(
+                                hit,
+                                plan=plan,
+                                axis=axis,
+                            )
+                            if item is None:
+                                rejected += 1
+                                continue
+                            accepted_axes.add(axis)
+                            if item.content_hash in seen:
+                                continue
+                            seen.add(item.content_hash)
+                            results.append(item)
+                            if len(results) >= limit:
+                                stop_reason = "limit_reached"
+                                break
+                        if len(results) >= limit:
+                            break
+                else:
+                    fused: dict[tuple[str, ...], dict[str, object]] = {}
+                    for axis, hits in zip(active_axes, hit_groups, strict=True):
+                        weight = query_axis_weights[axis]
+                        for rank, hit in enumerate(hits, start=1):
+                            metadata = (
+                                hit.metadata
+                                if isinstance(hit.metadata, dict)
+                                else {}
+                            )
+                            key = (
+                                str(hit.source),
+                                str(hit.source_id),
+                                str(metadata.get("episode_id") or ""),
+                                str(metadata.get("content_hash") or ""),
+                                str(metadata.get("index_generation") or ""),
+                                str(metadata.get("index_claim_token") or ""),
+                            )
+                            entry = fused.setdefault(
+                                key,
+                                {
+                                    "hit": hit,
+                                    "score": 0.0,
+                                    "axes": [],
+                                },
+                            )
+                            entry["score"] = (
+                                float(entry["score"]) + weight / (60 + rank)
+                            )
+                            entry_axes = entry["axes"]
+                            assert isinstance(entry_axes, list)
+                            entry_axes.append(axis)
+                            if float(hit.score) > float(entry["hit"].score):
+                                entry["hit"] = hit
+                    maximum = sum(
+                        query_axis_weights[axis] / 61 for axis in active_axes
+                    )
+                    ordered = sorted(
+                        fused.values(),
+                        key=lambda entry: (
+                            float(entry["score"]),
+                            len(entry["axes"]),
+                        ),
+                        reverse=True,
+                    )
+                    for entry in ordered:
+                        hit = entry["hit"]
+                        axes_for_hit = entry["axes"]
+                        assert isinstance(axes_for_hit, list)
                         item = await self._verified_episode_item(
                             hit,
                             plan=plan,
-                            axis=axis,
+                            axis="+".join(axes_for_hit),
                         )
                         if item is None:
                             rejected += 1
                             continue
+                        accepted_axes.update(axes_for_hit)
                         if item.content_hash in seen:
                             continue
                         seen.add(item.content_hash)
-                        results.append(item)
+                        results.append(
+                            item.model_copy(
+                                update={
+                                    "retrieval_score": min(
+                                        float(entry["score"]) / maximum,
+                                        1.0,
+                                    )
+                                }
+                            )
+                        )
                         if len(results) >= limit:
                             stop_reason = "limit_reached"
                             break
-                    if len(results) >= limit:
-                        break
-                if len(results) >= min(self.min_exact_evidence, limit):
+                if (
+                    len(results) >= min(self.min_exact_evidence, limit)
+                    and len(accepted_axes) >= self.min_axis_coverage
+                ):
                     if stop_reason != "limit_reached":
                         stop_reason = "enough_evidence"
                     break
@@ -694,6 +829,7 @@ class TimeFirstRetriever:
         if not isinstance(episode_id, str) or not episode_id:
             return None
         episode = await self.memory.get_context_episode(episode_id)
+        index_state = await self.memory.get_context_index_state(episode_id)
         now = datetime.now(UTC)
         if (
             episode is None
@@ -704,6 +840,35 @@ class TimeFirstRetriever:
             or not _range_matches(episode.started_at, episode.ended_at, plan)
         ):
             return None
+        hit_generation = metadata.get("index_generation")
+        if index_state is not None:
+            if (
+                index_state.desired_operation
+                is not ContextIndexOperation.UPSERT
+            ):
+                return None
+            if index_state.applied_generation is not None:
+                if str(hit_generation or "") != str(
+                    index_state.applied_generation
+                ):
+                    return None
+                if (
+                    index_state.index_fingerprint
+                    and metadata.get("vector_index_hash")
+                    != index_state.index_fingerprint
+                ):
+                    return None
+                if (
+                    index_state.applied_claim_token
+                    and metadata.get("index_claim_token")
+                    != index_state.applied_claim_token
+                ):
+                    return None
+            elif hit_generation is not None:
+                # A generated point is not serving evidence until SQL records
+                # the matching applied generation. Generation-less legacy
+                # points retain the older hash/source compatibility path.
+                return None
         source_hashes = metadata.get("source_event_hashes")
         if not isinstance(source_hashes, dict):
             return None

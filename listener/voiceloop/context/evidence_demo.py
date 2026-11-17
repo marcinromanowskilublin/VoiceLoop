@@ -30,12 +30,14 @@ from ..models import (
 )
 from ..qdrant_memory import QdrantVectorStore
 from ..settings import Settings
+from .adaptive_retrieval import AdaptiveHybridRetriever
 from .dual_track import DualTrackRun, DualTrackRunner
 from .evaluation import (
     ContextRetrievalEvalRecordV1,
     evaluate_context_dual_track,
     evaluate_context_retrieval,
 )
+from .policy import RetrievalDomain, resolve_retrieval_policy
 from .retrieval import TimeFirstRetriever
 from .schema import ContextEpisodeV1, ContextEventV1
 from .vectorization import ContextEpisodeIndexer
@@ -223,6 +225,55 @@ async def build_context_evidence_demo(
             dual_report.cascade,
         )
         scenarios = await _demonstration_scenarios(runner)
+        adaptive_retriever = AdaptiveHybridRetriever(
+            memory=memory,
+            embeddings=embeddings,  # type: ignore[arg-type]
+            qdrant=qdrant,
+        )
+        adaptive_wall_ms: dict[str, float] = {}
+
+        async def retrieve_adaptive(record: ContextRetrievalEvalRecordV1, limit: int):
+            started = time.perf_counter()
+            run = await adaptive_retriever.retrieve(
+                record.query,
+                domain_hint="general",
+                risk=record.risk,
+                now=record.observed_at or DEMO_NOW,
+                limit=limit,
+            )
+            adaptive_wall_ms[record.example_id] = round(
+                (time.perf_counter() - started) * 1000,
+                3,
+            )
+            return run.pack
+
+        adaptive_scores, adaptive_metrics = await evaluate_context_retrieval(
+            records=records,
+            retrieve=retrieve_adaptive,
+            k=3,
+        )
+        adaptive_public_metrics = _public_metrics(
+            records,
+            adaptive_scores,
+            adaptive_metrics,
+        )
+        index_state = await memory.context_index_summary()
+        coverage = await memory.context_episode_vector_coverage()
+        index_coupling = {
+            **coverage,
+            **index_state,
+            "collection_points": point_count,
+            "consistent": (
+                point_count == coverage["indexed"]
+                and coverage["pending"] == 0
+                and coverage["failed"] == 0
+                and coverage["delete_pending"] == 0
+                and coverage["untracked"] == 0
+                and index_state.get("outbox_ready", 0) == 0
+                and index_state.get("outbox_claimed", 0) == 0
+            ),
+        }
+        domain_profiles = _demonstrate_domain_profiles()
         action_boundary = await _demonstrate_action_boundary(settings, memory)
         report = {
             "schema_version": 1,
@@ -250,12 +301,15 @@ async def build_context_evidence_demo(
                     and second_index.indexed == 0
                     and second_index.already_indexed == len(episodes)
                 ),
+                "index_coupling": index_coupling,
             },
             "evaluation": {
                 "records": len(records),
                 "fts_only": fts_public_metrics,
                 "rrf5": rrf_public_metrics,
                 "cascade_2_2_1": cascade_public_metrics,
+                "adaptive_hybrid": adaptive_public_metrics,
+                "domain_profiles": domain_profiles,
                 "arbiter": {
                     "verdict_counts": dual_report.verdict_counts,
                     "labeled_verdict_count": dual_report.labeled_verdict_count,
@@ -275,11 +329,16 @@ async def build_context_evidence_demo(
                     "cascade_track": _latency_summary(
                         run.trace.cascade_duration_ms for run in runs.values()
                     ),
+                    "adaptive_track": _latency_summary(adaptive_wall_ms.values()),
                 },
                 "failures": {
                     "fts_only": _failure_rows(records, fts_scores),
                     "rrf5": _failure_rows(records, baseline_scores),
                     "cascade_2_2_1": _failure_rows(records, cascade_scores),
+                    "adaptive_hybrid": _failure_rows(
+                        records,
+                        adaptive_scores,
+                    ),
                 },
                 "promotion_allowed": False,
             },
@@ -322,7 +381,7 @@ async def build_context_evidence_demo(
 
 def render_evidence_markdown(report: dict[str, Any]) -> str:
     evaluation = report["evaluation"]
-    rows = (
+    rows = [
         ("FTS only", evaluation["fts_only"], evaluation["latency_ms"]["fts_only"]),
         ("RRF5", evaluation["rrf5"], evaluation["latency_ms"]["rrf5_track"]),
         (
@@ -330,7 +389,16 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
             evaluation["cascade_2_2_1"],
             evaluation["latency_ms"]["cascade_track"],
         ),
-    )
+    ]
+    if "adaptive_hybrid" in evaluation and "adaptive_track" in evaluation["latency_ms"]:
+        rows.append(
+            (
+                "Adaptive hybrid",
+                evaluation["adaptive_hybrid"],
+                evaluation["latency_ms"]["adaptive_track"],
+            )
+        )
+    coupling = report["ingest"].get("index_coupling") or {}
     lines = [
         "# VoiceLoop public context evidence v1",
         "",
@@ -340,6 +408,7 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
         f"- SQLite events/episodes: {report['ingest']['events']}",
         f"- Qdrant points: {report['storage']['qdrant_points']}",
         f"- Idempotent second index: {str(report['ingest']['idempotent']).lower()}",
+        f"- Index coupling consistent: {str(bool(coupling.get('consistent', True))).lower()}",
         "- Promotion allowed: `false`",
         "",
         "## Retrieval comparison",
@@ -366,6 +435,35 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
             )
             + " |"
         )
+    domain_profiles = evaluation.get("domain_profiles") or []
+    if domain_profiles:
+        lines.extend(
+            [
+                "",
+                "## Dynamic policy profiles",
+                "",
+                (
+                    "| Profile | Strategy | FTS weight | Vector weight | "
+                    "Max axes (qmax) | Serving eligible |"
+                ),
+                "|---|---|---:|---:|---:|---|",
+            ]
+        )
+        for profile in domain_profiles:
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        str(profile["label"]),
+                        f"`{profile['strategy']}`",
+                        _number(float(profile["fts_weight"])),
+                        _number(float(profile["vector_weight"])),
+                        str(profile["qmax"]),
+                        f"`{str(profile['serving_eligible']).lower()}`",
+                    )
+                )
+                + " |"
+            )
     lines.extend(
         [
             "",
@@ -426,7 +524,7 @@ def render_evidence_markdown(report: dict[str, Any]) -> str:
 def render_evidence_html(report: dict[str, Any]) -> str:
     evaluation = report["evaluation"]
     metric_rows = []
-    for label, metrics, latency in (
+    html_tracks = [
         ("FTS only", evaluation["fts_only"], evaluation["latency_ms"]["fts_only"]),
         ("RRF5", evaluation["rrf5"], evaluation["latency_ms"]["rrf5_track"]),
         (
@@ -434,7 +532,16 @@ def render_evidence_html(report: dict[str, Any]) -> str:
             evaluation["cascade_2_2_1"],
             evaluation["latency_ms"]["cascade_track"],
         ),
-    ):
+    ]
+    if "adaptive_hybrid" in evaluation and "adaptive_track" in evaluation["latency_ms"]:
+        html_tracks.append(
+            (
+                "Adaptive hybrid",
+                evaluation["adaptive_hybrid"],
+                evaluation["latency_ms"]["adaptive_track"],
+            )
+        )
+    for label, metrics, latency in html_tracks:
         metric_rows.append(
             "<tr>"
             f"<td>{html.escape(label)}</td>"
@@ -712,6 +819,55 @@ async def _demonstration_scenarios(
     return rows
 
 
+def _demonstrate_domain_profiles() -> list[dict[str, Any]]:
+    samples: tuple[tuple[str, RetrievalDomain, str], ...] = (
+        (
+            "Windows exact operation",
+            "windows",
+            r"Otwórz plik C:\Users\marci\VoiceLoop\README.md z wczoraj",
+        ),
+        (
+            "Windows architectural exploration",
+            "windows",
+            "Jak działa architektura pamięci i kaskady z wczoraj?",
+        ),
+        (
+            "RPG canonical fact",
+            "rpg",
+            "Kto wczoraj zdecydował o zamknięciu bramy w osadzie?",
+        ),
+        (
+            "RPG creative association",
+            "rpg",
+            "Wymyśl mroczny motyw fabularny na podstawie wczorajszej rozmowy",
+        ),
+    )
+    profiles: list[dict[str, Any]] = []
+    for label, domain, query in samples:
+        policy = resolve_retrieval_policy(
+            query,
+            domain_hint=domain,
+            risk="low",
+            time_bounded=True,
+        )
+        profiles.append(
+            {
+                "label": label,
+                "domain": policy.domain,
+                "query_class": policy.query_class,
+                "strategy": policy.strategy,
+                "fts_weight": policy.fts_weight,
+                "vector_weight": policy.vector_weight,
+                "qmax": policy.qmax,
+                "max_waves": policy.max_waves,
+                "min_axis_coverage": policy.min_axis_coverage,
+                "require_canonical_sql": policy.require_canonical_sql,
+                "serving_eligible": policy.serving_eligible,
+            }
+        )
+    return profiles
+
+
 def _public_metrics(
     records: list[ContextRetrievalEvalRecordV1],
     scores: list[Any],
@@ -865,6 +1021,12 @@ def _assert_demo_contract(report: dict[str, Any]) -> None:
         raise RuntimeError("Unbounded scenario was not rejected.")
     if not report["ingest"]["idempotent"]:
         raise RuntimeError("Episode indexer was not idempotent.")
+    coupling = report["ingest"].get("index_coupling") or {}
+    if not coupling.get("consistent"):
+        raise RuntimeError("Episode index coupling was not consistent.")
+    profiles = report["evaluation"].get("domain_profiles") or []
+    if len(profiles) != 4 or any(item["serving_eligible"] for item in profiles):
+        raise RuntimeError("Domain profiles contract violated.")
     action = report["action_boundary"]
     if (
         not action["confirmation_required"]

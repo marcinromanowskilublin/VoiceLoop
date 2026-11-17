@@ -54,6 +54,7 @@ def test_context_layer_readme_diagrams_are_accessible_svg() -> None:
         "voiceloop-dual-track-flow.svg",
         "voiceloop-arbiter-outcomes.svg",
         "voiceloop-time-certainty.svg",
+        "voiceloop-dynamic-memory-coupling.svg",
     )
     first_section = readme.index("## Context first")
 
@@ -92,6 +93,8 @@ def test_updated_documentation_has_no_missing_local_links() -> None:
     documents = (
         ROOT / "README.md",
         ROOT / "docs" / "README.md",
+        ROOT / "docs" / "PORTFOLIO_CASE_STUDY.md",
+        ROOT / "docs" / "DYNAMIC_MEMORY_COUPLING_V1.md",
         ROOT / "docs" / "DO_WYKONANIA_PRZEZ_CZLOWIEKA.md",
     )
     for document in documents:
@@ -120,6 +123,9 @@ def test_public_context_evidence_is_committed_and_ci_generated() -> None:
     assert report["storage"]["canonical"] == "SQLite"
     assert report["storage"]["derived_index"] == "Qdrant local mode"
     assert report["ingest"]["idempotent"] is True
+    assert report["ingest"]["index_coupling"]["consistent"] is True
+    assert report["evaluation"]["adaptive_hybrid"]["recall_at_k"] == 1.0
+    assert len(report["evaluation"]["domain_profiles"]) == 4
     assert report["evaluation"]["promotion_allowed"] is False
     assert {item["name"] for item in report["scenarios"]} == {
         "agreement",

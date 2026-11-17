@@ -383,6 +383,7 @@ def build_services(settings: Settings) -> Services:
         web_search,
         embeddings=embeddings,
         qdrant=qdrant,
+        context_qdrant=context_episode_qdrant,
         manual_memory=manual_memory,
     )
     capability_index = CapabilityIndex(
@@ -468,6 +469,7 @@ def build_services(settings: Settings) -> Services:
         tts=tts,
         embeddings=embeddings,
         qdrant=qdrant,
+        context_qdrant=context_episode_qdrant,
         capability_index=capability_index,
         routing_v2=routing_v2,
         action_definitions=actions.definitions(),
@@ -1127,8 +1129,9 @@ async def conversation_quality(
 async def context_dual_track_status(
     services: Annotated[Services, Depends(require_token)],
 ) -> dict[str, object]:
-    coverage, summary = await asyncio.gather(
+    coverage, index_state, summary = await asyncio.gather(
         services.memory.context_episode_vector_coverage(),
+        services.memory.context_index_summary(),
         services.memory.context_dual_track_summary(),
     )
     collection_error: str | None = None
@@ -1139,19 +1142,31 @@ async def context_dual_track_status(
     except QdrantMemoryError as exc:
         collection_points = None
         collection_error = type(exc).__name__
+    count_consistent = (
+        collection_points == coverage["indexed"]
+        if collection_points is not None
+        else False
+    )
+    revision_state_clean = (
+        coverage["pending"] == 0
+        and coverage["failed"] == 0
+        and coverage["delete_pending"] == 0
+        and coverage["untracked"] == 0
+        and index_state.get("outbox_ready", 0) == 0
+        and index_state.get("outbox_claimed", 0) == 0
+    )
     coverage = {
         **coverage,
         "collection_points": collection_points,
-        "consistent": (
-            collection_points == coverage["sql_marked"]
-            if collection_points is not None
-            else False
-        ),
+        "count_consistent": count_consistent,
+        "revision_state_clean": revision_state_clean,
+        "consistent": count_consistent and revision_state_clean,
     }
     return {
         **services.dual_track.status(),
         "enabled": services.settings.context_dual_track_enabled,
         "coverage": coverage,
+        "index_state": index_state,
         "summary": summary,
         "collection_error": collection_error,
     }
