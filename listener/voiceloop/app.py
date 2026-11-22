@@ -22,6 +22,15 @@ from .behavior_digest import LocalBehaviorDigestClient
 from .capability_index import CapabilityIndex, CapabilityIndexError
 from .context.dual_track import DualTrackRunner, DualTrackTraceV1
 from .context.vectorization import validate_episode_collection_isolation
+from .conversation_graph import (
+    AppliedUtterance,
+    ConversationGraphStore,
+    GraphRejected,
+    GraphSnapshot,
+    OperationRequest,
+    Utterance,
+    UtteranceRequest,
+)
 from .conversation_telemetry import ConversationTelemetry
 from .corpus.candidates import (
     CandidateDecisionError,
@@ -126,6 +135,7 @@ class Services:
     gemini_planner: OpenAICompatiblePlanner | None
     n8n: N8nClient
     situation: SituationStore
+    conversation_graph: ConversationGraphStore
     retention: RetentionWorkerState
 
 
@@ -637,6 +647,9 @@ def build_services(settings: Settings) -> Services:
         gemini_planner=gemini_planner,
         n8n=n8n,
         situation=SituationStore(),
+        conversation_graph=ConversationGraphStore(
+            settings.data_dir / "conversation_graph.sqlite"
+        ),
         retention=RetentionWorkerState(),
     )
 
@@ -1321,6 +1334,92 @@ async def get_meeting_recording(
             detail="Meeting recording not found",
         )
     return meeting
+
+
+def _reject_graph(exc: GraphRejected) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+@app.get("/graph", include_in_schema=False)
+async def conversation_graph_page(request: Request) -> FileResponse:
+    services = services_from(request)
+    page = services.settings.panel_dir / "graph.html"
+    if not page.exists():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Widok grafu nie jest dostępny.",
+        )
+    return FileResponse(page)
+
+
+@app.get(
+    "/api/v1/conversation-graph/{meeting_id}",
+    response_model=GraphSnapshot,
+)
+async def get_conversation_graph(
+    meeting_id: str,
+    services: Annotated[Services, Depends(require_token)],
+) -> GraphSnapshot:
+    try:
+        return services.conversation_graph.snapshot(meeting_id)
+    except GraphRejected as exc:
+        raise _reject_graph(exc) from exc
+
+
+@app.get("/api/v1/conversation-graph/{meeting_id}/events")
+async def get_conversation_graph_events(
+    meeting_id: str,
+    services: Annotated[Services, Depends(require_token)],
+) -> list[dict[str, object]]:
+    try:
+        return services.conversation_graph.events(meeting_id)
+    except GraphRejected as exc:
+        raise _reject_graph(exc) from exc
+
+
+@app.post(
+    "/api/v1/conversation-graph/{meeting_id}/utterances",
+    response_model=AppliedUtterance,
+)
+async def append_conversation_utterance(
+    meeting_id: str,
+    payload: UtteranceRequest,
+    services: Annotated[Services, Depends(require_token)],
+) -> AppliedUtterance:
+    utterance_id = payload.utterance_id or f"u-{secrets.token_hex(8)}"
+    try:
+        return services.conversation_graph.apply_utterance(
+            Utterance(
+                meeting_id=meeting_id,
+                utterance_id=utterance_id,
+                speaker_id=payload.speaker_id,
+                text=payload.text,
+                emotion=payload.emotion,
+                speaker_label=payload.speaker_label,
+            )
+        )
+    except GraphRejected as exc:
+        raise _reject_graph(exc) from exc
+
+
+@app.post(
+    "/api/v1/conversation-graph/{meeting_id}/operations",
+    response_model=AppliedUtterance,
+)
+async def apply_conversation_graph_operations(
+    meeting_id: str,
+    payload: OperationRequest,
+    services: Annotated[Services, Depends(require_token)],
+) -> AppliedUtterance:
+    try:
+        return services.conversation_graph.apply_operations(
+            meeting_id=meeting_id,
+            utterance_id=payload.utterance_id,
+            speaker_id=payload.speaker_id,
+            operations=payload.operations,
+        )
+    except GraphRejected as exc:
+        raise _reject_graph(exc) from exc
 
 
 @app.post("/api/v1/conversation/start")

@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Graf spotkania</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07080c;
+      --panel: #10131a;
+      --line: rgba(255, 255, 255, .12);
+      --text: #f4f6f8;
+      --muted: #9aa3b2;
+      --speaker: #3ddc97;
+      --concept: #5b8cff;
+      --intention: #f0a04b;
+      --emotion: #ff8fb8;
+      --bad: #ff8d8d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 "Segoe UI", sans-serif;
+    }
+    a { color: var(--concept); }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+      padding: 18px 22px 8px;
+    }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    p { margin: 4px 0 0; color: var(--muted); max-width: 720px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      gap: 16px;
+      padding: 12px 22px 22px;
+    }
+    form, .log, .detail, .stage-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    form, .log, .detail { padding: 14px; }
+    label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+    input, textarea, button {
+      font: inherit;
+      color: var(--text);
+      background: #07080c;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    input, textarea { width: 100%; padding: 8px 10px; }
+    textarea { min-height: 88px; resize: vertical; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { padding: 8px 12px; cursor: pointer; }
+    button.primary { background: var(--speaker); color: #062116; border-color: transparent; font-weight: 700; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .legend span, .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+    }
+    .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .log { margin-top: 12px; max-height: 280px; overflow: auto; }
+    .log p, .detail p { margin: 0 0 8px; }
+    .detail { margin-top: 12px; }
+    .warn { color: var(--bad); }
+    .stage-wrap { overflow: auto; min-height: 680px; }
+    .stage { position: relative; min-width: 980px; min-height: 680px; }
+    .stage svg { position: absolute; inset: 0; overflow: visible; }
+    .tile {
+      position: absolute;
+      width: 210px;
+      padding: 10px 12px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: #141820;
+      cursor: pointer;
+    }
+    .tile strong { display: block; }
+    .tile em { display: block; margin: 2px 0 6px; color: var(--muted); font-style: normal; font-size: 12px; }
+    .tile .badge { margin: 8px 8px 0 0; background: rgba(255,255,255,.06); }
+    .tile.speaker { border-color: var(--speaker); box-shadow: inset 3px 0 0 var(--speaker); }
+    .tile.concept { border-color: var(--concept); box-shadow: inset 3px 0 0 var(--concept); }
+    .tile.intention { border-color: var(--intention); box-shadow: inset 3px 0 0 var(--intention); }
+    .tile.selected { outline: 2px solid #fff; }
+    .empty-stage {
+      position: absolute;
+      left: 28px;
+      top: 28px;
+      color: var(--muted);
+      max-width: 420px;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      header { flex-direction: column; align-items: start; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Graf spotkania</h1>
+      <p>Nowe zdanie dopisuje, uzupełnia, łączy albo koryguje. Stary kafelek zostaje na swoim miejscu, razem z historią.</p>
+    </div>
+    <a href="/">VoiceLoop</a>
+  </header>
+  <div class="layout">
+    <section>
+      <form id="composer">
+        <label for="meeting">Nagranie</label>
+        <input id="meeting" name="meeting" value="przyklad" autocomplete="off" required>
+        <label for="speaker">Mówca z diaryzacji</label>
+        <input id="speaker" name="speaker" value="A" autocomplete="off" required>
+        <label for="text">Wypowiedź</label>
+        <textarea id="text" name="text" required>Chcę zbudować aplikację</textarea>
+        <label for="emotion">Emocja, jeśli rozpoznał ją detektor</label>
+        <input id="emotion" name="emotion" placeholder="na przykład: przeciążenie">
+        <div class="row">
+          <button class="primary" type="submit">Dodaj zdanie</button>
+          <button id="example" type="button">Przykład A i B</button>
+        </div>
+        <label for="paste">Albo wklej linie „id: zdanie”</label>
+        <textarea id="paste" placeholder="A: Chcę zbudować aplikację"></textarea>
+        <div class="row">
+          <button id="paste-btn" type="button">Wczytaj linie</button>
+        </div>
+        <div class="legend" aria-label="Legenda">
+          <span><i class="swatch" style="background:var(--speaker)"></i>mówca</span>
+          <span><i class="swatch" style="background:var(--concept)"></i>pojęcie</span>
+          <span><i class="swatch" style="background:var(--intention)"></i>intencja</span>
+          <span><i class="swatch" style="background:var(--emotion)"></i>emocja na krawędzi</span>
+        </div>
+      </form>
+      <div class="log" id="log" aria-live="polite"></div>
+      <div class="detail" id="detail"><p>Wybierz kafelek, żeby zobaczyć historię zmian.</p></div>
+    </section>
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <svg id="edges"></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const kindName = { speaker: "mówca", concept: "pojęcie", intention: "intencja" };
+    const edgeColor = { says: "#7dcea0", intends: "#f0a04b", relates: "#8eb4ff", tone: "#ff8fb8" };
+    const state = {
+      token: "",
+      meeting: "",
+      positions: new Map(),
+      ids: new Set(),
+      graph: null,
+      selected: "",
+    };
+
+    function beginMeeting(meeting) {
+      if (state.meeting === meeting) return;
+      state.meeting = meeting;
+      state.positions.clear();
+      state.ids.clear();
+      state.selected = "";
+    }
+
+    const logEl = document.querySelector("#log");
+    const detailEl = document.querySelector("#detail");
+    const stageEl = document.querySelector("#stage");
+    const nodesEl = document.querySelector("#nodes");
+    const edgesEl = document.querySelector("#edges");
+
+    function note(text, warn) {
+      const line = document.createElement("p");
+      if (warn) line.className = "warn";
+      line.textContent = text;
+      logEl.prepend(line);
+    }
+
+    function badgeText(node) {
+      const items = [];
+      const link = node.attributes.lacznosc;
+      if (link === "bez internetu") items.push("Offline");
+      else if (link === "z internetem") items.push("Z internetem");
+      else if (link) items.push(link);
+      if (node.attributes.stan) items.push(node.attributes.stan);
+      if (node.attributes.nie_jest) items.push("nie jest " + node.attributes.nie_jest);
+      if (node.attributes.cecha) items.push(node.attributes.cecha);
+      if (node.attributes.notatka) items.push(node.attributes.notatka);
+      return items;
+    }
+
+    function describe(op, graph) {
+      const node = graph.nodes.find((item) => item.id === op.node_id);
+      const name = node ? node.label : (op.label || "węzeł");
+      if (op.op === "add") return "dodano „" + (op.label || name) + "”";
+      if (op.op === "enrich" && op.attributes && op.attributes.lacznosc === "bez internetu") {
+        return "uzupełniono „" + name + "”: Offline";
+      }
+      if (op.op === "enrich") return "uzupełniono „" + name + "”";
+      if (op.op === "revise") return "korekta „" + name + "”";
+      if (op.op === "link") return "połączono";
+      return op.op;
+    }
+
+    function render(graph) {
+      const seen = new Set(graph.nodes.map((node) => node.id));
+      const lost = [...state.ids].filter((id) => !seen.has(id));
+      const moved = graph.nodes.filter((node) => {
+        const previous = state.positions.get(node.id);
+        return previous && (previous.x !== node.position.x || previous.y !== node.position.y);
+      });
+      if (lost.length || moved.length) {
+        note("Graf poruszył albo zgubił wcześniejszy kafelek. To nie powinno się zdarzyć.", true);
+      }
+      state.ids = seen;
+      state.positions = new Map(graph.nodes.map((node) => [node.id, node.position]));
+      state.graph = graph;
+
+      const width = Math.max(980, ...graph.nodes.map((node) => node.position.x + 260), 980);
+      const height = Math.max(680, ...graph.nodes.map((node) => node.position.y + 180), 680);
+      stageEl.style.width = width + "px";
+      stageEl.style.height = height + "px";
+      nodesEl.replaceChildren();
+      if (!graph.nodes.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty-stage";
+        empty.textContent = "Graf jest pusty. Zostanie taki, dopóki nie dojdzie pierwsze zdanie.";
+        nodesEl.append(empty);
+      }
+      for (const node of graph.nodes) {
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = "tile " + node.kind + (node.id === state.selected ? " selected" : "");
+        tile.dataset.id = node.id;
+        tile.style.left = node.position.x + "px";
+        tile.style.top = node.position.y + "px";
+        const title = document.createElement("strong");
+        title.textContent = node.label;
+        const kind = document.createElement("em");
+        kind.textContent = kindName[node.kind] || node.kind;
+        tile.append(title, kind);
+        for (const item of badgeText(node)) {
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = item;
+          tile.append(badge);
+        }
+        tile.addEventListener("click", () => selectNode(node.id));
+        nodesEl.append(tile);
+      }
+      drawEdges(graph);
+      if (state.selected) selectNode(state.selected);
+    }
+
+    function drawEdges(graph) {
+      const centers = new Map();
+      for (const tile of nodesEl.querySelectorAll(".tile")) {
+        centers.set(tile.dataset.id, {
+          x: tile.offsetLeft + tile.offsetWidth / 2,
+          y: tile.offsetTop + tile.offsetHeight / 2,
+        });
+      }
+      edgesEl.replaceChildren();
+      edgesEl.setAttribute("width", stageEl.style.width);
+      edgesEl.setAttribute("height", stageEl.style.height);
+      for (const edge of graph.edges) {
+        const source = centers.get(edge.source);
+        const target = centers.get(edge.target);
+        if (!source || !target) continue;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", source.x);
+        line.setAttribute("y1", source.y);
+        line.setAttribute("x2", target.x);
+        line.setAttribute("y2", target.y);
+        line.setAttribute("stroke", edge.emotion ? edgeColor.tone : (edgeColor[edge.kind] || "#889")) ;
+        line.setAttribute("stroke-width", "2");
+        edgesEl.append(line);
+        if (edge.emotion) {
+          const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          label.setAttribute("x", (source.x + target.x) / 2);
+          label.setAttribute("y", (source.y + target.y) / 2 - 6);
+          label.setAttribute("fill", "#ff8fb8");
+          label.setAttribute("font-size", "12");
+          label.textContent = edge.emotion;
+          edgesEl.append(label);
+        }
+      }
+    }
+
+    function historyLine(entry) {
+      const field = entry.field === "label" ? "nazwa" : entry.field.replace("attribute:lacznosc", "łączność");
+      const show = (value) => value === "bez internetu" ? "Offline" : value;
+      return field + ": " + show(entry.before) + " → " + show(entry.after);
+    }
+
+    function selectNode(id) {
+      state.selected = id;
+      for (const tile of nodesEl.querySelectorAll(".tile")) {
+        tile.classList.toggle("selected", tile.dataset.id === id);
+      }
+      const graph = state.graph;
+      const node = graph && graph.nodes.find((item) => item.id === id);
+      detailEl.replaceChildren();
+      if (!node) {
+        const empty = document.createElement("p");
+        empty.textContent = "Wybierz kafelek, żeby zobaczyć historię zmian.";
+        detailEl.append(empty);
+        return;
+      }
+      const title = document.createElement("p");
+      title.textContent = node.label + " · " + (kindName[node.kind] || node.kind);
+      detailEl.append(title);
+      if (!node.history.length) {
+        const same = document.createElement("p");
+        same.textContent = "Ten kafelek nie był jeszcze korygowany.";
+        detailEl.append(same);
+      }
+      for (const entry of node.history) {
+        const line = document.createElement("p");
+        line.textContent = historyLine(entry);
+        detailEl.append(line);
+      }
+      for (const edge of graph.edges) {
+        if (edge.source !== id && edge.target !== id) continue;
+        const line = document.createElement("p");
+        const otherId = edge.source === id ? edge.target : edge.source;
+        const other = graph.nodes.find((item) => item.id === otherId);
+        const bits = [other ? other.label : "węzeł"];
+        if (edge.label) bits.push(edge.label);
+        if (edge.emotion) bits.push("emocja: " + edge.emotion);
+        line.textContent = bits.join(" · ");
+        detailEl.append(line);
+      }
+    }
+
+    async function api(path, options) {
+      const headers = { ...(options && options.headers) };
+      if (state.token) headers["X-VoiceLoop-Token"] = state.token;
+      const response = await fetch(path, { ...options, headers });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = body.detail;
+        throw new Error(typeof detail === "string" ? detail : "Żądanie nie przeszło");
+      }
+      return body;
+    }
+
+    async function load(meeting) {
+      beginMeeting(meeting);
+      const graph = await api("/api/v1/conversation-graph/" + encodeURIComponent(meeting));
+      render(graph);
+    }
+
+    async function send(meeting, payload) {
+      beginMeeting(meeting);
+      const result = await api("/api/v1/conversation-graph/" + encodeURIComponent(meeting) + "/utterances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const phrases = result.operations.map((op) => describe(op, result.graph));
+      if (result.replayed) note(payload.speaker_id + ": to zdanie już jest w historii, graf bez zmian");
+      else note(payload.speaker_id + ": " + payload.text + (phrases.length ? " → " + phrases.join(", ") : " → bez nowych kafelków"));
+      render(result.graph);
+    }
+
+    function meetingValue() {
+      const meeting = document.querySelector("#meeting").value.trim();
+      if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(meeting)) {
+        throw new Error("Identyfikator nagrania: litery, cyfry, kropka albo myślnik.");
+      }
+      return meeting;
+    }
+
+    document.querySelector("#composer").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        await send(meetingValue(), {
+          speaker_id: document.querySelector("#speaker").value.trim(),
+          text: document.querySelector("#text").value.trim(),
+          emotion: document.querySelector("#emotion").value.trim() || null,
+        });
+      } catch (error) {
+        note(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector("#example").addEventListener("click", async () => {
+      const button = document.querySelector("#example");
+      button.disabled = true;
+      try {
+        const meeting = meetingValue();
+        const lines = [
+          ["A", "Chcę zbudować aplikację"],
+          ["A", "Ma działać bez internetu"],
+          ["B", "Ale synchronizacja powinna być możliwa"],
+        ];
+        for (let index = 0; index < lines.length; index += 1) {
+          await send(meeting, {
+            speaker_id: lines[index][0],
+            text: lines[index][1],
+            utterance_id: meeting + "-przyklad-" + (index + 1),
+          });
+        }
+      } catch (error) {
+        note(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector("#paste-btn").addEventListener("click", async () => {
+      const button = document.querySelector("#paste-btn");
+      button.disabled = true;
+      try {
+        const meeting = meetingValue();
+        const lines = document.querySelector("#paste").value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+        if (!lines.length) throw new Error("Wklej choć jedną linię.");
+        for (const line of lines) {
+          const match = line.match(/^([^:]{1,40}):\s*(.+)$/);
+          if (!match) throw new Error("Linia ma mieć postać „A: zdanie”. Identyfikator mówcy pochodzi z diaryzacji.");
+          await send(meeting, { speaker_id: match[1].trim(), text: match[2].trim() });
+        }
+      } catch (error) {
+        note(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector("#meeting").addEventListener("change", async () => {
+      try {
+        await load(meetingValue());
+      } catch (error) {
+        note(error.message, true);
+      }
+    });
+
+    (async () => {
+      try {
+        const session = await api("/api/v1/session");
+        state.token = session.token;
+        await load(meetingValue());
+      } catch (error) {
+        note(error.message, true);
+      }
+    })();
+  </script>
+</body>
+</html>
