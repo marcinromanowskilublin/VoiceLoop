@@ -168,12 +168,13 @@ async def test_dual_track_runs_parallel_tracks_and_persists_content_free_trace(
         qdrant=QdrantStub(hits),  # type: ignore[arg-type]
     )
 
+    observed = DAY + timedelta(days=1)
     result = await runner.run(
         "Co ustaliliśmy wczoraj?",
         request_id="private-request-id",
-        now=DAY + timedelta(days=1),
+        now=observed,
     )
-    stored = await store.list_context_dual_track_traces()
+    stored = await store.list_context_dual_track_traces(now=observed)
 
     assert result.trace.verdict == "agreement"
     assert result.trace.baseline_axes_attempted == (
@@ -189,7 +190,7 @@ async def test_dual_track_runs_parallel_tracks_and_persists_content_free_trace(
     assert "private-request-id" not in serialized
     assert "source-0" not in serialized
     assert "Co ustaliliśmy" not in serialized
-    summary = await store.context_dual_track_summary()
+    summary = await store.context_dual_track_summary(now=observed)
     assert summary["sample_count"] == 1
     assert summary["verdict_counts"] == {"agreement": 1}
     assert summary["time_precision_counts"] == {"exact": 1}
@@ -298,7 +299,7 @@ async def test_dual_track_handles_approximate_epistemic_statement_and_persists_r
         request_id="private-approx-request",
         now=DAY,
     )
-    stored_traces = await store.list_context_dual_track_traces()
+    stored_traces = await store.list_context_dual_track_traces(now=DAY)
 
     assert result.statement is not None
     assert result.trace.bounded is True
@@ -323,7 +324,7 @@ async def test_dual_track_handles_approximate_epistemic_statement_and_persists_r
             "SELECT COUNT(*) FROM context_cascade_shadow_telemetry"
         ).fetchone()[0]
     assert telemetry_count == 1
-    summary = await store.context_dual_track_summary()
+    summary = await store.context_dual_track_summary(now=DAY)
     assert summary["time_precision_counts"] == {"approximate": 1}
     assert summary["relevance_gate_counts"] == {"investigate": 1}
     assert summary["epistemic_role_counts"] == {"prediction": 1}
@@ -347,7 +348,7 @@ async def test_dual_track_can_delegate_temporal_role_persistence(tmp_path) -> No
     )
 
     assert result.statement is not None
-    assert len(await store.list_context_dual_track_traces()) == 1
+    assert len(await store.list_context_dual_track_traces(now=DAY)) == 1
     with store._connect() as connection:
         telemetry_count = connection.execute(
             "SELECT COUNT(*) FROM context_cascade_shadow_telemetry"
