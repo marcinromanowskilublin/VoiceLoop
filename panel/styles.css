@@ -191,6 +191,8 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+a.nav-pill { text-decoration: none; }
+
 .nav-pill,
 #model-badge {
   display: inline-flex;

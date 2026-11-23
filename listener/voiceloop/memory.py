@@ -47,6 +47,14 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _as_of_iso(now: datetime | None = None) -> str:
+    if now is None:
+        return _now_iso()
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(UTC).isoformat()
+
+
 @dataclass(frozen=True)
 class VectorMemoryHit:
     source: str
@@ -3455,10 +3463,12 @@ class MemoryStore:
         self,
         *,
         limit: int = 20,
+        now: datetime | None = None,
     ) -> list[Any]:
         from .context.dual_track import DualTrackTraceV1
 
         safe_limit = max(1, min(int(limit), 200))
+        cutoff = _as_of_iso(now)
 
         def _list() -> list[sqlite3.Row]:
             with self._connect() as connection:
@@ -3469,7 +3479,7 @@ class MemoryStore:
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
-                    (_now_iso(), safe_limit),
+                    (cutoff, safe_limit),
                 ).fetchall()
 
         rows = await asyncio.to_thread(_list)
@@ -3546,12 +3556,17 @@ class MemoryStore:
             )
         return traces
 
-    async def context_dual_track_summary(self) -> dict[str, object]:
+    async def context_dual_track_summary(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
         """Aggregate only counters and durations for the read-only UI."""
+
+        cutoff = _as_of_iso(now)
 
         def _summary() -> dict[str, object]:
             with self._connect() as connection:
-                cutoff = _now_iso()
                 verdict_rows = connection.execute(
                     """
                     SELECT verdict, COUNT(*) AS count

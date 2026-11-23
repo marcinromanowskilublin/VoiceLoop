@@ -113,6 +113,26 @@ work succeeded.
 > local risk policy and—when required—human confirmation. Only the executor can
 > report success.
 
+These are scoped engineering controls, not a guarantee that every generated
+response is safe or appropriate.
+
+## Research and evaluation relevance
+
+VoiceLoop is developed by **Marcin Romanowski, a psychiatrist with more than
+12 years of clinical experience and a software builder**. The repository
+provides concrete engineering material relevant to human oversight and
+mental-health AI evaluation: ambiguous intent, requests mistaken for consent,
+source attribution, long-horizon corrections, interruption and review before
+consequential action.
+
+VoiceLoop is **not a medical device and has not been clinically validated**.
+It does not claim diagnostic, therapeutic or crisis-response effectiveness.
+Clinical experience informs evaluation questions; it does not replace
+evidence.
+
+- [Safety evaluation and claim boundaries](docs/SAFETY_EVALUATION.md)
+- [Claims and evidence register](docs/CLAIMS_AND_EVIDENCE.md)
+
 ## Quick start
 
 Requirements: Windows and Python 3.11.
@@ -156,6 +176,16 @@ shadow or read-only paths by default.
 
 Canonical details:
 [`docs/ARCHITECTURE_CURRENT.md`](docs/ARCHITECTURE_CURRENT.md).
+
+### Product direction: one core, explicit adapters
+
+![VoiceLoop capability map showing the implemented Windows host alongside professional-practice and interactive-world adapter directions](docs/img/voiceloop-capability-map-en-v1.png)
+
+The diagram above is a **product and adapter direction**, not a claim that all
+three environments are deployed. The Windows-first core is implemented.
+Professional-practice and interactive-world integrations remain explicit
+adapters or demonstrations that must preserve the same context, policy and
+verification contracts.
 
 ## Current status
 
@@ -252,6 +282,14 @@ Checked in invariant `INV-11`.
 ## Context, Memory And Retrieval
 
 ![VoiceLoop memory architecture: SQLite is canonical, Qdrant is a derived index](docs/img/voiceloop-memory-architecture.svg)
+
+### Implemented boundary; opt-in retrieval path
+
+![Time-first retrieval architecture: SQLite holds canonical content, time and provenance while the bounded cascade selects and verifies Qdrant candidates](docs/img/voiceloop-sqlite-cascade-architecture-en-v1.png)
+
+The diagram describes implemented storage and verification contracts. The
+time-first recall path and cascade measurements remain opt-in or shadow where
+the current-status section says so.
 
 VoiceLoop keeps exact records and semantic search deliberately separate:
 
@@ -361,6 +399,9 @@ Checked in invariant `INV-12`, `tests/test_executor.py` and
   that they do not.
 - CI mocks Windows UI Automation policy. A live desktop remains a separate
   manual verification.
+- Clinical safety, crisis handling, freedom from harmful reassurance or
+  dependency-promoting responses, and safety over long multi-turn
+  interactions.
 
 ## Security boundary
 
@@ -430,6 +471,8 @@ The live checklist is maintained in
 
 - [Current architecture](docs/ARCHITECTURE_CURRENT.md)
 - [Architecture invariants](docs/ARCHITECTURE_INVARIANTS.md)
+- [Safety evaluation and claim boundaries](docs/SAFETY_EVALUATION.md)
+- [Claims and evidence](docs/CLAIMS_AND_EVIDENCE.md)
 - [Portfolio case study](docs/PORTFOLIO_CASE_STUDY.md)
 - [Dynamic Memory Coupling V1](docs/DYNAMIC_MEMORY_COUPLING_V1.md)
 - [Context Timeline V1](docs/CONTEXT_TIMELINE_V1.md)
