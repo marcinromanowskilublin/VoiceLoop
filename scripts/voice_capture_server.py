@@ -302,7 +302,8 @@ def make_capture_handler(
                 return
             if path in {"/", "/index.html"}:
                 html = PROJECT_ROOT / "scripts" / config.slug / "index.html"
-                self._send(200, (html if html.is_file() else HTML_PATH).read_bytes(), "text/html; charset=utf-8")
+                page = html if html.is_file() else HTML_PATH
+                self._send(200, page.read_bytes(), "text/html; charset=utf-8")
                 return
             if minimalizuj is not None and path in {"/minimalizuj", "/minimalizuj/"}:
                 html = PROJECT_ROOT / "scripts" / config.slug / "minimalizuj.html"
@@ -348,7 +349,10 @@ def make_capture_handler(
         def _local_browser(self) -> bool:
             host = self.headers.get("Host", "")
             origin = self.headers.get("Origin", "")
-            allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+            allowed = {
+                f"127.0.0.1:{self.server.server_port}",
+                f"localhost:{self.server.server_port}",
+            }
             if host not in allowed:
                 self._json(400, {"ok": False, "error": "Invalid Host"})
                 return False
@@ -371,7 +375,12 @@ def make_capture_handler(
                 return
             body = self.rfile.read(length) if length else b""
             try:
-                if minimalizuj is not None and path in {"/api/minimalizuj", "/api/minimalizuj/approve", "/api/minimalizuj/revert"}:
+                calibration_paths = {
+                    "/api/minimalizuj",
+                    "/api/minimalizuj/approve",
+                    "/api/minimalizuj/revert",
+                }
+                if minimalizuj is not None and path in calibration_paths:
                     if length > 16384:
                         self._json(413, {"ok": False, "error": "Zbyt duża próbka"})
                         return
@@ -381,7 +390,8 @@ def make_capture_handler(
                     if path == "/api/minimalizuj":
                         result = minimalizuj.save(data, store.data_dir)
                     else:
-                        result = minimalizuj.change_alias(str(data.get("id") or ""), path.endswith("approve"))
+                        identifier = str(data.get("id") or "")
+                        result = minimalizuj.change_alias(identifier, path.endswith("approve"))
                     self._json(200, result)
                     return
                 if path == "/api/record":
