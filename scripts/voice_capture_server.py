@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 HOST = "127.0.0.1"
 MAX_BODY_BYTES = 25 * 1024 * 1024
@@ -314,8 +314,6 @@ def make_capture_handler(
                 from minimalizuj_studio import command_status
 
                 query = urlparse(self.path).query
-                from urllib.parse import parse_qs
-
                 request_id = parse_qs(query).get("request_id", [""])[0]
                 try:
                     self._json(200, command_status(request_id))
