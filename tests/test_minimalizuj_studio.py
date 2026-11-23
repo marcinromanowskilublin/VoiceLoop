@@ -44,7 +44,8 @@ def test_store_persists_alias_and_can_revert(tmp_path):
     assert db.change_alias(response["id"], True)["scope"] == "calibration_studio_only"
     assert "minimalizuj nowe" in db.snapshot()["aliases"]
     assert db.change_alias(response["id"], False)["alias_state"] == "reverted"
-    assert "minimalizuj nowe" not in studio.CalibrationStudio(tmp_path / "samples.sqlite3").snapshot()["aliases"]
+    reopened = studio.CalibrationStudio(tmp_path / "samples.sqlite3")
+    assert "minimalizuj nowe" not in reopened.snapshot()["aliases"]
 
 
 def test_store_rejects_unregistered_action(tmp_path):
