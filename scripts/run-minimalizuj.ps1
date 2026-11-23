@@ -23,7 +23,28 @@ try {
     do {
         try {
             $Args = @($Prefix) + @('"' + $ServerScript + '"')
-            $Proc = Start-Process -FilePath $Python -ArgumentList $Args -Wait -PassThru -WindowStyle Hidden -WorkingDirectory $Root -RedirectStandardOutput (Join-Path $Root "logs\minimalizuj.stdout.log") -RedirectStandardError (Join-Path $Root "logs\minimalizuj.stderr.log")
+            $Proc = Start-Process -FilePath $Python -ArgumentList $Args -PassThru -WindowStyle Hidden -WorkingDirectory $Root -RedirectStandardOutput (Join-Path $Root "logs\minimalizuj.stdout.log") -RedirectStandardError (Join-Path $Root "logs\minimalizuj.stderr.log")
+            $Misses = 0
+            while (-not $Proc.HasExited) {
+                Start-Sleep -Seconds 10
+                if ($Proc.HasExited) { break }
+                try {
+                    $Health = Invoke-RestMethod -Uri "http://127.0.0.1:8792/api/health" -TimeoutSec 3
+                    if ($Health.ok -and $Health.tool -eq "calibration-phrases") {
+                        $Misses = 0
+                    } else {
+                        $Misses++
+                    }
+                } catch {
+                    $Misses++
+                }
+                if ($Misses -ge 3) {
+                    Write-Warning "Local calibration health failed 3 times; restarting owned process."
+                    Stop-Process -Id $Proc.Id -Force -ErrorAction SilentlyContinue
+                    break
+                }
+            }
+            $Proc.WaitForExit()
             Write-Output "Minimalizuj exited: $($Proc.ExitCode)"
         } catch {
             Write-Warning $_
