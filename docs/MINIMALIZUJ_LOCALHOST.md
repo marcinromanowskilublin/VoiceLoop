@@ -29,8 +29,12 @@ Nie działa przed logowaniem. Aby wyłączyć autostart:
    audio obok, w tym samym katalogu.
 5. Zatwierdzone aliasy obowiązują WYŁĄCZNIE w kalibracyjnym studio.
    Nie są automatycznie publikowane w produkcyjnym routerze ani wykonywane.
-6. Akcja minimalizacji jest już w produkcyjnym executorze na 8765.
+6. Osobny przycisk Wykonaj minimalizację wymaga potwierdzenia w przeglądarce.
+   Serwer 8792 przekazuje wyłącznie zarejestrowaną akcję do rdzenia 8765,
+   z lokalnym tokenem sesji, i pokazuje późniejszy status executora.
+   Nie ma uniwersalnego endpointu wykonywania arbitralnych poleceń.
    Ta gałąź dodaje do routera jednoznaczny alias "minimalizuj".
+   Kliknięcie bez działającego rdzenia 8765 zwróci czytelny błąd.
 
 STT przeglądarkowe jest OPCJONALNE i może przesyłać dźwięk do zewnętrznego dostawcy;
 nie używaj go do prywatnych rozmów bez odpowiedniej podstawy i zgody.
