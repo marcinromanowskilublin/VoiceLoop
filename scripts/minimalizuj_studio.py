@@ -5,6 +5,8 @@ import difflib
 import json
 import re
 import sqlite3
+import urllib.error
+import urllib.request
 import threading
 import unicodedata
 from datetime import datetime, timezone
@@ -108,3 +110,53 @@ class CalibrationStudio:
             state="approved" if approve else "reverted"
             db.execute("UPDATE corrections SET alias_state=? WHERE id=?",(state,identifier))
             return {"ok":True,"id":identifier,"alias_state":state,"scope":"calibration_studio_only"}
+
+
+# The execution bridge calls the existing localhost core. It never executes OS
+# commands, imports win32 or lets a caller supply an arbitrary action_id.
+CORE_BASE = "http://127.0.0.1:8765"
+
+
+def core_request(path: str, *, payload: dict | None = None) -> dict:
+    """Fetch a token and forward an explicit action to the existing core."""
+    try:
+        with urllib.request.urlopen(CORE_BASE + "/api/v1/session", timeout=3) as response:
+            token = json.loads(response.read().decode("utf-8"))["token"]
+        headers = {"X-VoiceLoop-Token": token}
+        body = None
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            CORE_BASE + path, data=body, headers=headers,
+            method="POST" if body is not None else "GET",
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("VoiceLoop core 8765 nie odpowiada lub odrzucił żądanie: " + str(exc)) from exc
+
+
+def execute_minimize(confirmation: str) -> dict:
+    if confirmation != "MINIMALIZUJ":
+        raise ValueError("Wykonanie wymaga jawnego potwierdzenia MINIMALIZUJ.")
+    result = core_request(
+        "/api/v1/commands",
+        payload={
+            "source": "panel",
+            "text": "minimalizuj",
+            "command_id": "minimize_all_windows",
+            "allow_cloud": False,
+        },
+    )
+    return {"ok": True, "request_id": result.get("request_id"),
+            "status": result.get("status", "received"),
+            "note": "Przekazano do istniejącego executora; sprawdź status."}
+
+
+def command_status(request_id: str) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", request_id):
+        raise ValueError("Nieprawidłowy request_id")
+    result = core_request("/api/v1/commands/" + request_id)
+    return {"ok": True, "request_id": request_id,
+            "status": result.get("status", "unknown")}
