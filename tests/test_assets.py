@@ -94,6 +94,8 @@ def test_updated_documentation_has_no_missing_local_links() -> None:
         ROOT / "README.md",
         ROOT / "docs" / "README.md",
         ROOT / "docs" / "PORTFOLIO_CASE_STUDY.md",
+        ROOT / "docs" / "SAFETY_EVALUATION.md",
+        ROOT / "docs" / "CLAIMS_AND_EVIDENCE.md",
         ROOT / "docs" / "DYNAMIC_MEMORY_COUPLING_V1.md",
         ROOT / "docs" / "DO_WYKONANIA_PRZEZ_CZLOWIEKA.md",
     )
@@ -106,6 +108,55 @@ def test_updated_documentation_has_no_missing_local_links() -> None:
             assert (document.parent / target).resolve().exists(), (
                 f"{document.relative_to(ROOT)} -> {raw_target}"
             )
+
+
+def test_light_portfolio_diagrams_are_labeled_truthfully() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized = " ".join(readme.split())
+    diagrams = {
+        "voiceloop-capability-map-en-v1.png": (1672, 941),
+        "voiceloop-sqlite-cascade-architecture-en-v1.png": (1672, 941),
+    }
+    for name, expected_size in diagrams.items():
+        relative = f"docs/img/{name}"
+        with Image.open(ROOT / relative) as image:
+            assert image.size == expected_size
+        markdown = re.search(
+            rf"!\[([^\]]+)\]\({re.escape(relative)}\)",
+            readme,
+        )
+        assert markdown is not None and len(markdown.group(1)) >= 80
+
+    assert "product and adapter direction" in normalized
+    assert "not a claim that all three environments are deployed" in normalized
+    assert "implemented storage and verification contracts" in normalized
+    assert "remain opt-in or shadow" in normalized
+
+
+def test_safety_and_claim_documents_keep_public_boundaries_explicit() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    safety = (ROOT / "docs" / "SAFETY_EVALUATION.md").read_text(encoding="utf-8")
+    claims = (ROOT / "docs" / "CLAIMS_AND_EVIDENCE.md").read_text(encoding="utf-8")
+
+    assert "not a medical device" in readme
+    assert "has not been clinically validated" in readme
+    assert "Behavioral evaluation matrix — proposed, not scored" in safety
+    assert "Claims that are not established" in safety
+    assert "Higher levels are never inferred from lower ones" in claims
+    assert "Adaptive retrieval is better than the baseline. | Not established generally." in claims
+
+
+def test_current_public_docs_do_not_describe_the_authorship_process() -> None:
+    documents = (
+        ROOT / "README.md",
+        ROOT / "docs" / "README.md",
+        ROOT / "docs" / "PORTFOLIO_CASE_STUDY.md",
+        ROOT / "docs" / "SAFETY_EVALUATION.md",
+        ROOT / "docs" / "CLAIMS_AND_EVIDENCE.md",
+    )
+    forbidden = ("AI-assisted work", "AI-generated code", "AI-generated prose")
+    source = "\n".join(document.read_text(encoding="utf-8") for document in documents)
+    assert all(phrase not in source for phrase in forbidden)
 
 
 def test_public_context_evidence_is_committed_and_ci_generated() -> None:

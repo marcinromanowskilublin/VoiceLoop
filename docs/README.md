@@ -15,7 +15,12 @@ like current runtime behavior.
 - [Architecture invariants](ARCHITECTURE_INVARIANTS.md) — safety boundaries
   enforced by tests.
 - [Portfolio case study](PORTFOLIO_CASE_STUDY.md) — problem, product
-  hypothesis, reproducible evidence, interpretation and human/AI roles.
+  hypothesis, reproducible evidence, interpretation and remaining unknowns.
+- [Safety evaluation and claim boundaries](SAFETY_EVALUATION.md) — existing
+  controls, measurable criteria, proposed behavioral evaluations and clinical
+  claim limits.
+- [Claims and evidence](CLAIMS_AND_EVIDENCE.md) — evidence hierarchy, public
+  wording rules and release checklist.
 
 ## Context, memory and evaluation
 
@@ -36,7 +41,7 @@ like current runtime behavior.
 - [Context Evidence Pack V1](CONTEXT_EVIDENCE_RELEASE_V1.md) — reproduction,
   included artifacts, known failure and release checklist.
 - [Committed evaluation card](evaluation/context-evidence-v1/report.md) —
-  FTS/RRF5/2+2+1 metrics, observable outcomes and limitations.
+  FTS/RRF5/2+2+1/adaptive metrics, observable outcomes and limitations.
 - [Memory-axis navigation design](VECTOR_NAVIGATION_DESIGN.md) — agreed direction
   for a larger set of specialized axes, evidence requirements and stopping
   rules; separates future design from current code and human labeling duties.
@@ -59,6 +64,11 @@ These contracts exist in code but do not grant execution authority.
 
 - [Public context evidence screenshot](img/voiceloop-context-evidence.png) —
   the committed deterministic SQLite/Qdrant integration report.
+- [Time-first SQLite/cascade architecture](img/voiceloop-sqlite-cascade-architecture-en-v1.png) —
+  light diagram of canonical SQL, bounded semantic search and SQL verification.
+- [Capability map](img/voiceloop-capability-map-en-v1.png) — product direction
+  across the implemented Windows host and explicit professional/interactive
+  adapter targets.
 - [Dynamic Memory Coupling V1](img/voiceloop-dynamic-memory-coupling.svg) —
   transactional SQLite outbox, generation-fenced Qdrant points and domain-aware
   retrieval policies across Windows and RPG profiles.

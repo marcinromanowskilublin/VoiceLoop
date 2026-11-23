@@ -104,9 +104,20 @@ Finally, a proposed `remember` action starts at low risk. The real
 `awaiting_confirmation`, keeps it in the pending-confirmation map and leaves
 the instrumented handler call count at zero.
 
-## Human decisions and AI-assisted work
+## Verification and human decisions
 
-Human responsibility remains explicit:
+Mechanical checks verify bounded contracts:
+
+- Ruff verifies the declared code scope;
+- dependency audit checks the pinned runtime lock;
+- pytest covers retrieval integrity, index races, stale generations, policy
+  boundaries and confirmation-only execution;
+- the no-network evidence command executes real SQLite and local Qdrant
+  integration and preserves known failures in its report;
+- content-free trace assertions check that private query text and source IDs
+  are not written to the published telemetry shape.
+
+Some decisions deliberately remain outside automatic promotion:
 
 - define the product problem and acceptable failure cost;
 - approve axis meanings, private labels, retention and rollout criteria;
@@ -114,11 +125,9 @@ Human responsibility remains explicit:
   shadow;
 - perform target-Windows observation and publish a release.
 
-AI-assisted work includes implementation scaffolding, synthetic fixtures,
-tests, documentation and report generation. Mechanical checks—Ruff,
-dependency audit, pytest, integration evidence and content-free trace
-assertions—verify the resulting contracts. AI-generated code and prose do not
-replace private labeling or the release decision.
+See [Safety evaluation and claim boundaries](SAFETY_EVALUATION.md) and
+[Claims and evidence](CLAIMS_AND_EVIDENCE.md) for the evaluation hierarchy and
+public wording rules.
 
 ## What remains unknown
 
