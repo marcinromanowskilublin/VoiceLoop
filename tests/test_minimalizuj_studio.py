@@ -91,3 +91,25 @@ def test_local_http_panel_record_and_cross_origin_boundary(tmp_path):
     assert len(entries.json()["samples"]) == 1
     assert bad_host.status_code == 400
     assert bad_origin.status_code == 403
+
+
+def test_explicit_execution_bridge_never_runs_without_confirmation(monkeypatch):
+    calls = []
+
+    def fake_core(path, *, payload=None):
+        calls.append((path, payload))
+        if path.endswith("/commands"):
+            return {"request_id": "test-1", "status": "queued"}
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(studio, "core_request", fake_core)
+    with pytest.raises(ValueError, match="jawnego potwierdzenia"):
+        studio.execute_minimize("")
+    assert calls == []
+    accepted = studio.execute_minimize("MINIMALIZUJ")
+    assert accepted["status"] == "queued"
+    assert calls[0][1]["command_id"] == "minimize_all_windows"
+    assert calls[0][1]["allow_cloud"] is False
+    assert studio.command_status("test-1")["status"] == "succeeded"
+    with pytest.raises(ValueError, match="request_id"):
+        studio.command_status("../../other")
