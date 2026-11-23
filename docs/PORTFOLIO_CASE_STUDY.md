@@ -1,5 +1,11 @@
 # Case study: proving a local-first context boundary
 
+<img src="img/portfolio-hero.svg" alt="VoiceLoop research and engineering portfolio banner." width="100%">
+
+**Portfolio refresh (2026-11-24).** This study describes implemented engineering contracts and synthetic evidence, not a live deployment. The incremental November conversation graph has its own source and regression suite: [implementation](../listener/voiceloop/conversation_graph.py) · [tests](../tests/test_conversation_graph.py). For the shorter visual presentation, see [technical portfolio](PORTFOLIO_OVERVIEW.md).
+
+<img src="img/portfolio-system.svg" alt="Local sources, canonical data, derived retrieval and controlled execution boundary." width="100%">
+
 ## One-sentence summary
 
 VoiceLoop explores whether documents, meetings, windows and local history can

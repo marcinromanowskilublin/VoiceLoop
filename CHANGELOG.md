@@ -6,6 +6,9 @@ All notable public changes to VoiceLoop are documented here.
 
 ### Added
 
+- Portfolio-facing documentation refresh (2026-11-24): new SVG hero, architecture, incremental-graph and synthetic-evidence visuals; a shorter project landing page; clarified November graph status; and a navigable documentation index. No runtime behavior, version number or deployment status changed.
+- November 2026 incremental meeting graph: an append-only SQLite operation log with add/enrich/link/revise semantics and a separate local graph view, backed by dedicated regression tests.
+
 - Explicit document ingest, Windows project projection, SQL memory migration,
   deictic live-screen items, commitment review rows and shadow retrieval
   comparison. Runtime integrations remain opt-in and off by default.
