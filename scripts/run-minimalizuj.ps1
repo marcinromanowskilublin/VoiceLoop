@@ -22,7 +22,7 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $Root "logs") | Out-Null
     do {
         try {
-            $Args = @($Prefix) + @($ServerScript)
+            $Args = @($Prefix) + @('"' + $ServerScript + '"')
             $Proc = Start-Process -FilePath $Python -ArgumentList $Args -Wait -PassThru -WindowStyle Hidden -WorkingDirectory $Root -RedirectStandardOutput (Join-Path $Root "logs\minimalizuj.stdout.log") -RedirectStandardError (Join-Path $Root "logs\minimalizuj.stderr.log")
             Write-Output "Minimalizuj exited: $($Proc.ExitCode)"
         } catch {
