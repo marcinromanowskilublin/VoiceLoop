@@ -1647,8 +1647,14 @@ class ActionRegistry:
         except ImportError as exc:
             raise RuntimeError(f"Brak zależności Windows do minimalizacji okien: {exc}") from exc
 
-        shell = win32com.client.Dispatch("Shell.Application")
-        shell.MinimizeAll()
+        import pythoncom
+
+        pythoncom.CoInitialize()
+        try:
+            shell = win32com.client.Dispatch("Shell.Application")
+            shell.MinimizeAll()
+        finally:
+            pythoncom.CoUninitialize()
         return "Zminimalizowałem wszystkie okna.", {"mode": "minimize_all"}
 
     @staticmethod

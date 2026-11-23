@@ -269,6 +269,10 @@ def make_capture_handler(
     data_dir: Path,
 ) -> type[BaseHTTPRequestHandler]:
     store = CaptureStore(data_dir)
+    minimalizuj = None
+    if config.slug == "calibration-phrases":
+        from minimalizuj_studio import CalibrationStudio
+        minimalizuj = CalibrationStudio(store.data_dir / "minimalizuj.sqlite3")
 
     class CaptureHandler(BaseHTTPRequestHandler):
         server_version = "VoiceLoopCapture/1"
@@ -294,8 +298,18 @@ def make_capture_handler(
 
         def do_GET(self) -> None:  # noqa: N802
             path = unquote(urlparse(self.path).path)
+            if not self._local_browser():
+                return
             if path in {"/", "/index.html"}:
-                self._send(200, HTML_PATH.read_bytes(), "text/html; charset=utf-8")
+                html = PROJECT_ROOT / "scripts" / config.slug / "index.html"
+                self._send(200, (html if html.is_file() else HTML_PATH).read_bytes(), "text/html; charset=utf-8")
+                return
+            if minimalizuj is not None and path in {"/minimalizuj", "/minimalizuj/"}:
+                html = PROJECT_ROOT / "scripts" / config.slug / "minimalizuj.html"
+                self._send(200, html.read_bytes(), "text/html; charset=utf-8")
+                return
+            if minimalizuj is not None and path == "/api/minimalizuj":
+                self._json(200, minimalizuj.snapshot())
                 return
             if path == "/api/health":
                 self._json(
@@ -331,7 +345,21 @@ def make_capture_handler(
                 return
             self._json(404, {"ok": False, "error": "Nie znaleziono."})
 
+        def _local_browser(self) -> bool:
+            host = self.headers.get("Host", "")
+            origin = self.headers.get("Origin", "")
+            allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+            if host not in allowed:
+                self._json(400, {"ok": False, "error": "Invalid Host"})
+                return False
+            if origin and origin != f"http://{host}":
+                self._json(403, {"ok": False, "error": "Cross-origin denied"})
+                return False
+            return True
+
         def do_POST(self) -> None:  # noqa: N802
+            if not self._local_browser():
+                return
             path = urlparse(self.path).path
             try:
                 length = int(self.headers.get("Content-Length") or "0")
@@ -343,6 +371,19 @@ def make_capture_handler(
                 return
             body = self.rfile.read(length) if length else b""
             try:
+                if minimalizuj is not None and path in {"/api/minimalizuj", "/api/minimalizuj/approve", "/api/minimalizuj/revert"}:
+                    if length > 16384:
+                        self._json(413, {"ok": False, "error": "Zbyt duża próbka"})
+                        return
+                    data = json.loads(body.decode("utf-8") or "{}")
+                    if not isinstance(data, dict):
+                        raise ValueError("Expected JSON object")
+                    if path == "/api/minimalizuj":
+                        result = minimalizuj.save(data, store.data_dir)
+                    else:
+                        result = minimalizuj.change_alias(str(data.get("id") or ""), path.endswith("approve"))
+                    self._json(200, result)
+                    return
                 if path == "/api/record":
                     metadata = decode_recording_metadata(
                         self.headers.get("X-VoiceLoop-Metadata", "")
