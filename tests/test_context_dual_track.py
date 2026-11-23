@@ -168,14 +168,13 @@ async def test_dual_track_runs_parallel_tracks_and_persists_content_free_trace(
         qdrant=QdrantStub(hits),  # type: ignore[arg-type]
     )
 
+    observed = DAY + timedelta(days=1)
     result = await runner.run(
         "Co ustaliliśmy wczoraj?",
         request_id="private-request-id",
-        now=DAY + timedelta(days=1),
+        now=observed,
     )
-    stored = await store.list_context_dual_track_traces(
-        now=DAY + timedelta(days=1),
-    )
+    stored = await store.list_context_dual_track_traces(now=observed)
 
     assert result.trace.verdict == "agreement"
     assert result.trace.baseline_axes_attempted == (
@@ -191,9 +190,7 @@ async def test_dual_track_runs_parallel_tracks_and_persists_content_free_trace(
     assert "private-request-id" not in serialized
     assert "source-0" not in serialized
     assert "Co ustaliliśmy" not in serialized
-    summary = await store.context_dual_track_summary(
-        now=DAY + timedelta(days=1),
-    )
+    summary = await store.context_dual_track_summary(now=observed)
     assert summary["sample_count"] == 1
     assert summary["verdict_counts"] == {"agreement": 1}
     assert summary["time_precision_counts"] == {"exact": 1}

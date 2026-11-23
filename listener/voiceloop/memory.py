@@ -47,6 +47,14 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _as_of_iso(now: datetime | None = None) -> str:
+    if now is None:
+        return _now_iso()
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(UTC).isoformat()
+
+
 @dataclass(frozen=True)
 class VectorMemoryHit:
     source: str
@@ -3460,7 +3468,7 @@ class MemoryStore:
         from .context.dual_track import DualTrackTraceV1
 
         safe_limit = max(1, min(int(limit), 200))
-        cutoff = self._aware_iso(now or datetime.now(UTC))
+        cutoff = _as_of_iso(now)
 
         def _list() -> list[sqlite3.Row]:
             with self._connect() as connection:
@@ -3555,7 +3563,7 @@ class MemoryStore:
     ) -> dict[str, object]:
         """Aggregate only counters and durations for the read-only UI."""
 
-        cutoff = self._aware_iso(now or datetime.now(UTC))
+        cutoff = _as_of_iso(now)
 
         def _summary() -> dict[str, object]:
             with self._connect() as connection:
