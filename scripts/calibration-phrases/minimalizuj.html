@@ -36,7 +36,8 @@ button.main{background:var(--mint);color:#07352c;border-color:var(--mint)}button
 <label>Co powinien zrobić system?</label><input readonly value="Minimalizuj wszystkie okna">
 <div class="actions"><button id="save" class="main">Zapisz różnicę</button><button id="reset">Nowa próba</button></div>
 <div id="explanation">Brak porównania.</div></section></div>
-<section class="card"><h2>03 · Historia i poprawki</h2>
+<section class="card"><h2>03 · Test działania Windows</h2><p>To nie jest kalibracja: ten przycisk rzeczywiście zminimalizuje okna przez oryginalny executor VoiceLoop na porcie 8765. Wymaga uruchomionego rdzenia.</p><div class="actions"><button id="execute">Wykonaj minimalizację — potwierdź</button></div><p id="execution" role="status">Oczekiwanie na wyraźne polecenie.</p></section>
+<section class="card"><h2>04 · Historia i poprawki</h2>
 <p>Próbki zapisują się w lokalnym SQLite. Zatwierdzony alias dotyczy tego studia; nie zmienia automatycznie produkcyjnego routera.</p>
 <div id="history">Ładowanie…</div></section>
 </main><script>
@@ -76,6 +77,17 @@ document.addEventListener("keydown",e=>{if(e.code!=="Space"||e.repeat||e.ctrlKey
 if(e.target.isContentEditable||["INPUT","TEXTAREA","BUTTON","SELECT"].includes(e.target.tagName))return;e.preventDefault();if(rec)stop();else if(!busy)start()});
 $("expected").onchange=()=>{$("corrected").value=$("expected").value};
 $("reset").onclick=()=>{$("heard").value="";$("corrected").value=$("expected").value;$("explanation").textContent="Nowa próba";file=""};
+$("execute").onclick=async()=>{if(!window.confirm("Zminimalizować wszystkie okna Windows TERAZ?"))return;
+$("execute").disabled=true;$("execution").textContent="Wysyłam do rdzenia VoiceLoop…";
+try{const r=await api("/api/minimalizuj/execute","POST",{confirm:"MINIMALIZUJ"});
+$("execution").textContent="Polecenie: "+r.status+". Sprawdzam status executora…";
+const id=r.request_id;if(!id)throw Error("Brak request_id");
+for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,750));
+const x=await api("/api/minimalizuj/status?request_id="+encodeURIComponent(id));
+$("execution").textContent="Status Windows / executor: "+x.status;
+if(["succeeded","failed","cancelled","rejected","awaiting_confirmation"].includes(x.status))break}
+}catch(e){$("execution").textContent="Nie udało się wykonać: "+e.message}
+finally{$("execute").disabled=false}};
 $("save").onclick=async()=>{try{const x=await api("/api/minimalizuj","POST",{expected:$("expected").value,heard:$("heard").value,corrected:$("corrected").value,expected_action:"minimize_all_windows",audio_file:file});
 $("explanation").textContent=x.analysis.explanation+"\nRodzaj: "+x.analysis.kind+"\nRouter: "+x.detected_action+"\nZmiany: "+x.analysis.changes.map(y=>y.operation+" ["+y.recognized+"] → ["+y.correct+"]").join("; ")+"\nAlias: "+x.alias_state;await reload()}catch(e){status("Błąd zapisu: "+e.message)}};
 async function reload(){const h=$("history");try{const x=await api("/api/minimalizuj");h.replaceChildren();if(!x.samples.length){h.textContent="Brak próbek.";return}
