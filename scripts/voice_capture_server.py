@@ -301,9 +301,7 @@ def make_capture_handler(
             if not self._local_browser():
                 return
             if path in {"/", "/index.html"}:
-                html = PROJECT_ROOT / "scripts" / config.slug / "index.html"
-                page = html if html.is_file() else HTML_PATH
-                self._send(200, page.read_bytes(), "text/html; charset=utf-8")
+                self._send(200, HTML_PATH.read_bytes(), "text/html; charset=utf-8")
                 return
             if minimalizuj is not None and path in {"/minimalizuj", "/minimalizuj/"}:
                 html = PROJECT_ROOT / "scripts" / config.slug / "minimalizuj.html"
