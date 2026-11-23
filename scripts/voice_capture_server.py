@@ -310,6 +310,18 @@ def make_capture_handler(
             if minimalizuj is not None and path == "/api/minimalizuj":
                 self._json(200, minimalizuj.snapshot())
                 return
+            if minimalizuj is not None and path == "/api/minimalizuj/status":
+                from minimalizuj_studio import command_status
+
+                query = urlparse(self.path).query
+                from urllib.parse import parse_qs
+
+                request_id = parse_qs(query).get("request_id", [""])[0]
+                try:
+                    self._json(200, command_status(request_id))
+                except ValueError as exc:
+                    self._json(503, {"ok": False, "error": str(exc)})
+                return
             if path == "/api/health":
                 self._json(
                     200,
@@ -377,6 +389,7 @@ def make_capture_handler(
                     "/api/minimalizuj",
                     "/api/minimalizuj/approve",
                     "/api/minimalizuj/revert",
+                    "/api/minimalizuj/execute",
                 }
                 if minimalizuj is not None and path in calibration_paths:
                     if length > 16384:
@@ -387,6 +400,10 @@ def make_capture_handler(
                         raise ValueError("Expected JSON object")
                     if path == "/api/minimalizuj":
                         result = minimalizuj.save(data, store.data_dir)
+                    elif path == "/api/minimalizuj/execute":
+                        from minimalizuj_studio import execute_minimize
+
+                        result = execute_minimize(str(data.get("confirm") or ""))
                     else:
                         identifier = str(data.get("id") or "")
                         result = minimalizuj.change_alias(identifier, path.endswith("approve"))
