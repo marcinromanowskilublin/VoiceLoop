@@ -435,7 +435,7 @@ async def test_dual_track_timeout_preserves_completed_track_and_cancels_other(
             if len(documents) == 5:
                 return await super().embed_queries(documents)
             try:
-                await asyncio.sleep(1)
+                await asyncio.sleep(30)
             finally:
                 cascade_cancelled.set()
             return await super().embed_queries(documents)
@@ -444,7 +444,10 @@ async def test_dual_track_timeout_preserves_completed_track_and_cancels_other(
         memory=store,
         embeddings=PartialEmbeddings(),  # type: ignore[arg-type]
         qdrant=QdrantStub(hits),  # type: ignore[arg-type]
-        timeout_seconds=0.1,
+        # 0.1 s is the runner floor. On the Windows CI host the fast track
+        # is still inside SQLite verification when that floor expires, so
+        # both tasks are cancelled and baseline_count stays 0.
+        timeout_seconds=2.0,
     )
 
     result = await runner.run(
