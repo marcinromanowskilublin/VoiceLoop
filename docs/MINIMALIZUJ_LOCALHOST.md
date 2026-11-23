@@ -15,7 +15,7 @@ Health: http://127.0.0.1:8792/api/health
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-minimalizuj-autostart.ps1
 
 Powstanie zadanie użytkownika "VoiceLoop Minimalizuj" (bez uprawnień SYSTEM).
-Watchdog wznawia proces po jego awarii z pięciosekundową przerwą.
+Watchdog sprawdza /api/health co 10 sekund, restartuje własny proces po trzech kolejnych błędach lub awarii i zachowuje pięciosekundową przerwę przed ponownym uruchomieniem.
 Nie działa przed logowaniem. Aby wyłączyć autostart:
 
     Unregister-ScheduledTask -TaskName "VoiceLoop Minimalizuj" -Confirm:$false
