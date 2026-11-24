@@ -1,3 +1,26 @@
+# Current architecture — November 2026 status addendum
+
+**Verified repository revision:** `0b5900a` (merged 2026-11-23). **Documented software version:** 0.3.0. This addendum describes newly inspected code; it does not change runtime flags, promote an experiment, or imply a new release. The detailed September baseline below remains a useful subsystem reference but is **not** a complete inventory of later additions.
+
+<img src="img/portfolio-system.svg" alt="Current implemented local context and separate policy-controlled action paths." width="100%">
+
+## Added since the September baseline
+
+- **Incremental conversation graph:** `listener/voiceloop/conversation_graph.py` stores an event log and folds `add`, `enrich`, `link` and `revise` operations into a graph view, preserving node ID, position and revision history. It has dedicated regression tests in `tests/test_conversation_graph.py`, API endpoints under `/api/v1/conversation-graph/{meeting_id}` and the local `/graph` panel. The graph is a heuristically constructed view, not a clinically validated or semantically benchmarked understanding engine.
+- **Dynamic Memory Coupling V1:** transactional `context_index_state` and `context_index_outbox`, desired/applied generations, lease/claim tokens, embedding fingerprint checks and post-tombstone fences. The adaptive retriever and domain policy remain research / shadow-only for serving selection. See [engineering details](DYNAMIC_MEMORY_COUPLING_V1.md).
+- **Public offline evidence pack:** real SQLite and local `qdrant-client` engine, synthetic five-record queries, a preserved RRF5 topic miss, and action confirmation with zero handler calls. Source revision for the **committed reference report** is `372b642` (2026-11-17), not the current repository head. CI regenerates an artifact per run; do not treat the committed report as latest CI output. See [results](evaluation/context-evidence-v1/report.md) and [claim limits](CLAIMS_AND_EVIDENCE.md).
+- **Verification:** the newest checked main-branch GitHub Actions run at the review point completed successfully on `0b5900a`; this is a CI status, not a local live-audio or Windows-desktop acceptance test.
+
+### Status legend
+
+**Active** means the runtime code path exists and may be used under documented defaults. **Opt-in** means an operator must enable it. **Shadow** means code may measure or propose but cannot promote itself into serving or execution. **Designed** means a contract or plan, not a deployed integration.
+
+The architecture remains **planner → local validation → registered allowlist → risk policy → executor**. No vector search result or graph observation grants execution authority.
+
+---
+
+## Historical technical baseline (September 2026)
+
 # VoiceLoop — aktualny baseline architektury
 
 **Wersja:** 0.3.0

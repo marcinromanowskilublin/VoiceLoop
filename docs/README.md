@@ -1,107 +1,54 @@
-# VoiceLoop documentation
+# Documentation · VoiceLoop
 
-Public documentation for VoiceLoop 0.3.0.
+**An index for reading the system, not a second README.** The [portfolio home](../README.md) introduces the project; this page routes each question to the evidence or implementation that answers it. Source revision reviewed for the portfolio: `0b5900a` (2026-11-23). Public version: **0.3.0**, not a new release.
 
-The source of truth is the current code under `listener/voiceloop/`. Documents
-below are grouped by role so historical handoffs and experiments do not look
-like current runtime behavior.
+<img src="img/portfolio-system.svg" alt="VoiceLoop system overview: inputs, canonical SQLite, retrieval verification, and separate execution policy." width="100%">
 
-## Start here
+## Choose a reading path
 
-- [Repository README](../README.md) — context-layer overview, truthful system
-  diagrams, current status and quick start.
-- [Current architecture](ARCHITECTURE_CURRENT.md) — active, experimental and
-  planned components mapped to code.
-- [Architecture invariants](ARCHITECTURE_INVARIANTS.md) — safety boundaries
-  enforced by tests.
-- [Portfolio case study](PORTFOLIO_CASE_STUDY.md) — problem, product
-  hypothesis, reproducible evidence, interpretation and remaining unknowns.
-- [Safety evaluation and claim boundaries](SAFETY_EVALUATION.md) — existing
-  controls, measurable criteria, proposed behavioral evaluations and clinical
-  claim limits.
-- [Claims and evidence](CLAIMS_AND_EVIDENCE.md) — evidence hierarchy, public
-  wording rules and release checklist.
+### I want to understand the product in five minutes
+- [Portfolio case study](PORTFOLIO_CASE_STUDY.md) — problem, engineering decisions, evaluation and limits.
+- [Incremental conversation graph](../listener/voiceloop/conversation_graph.py) — current implementation of append/enrich/link/revise.
+- [Graph view](../panel/graph.html) — interactive local front end (requires local running app).
+- [Capability / adapter direction](img/voiceloop-capability-map-en-v1.png) — labeled future possibilities, not deployed capabilities.
 
-## Context, memory and evaluation
+### I want to review the architecture
+- [Current architecture and November addendum](ARCHITECTURE_CURRENT.md) — source boundaries, active/opt-in/shadow status.
+- [Architecture invariants](ARCHITECTURE_INVARIANTS.md) — enforceable limits of model authority.
+- [Context Timeline](CONTEXT_TIMELINE_V1.md) — source time, provenance and retrieval.
+- [Dynamic Memory Coupling](DYNAMIC_MEMORY_COUPLING_V1.md) — transactional index outbox and retrieval policy.
+- [Memory-axis navigation](VECTOR_NAVIGATION_DESIGN.md) — a proposed direction, not a live feature.
+- [Threshold Guard](THRESHOLD_GUARD.md) — threshold diagnostics and limits.
 
-- [Dynamic Memory Coupling V1](DYNAMIC_MEMORY_COUPLING_V1.md) — engineering
-  status, transactional SQL→Qdrant index state, adaptive shadow policy,
-  rollout gates and a Windows test checklist.
-- [Context Timeline V1](CONTEXT_TIMELINE_V1.md) — time-first local context,
-  explicit adapters, SQL-verified semantic candidates, CLI operations and
-  rollout limits. Includes legacy-index compatibility requirements.
-- [Cascade 2+2+1 and security boundary](KASKADA_BEZPIECZENSTWO.md) — shadow
-  measurer on the five existing axes, the HTTP, file, search and retention
-  boundaries, and the decisions only a person can make.
-- [Dual-track cascade prototype](DUAL_TRACK_CASCADE_PROTOTYPE.md) — isolated
-  episode collection, explicit idempotent indexer, parallel RRF5/2+2+1,
-  deterministic arbiter, content-free traces and read-only demonstrator.
-- [Manual human contribution](DO_WYKONANIA_PRZEZ_CZLOWIEKA.md) — decisions,
-  private labeling and operator steps that cannot be completed by code.
-- [Context Evidence Pack V1](CONTEXT_EVIDENCE_RELEASE_V1.md) — reproduction,
-  included artifacts, known failure and release checklist.
-- [Committed evaluation card](evaluation/context-evidence-v1/report.md) —
-  FTS/RRF5/2+2+1/adaptive metrics, observable outcomes and limitations.
-- [Memory-axis navigation design](VECTOR_NAVIGATION_DESIGN.md) — agreed direction
-  for a larger set of specialized axes, evidence requirements and stopping
-  rules; separates future design from current code and human labeling duties.
-- [Threshold Guard](THRESHOLD_GUARD.md) — measured vector thresholds and
-  fail-closed behavior.
-- [Safe user corpus](SAFE_USER_CORPUS.md) — local corpus, privacy gates,
-  holdouts and controlled remote evaluation.
+### I want reproducible evidence, not feature claims
+- [Committed synthetic results](evaluation/context-evidence-v1/report.md) — five-record fixture and known RRF5 miss.
+- [Evidence pack reproduction](CONTEXT_EVIDENCE_RELEASE_V1.md) — exact command and inputs.
+- [Claims and evidence register](CLAIMS_AND_EVIDENCE.md) — implemented vs. tested vs. validated.
+- [Safety evaluation](SAFETY_EVALUATION.md) — bounded engineering controls, proposed behavioral studies.
+- [Safe user corpus](SAFE_USER_CORPUS.md) — private approval and holdout protocol.
 
-## Experimental contracts
+### I want to inspect experimental boundaries
+- [Dual-track prototype](DUAL_TRACK_CASCADE_PROTOTYPE.md) · [Cascade safety](KASKADA_BEZPIECZENSTWO.md)
+- [Commitment Layer](COMMITMENT_LAYER.md) · [Evidence schema](EVIDENCE_V1.md)
+- [Situation State](SITUATION_STATE_V1.md) · [State Proposal](STATE_PROPOSAL_V1.md)
+- [Required human decisions](DO_WYKONANIA_PRZEZ_CZLOWIEKA.md)
 
-These contracts exist in code but do not grant execution authority.
+## Visual library
 
-- [Commitment Layer](COMMITMENT_LAYER.md) — requests, promises, boundaries and
-  review states.
-- [EvidenceItem V1](EVIDENCE_V1.md) — provenance and trust classes.
-- [SituationState V1](SITUATION_STATE_V1.md) — read-only event ledger.
-- [StateProposal V1](STATE_PROPOSAL_V1.md) — locally governed state proposals.
+<img src="img/portfolio-conversation.svg" alt="Append-only graph operations with two diarized speakers." width="100%">
 
-## Visual reference
+<img src="img/portfolio-evidence.svg" alt="Synthetic retrieval comparison: five records, not a model-quality benchmark." width="100%">
 
-- [Public context evidence screenshot](img/voiceloop-context-evidence.png) —
-  the committed deterministic SQLite/Qdrant integration report.
-- [Time-first SQLite/cascade architecture](img/voiceloop-sqlite-cascade-architecture-en-v1.png) —
-  light diagram of canonical SQL, bounded semantic search and SQL verification.
-- [Capability map](img/voiceloop-capability-map-en-v1.png) — product direction
-  across the implemented Windows host and explicit professional/interactive
-  adapter targets.
-- [Dynamic Memory Coupling V1](img/voiceloop-dynamic-memory-coupling.svg) —
-  transactional SQLite outbox, generation-fenced Qdrant points and domain-aware
-  retrieval policies across Windows and RPG profiles.
-- [Local context dual-track flow](img/voiceloop-dual-track-flow.svg) — local
-  adapters, canonical SQL time, parallel retrieval and shadow evidence.
-- [Arbiter outcomes](img/voiceloop-arbiter-outcomes.svg) — deterministic
-  agreement, conflict and uncertain behavior.
-- [Time certainty boundary](img/voiceloop-time-certainty.svg) — bounded,
-  approximate and missing time remain distinct states.
-- [Context workspace — user view](img/voiceloop-context-workspace.svg)
-- [Live context workspace](img/voiceloop-panel.png)
-- [System architecture](img/voiceloop-system-architecture.svg)
-- [Memory and context architecture](img/voiceloop-memory-architecture.svg)
-- [Safe execution model](img/voiceloop-safe-execution.svg)
+More diagrams: [context workspace](img/voiceloop-context-workspace.svg) · [execution boundary](img/voiceloop-safe-execution.svg) · [dual-track](img/voiceloop-dual-track-flow.svg) · [time certainty](img/voiceloop-time-certainty.svg) · [arbiter](img/voiceloop-arbiter-outcomes.svg) · [memory architecture](img/voiceloop-memory-architecture.svg).
 
-## Optional integration directories
+## Repository map
 
-The core lives in `listener/voiceloop/`. The directories below are tracked
-because the optional stack depends on them, but none of them is required to run
-the core, and none of them can bypass the executor or local policy.
+- `listener/voiceloop/` — source of runtime behavior
+- `tests/` — regression checks and safety invariants
+- `panel/` — localhost front end, including incremental graph view
+- `vectorscope/` — read-only vector inspection and threshold experiments
+- `scripts/` — explicit setup, evaluation and Windows utilities
+- `voiceattack/`, `uivision/`, `n8n/` — optional external automation adapters
+- `docs/archive/` — historical documentation; **not** the current contract
 
-- [`panel/`](../panel/) — the local control panel served by the FastAPI core.
-- [`vectorscope/`](../vectorscope/README.md) — read-only Qdrant inspection lab
-  and threshold measurements; it never writes to memory.
-- [`voiceattack/`](../voiceattack/INSTRUKCJA.md) — VoiceAttack profiles that
-  forward configured commands to the core as the `voiceattack` source.
-- [`uivision/`](../uivision/) — UI.Vision macros used by the confirmed
-  `run_uivision_macro` action.
-- [`n8n/`](../n8n/) — exact-phrase webhook workflow for the optional n8n
-  fallback (`n8n_enabled=false` by default).
-
-## Historical material
-
-Historical plans, handoffs and point-in-time audits are not part of the current
-architecture contract. They live under [`archive/`](archive/README.md) only when
-retaining them is useful for project archaeology.
+**Maintenance rule:** link to the canonical source, keep synthetic numbers identified, and do not turn shadow modules into deployed features by changing wording. No code paths or runtime flags are altered by this documentation refresh.
