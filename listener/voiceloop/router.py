@@ -1157,6 +1157,7 @@ def _is_minimize_all_windows_command(text: str) -> bool:
         (
             "minimize_all_windows",
             "minimize all",
+            "minimalizuj",
             "zminimalizuj wszystkie",
             "zminimalizuj wszystkie okna",
             "schowaj wszystkie okna",

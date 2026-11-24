@@ -1,0 +1,99 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VoiceLoop — Minimalizuj</title>
+<style>
+:root{color-scheme:dark;--bg:#071d20;--surface:#102e2e;--border:#376260;--mint:#6ee6b5;--text:#f6fbfa;--muted:#b1caca}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% -10%,#1e5a50,transparent 58%),var(--bg);color:var(--text);font:17px/1.5 "Segoe UI",system-ui,sans-serif}
+main{max-width:1100px;margin:auto;padding:38px 22px 90px}
+small{color:var(--muted)}h1{font-size:clamp(44px,7vw,82px);line-height:1;letter-spacing:-.055em;margin:30px 0 12px}h2{font-size:24px;margin:0 0 12px}
+p{color:var(--muted)}.kicker{color:var(--mint);letter-spacing:.13em;font-size:13px;font-weight:800}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:var(--surface);border:1px solid var(--border);border-radius:22px;padding:25px;margin-top:20px}
+label{display:block;color:var(--muted);font-size:13px;font-weight:700;margin:17px 0 6px}
+input:not([type=checkbox]){width:100%;padding:13px;border:1px solid var(--border);border-radius:12px;background:#071f22;color:white;font:inherit}
+button{border:1px solid var(--border);border-radius:12px;background:#205047;color:white;padding:13px 17px;cursor:pointer;font:700 16px "Segoe UI",sans-serif}
+button.main{background:var(--mint);color:#07352c;border-color:var(--mint)}button:disabled{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}
+#status{min-height:50px;font-weight:700;color:var(--mint)}#meter{height:10px;background:#244c4b;border-radius:10px;overflow:hidden}
+#fill{height:100%;width:0%;background:var(--mint);transition:width .1s}
+#explanation{font-size:14px;white-space:pre-wrap;color:#cfeee4}
+.item{border-top:1px solid var(--border);padding:14px 0;font-size:14px}
+.item button{font-size:13px;padding:7px 10px;margin-top:8px}
+.warning{color:#f1cd98;font-size:13px}
+@media(max-width:760px){.layout{grid-template-columns:1fr}main{padding:24px 14px}h1{font-size:48px}}
+</style></head><body><main>
+<div class="kicker">VOICELOOP / LOKALNA KALIBRACJA</div><h1>Minimalizuj.<br><span style="color:var(--mint)">Powiedz. Popraw.</span></h1>
+<p>Naciśnij Spację, powiedz komendę i naciśnij Spację ponownie. Kalibracja niczego nie minimalizuje automatycznie.</p>
+<div class="layout">
+<section class="card"><h2>01 · Nagranie</h2><label for="expected">Fraza, którą chcesz wypowiedzieć</label><input id="expected" maxlength="300" value="Minimalizuj">
+<div class="actions"><button class="main" id="start">● Rozpocznij — Spacja</button><button id="stop" disabled>■ Zatrzymaj</button><button id="finish">Zakończ kalibrację</button></div>
+<div id="meter"><div id="fill"></div></div><p id="status" role="status" aria-live="polite">Gotowy do nagrania.</p>
+<audio controls id="audio" hidden style="width:100%"></audio>
+<label><input id="stt" type="checkbox"> Opcjonalny STT przeglądarki</label>
+<p class="warning">STT przeglądarkowe może wysłać głos do dostawcy zewnętrznego. Domyślnie jest wyłączone. Nagranie lokalne nie wymaga STT.</p>
+</section>
+<section class="card"><h2>02 · Analiza błędu</h2>
+<label for="heard">Co zostało rozpoznane?</label><input id="heard" maxlength="300" placeholder="Wynik STT albo wpisz ręcznie">
+<label for="corrected">Co rzeczywiście powiedziałeś?</label><input id="corrected" maxlength="300" value="Minimalizuj">
+<label>Co powinien zrobić system?</label><input readonly value="Minimalizuj wszystkie okna">
+<div class="actions"><button id="save" class="main">Zapisz różnicę</button><button id="reset">Nowa próba</button></div>
+<div id="explanation">Brak porównania.</div></section></div>
+<section class="card"><h2>03 · Test działania Windows</h2><p>To nie jest kalibracja: ten przycisk rzeczywiście zminimalizuje okna przez oryginalny executor VoiceLoop na porcie 8765. Wymaga uruchomionego rdzenia.</p><div class="actions"><button id="execute">Wykonaj minimalizację — potwierdź</button></div><p id="execution" role="status">Oczekiwanie na wyraźne polecenie.</p></section>
+<section class="card"><h2>04 · Historia i poprawki</h2>
+<p>Próbki zapisują się w lokalnym SQLite. Zatwierdzony alias dotyczy tego studia; nie zmienia automatycznie produkcyjnego routera.</p>
+<div id="history">Ładowanie…</div></section>
+</main><script>
+const $=id=>document.getElementById(id);
+let rec=null,stream=null,context=null,timer=null,parts=[],file="",objectURL="",started=0,stopping=false,busy=false,recognition=null;
+function status(t){$("status").textContent=t}
+function buttons(active){$("start").disabled=active||busy;$("stop").disabled=!active||busy}
+function cleanup(){if(timer)clearInterval(timer);timer=null;if(context){context.close().catch(()=>{});context=null}if(stream){stream.getTracks().forEach(x=>x.stop());stream=null}$("fill").style.width="0%"}
+function encodeMeta(m){const bytes=new TextEncoder().encode(JSON.stringify(m));let s="";for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replaceAll("+","-").replaceAll("/","_").replace(/=+$/,"")}
+async function api(path,method="GET",body){const r=await fetch(path,{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"HTTP "+r.status);return d}
+async function start(){
+if(rec||busy)return;
+try{
+stream=await navigator.mediaDevices.getUserMedia({audio:true});
+const types=["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus"];const mime=types.find(t=>MediaRecorder.isTypeSupported(t));
+rec=mime?new MediaRecorder(stream,{mimeType:mime}):new MediaRecorder(stream);parts=[];stopping=false;file="";
+rec.ondataavailable=e=>{if(e.data.size)parts.push(e.data)};
+rec.onstop=async()=>{busy=true;buttons(false);try{
+const blob=new Blob(parts,{type:rec.mimeType||"audio/webm"});if(blob.size<64)throw Error("Puste nagranie.");
+const raw=$("expected").value.trim()||"Minimalizuj";
+const headers={"Content-Type":blob.type,"X-VoiceLoop-Metadata":encodeMeta({id:"minimalizuj",text:raw,family:"okna",label:"minimalizuj",ext:blob.type.includes("ogg")?"ogg":"webm",duration_ms:Date.now()-started})};
+const response=await fetch("/api/record",{method:"POST",headers,body:blob});const data=await response.json();
+if(!response.ok||!data.saved)throw Error(data.error||"Nie zapisano nagrania.");
+file=data.take.file;
+if(objectURL)URL.revokeObjectURL(objectURL);objectURL=URL.createObjectURL(blob);$("audio").src=objectURL;$("audio").hidden=false;
+status("Zapisano "+file+". Uzupełnij transkrypcję i zapisz porównanie.");
+}catch(e){status("Błąd: "+e.message)}finally{rec=null;busy=false;cleanup();buttons(false)}};
+rec.start(250);started=Date.now();buttons(true);status("Nagrywam. Spacja zatrzymuje.");
+context=new AudioContext();let source=context.createMediaStreamSource(stream);let analyser=context.createAnalyser();source.connect(analyser);analyser.fftSize=1024;let buf=new Float32Array(1024);
+timer=setInterval(()=>{analyser.getFloatTimeDomainData(buf);let sum=0;for(let v of buf)sum+=v*v;$("fill").style.width=Math.min(100,Math.round(Math.sqrt(sum/buf.length)*950))+"%"},90);
+if($("stt").checked){const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(Speech){recognition=new Speech();recognition.lang="pl-PL";recognition.onresult=e=>{$("heard").value=e.results[e.results.length-1][0].transcript};recognition.onerror=e=>status("STT: "+e.error+" — możesz wpisać tekst ręcznie.");try{recognition.start()}catch(e){status("STT niedostępne: "+e.message)}}else status("Przeglądarka nie udostępnia STT. Wpisz transkrypcję ręcznie.")}
+}catch(e){cleanup();rec=null;buttons(false);status("Błąd mikrofonu: "+e.message)}
+}
+function stop(){if(!rec||stopping)return;stopping=true;try{rec.stop()}catch(e){status("Błąd: "+e.message)}if(recognition){try{recognition.stop()}catch{}recognition=null}}
+$("start").onclick=start;$("stop").onclick=stop;$("finish").onclick=()=>{if(rec)stop();status("Sesja zakończona. Zapisz ostatnią różnicę, jeśli jeszcze tego nie zrobiłeś.")};
+document.addEventListener("keydown",e=>{if(e.code!=="Space"||e.repeat||e.ctrlKey||e.altKey||e.metaKey)return;
+if(e.target.isContentEditable||["INPUT","TEXTAREA","BUTTON","SELECT"].includes(e.target.tagName))return;e.preventDefault();if(rec)stop();else if(!busy)start()});
+$("expected").onchange=()=>{$("corrected").value=$("expected").value};
+$("reset").onclick=()=>{$("heard").value="";$("corrected").value=$("expected").value;$("explanation").textContent="Nowa próba";file=""};
+$("execute").onclick=async()=>{if(!window.confirm("Zminimalizować wszystkie okna Windows TERAZ?"))return;
+$("execute").disabled=true;$("execution").textContent="Wysyłam do rdzenia VoiceLoop…";
+try{const r=await api("/api/minimalizuj/execute","POST",{confirm:"MINIMALIZUJ"});
+$("execution").textContent="Polecenie: "+r.status+". Sprawdzam status executora…";
+const id=r.request_id;if(!id)throw Error("Brak request_id");
+for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,750));
+const x=await api("/api/minimalizuj/status?request_id="+encodeURIComponent(id));
+$("execution").textContent="Status Windows / executor: "+x.status;
+if(["succeeded","failed","cancelled","rejected","awaiting_confirmation"].includes(x.status))break}
+}catch(e){$("execution").textContent="Nie udało się wykonać: "+e.message}
+finally{$("execute").disabled=false}};
+$("save").onclick=async()=>{try{const x=await api("/api/minimalizuj","POST",{expected:$("expected").value,heard:$("heard").value,corrected:$("corrected").value,expected_action:"minimize_all_windows",audio_file:file});
+$("explanation").textContent=x.analysis.explanation+"\nRodzaj: "+x.analysis.kind+"\nRouter: "+x.detected_action+"\nZmiany: "+x.analysis.changes.map(y=>y.operation+" ["+y.recognized+"] → ["+y.correct+"]").join("; ")+"\nAlias: "+x.alias_state;await reload()}catch(e){status("Błąd zapisu: "+e.message)}};
+async function reload(){const h=$("history");try{const x=await api("/api/minimalizuj");h.replaceChildren();if(!x.samples.length){h.textContent="Brak próbek.";return}
+for(const sample of x.samples){const div=document.createElement("div");div.className="item";
+const t=document.createElement("div");t.textContent=sample.expected+" → "+(sample.heard||"(brak STT)")+" → "+sample.corrected+" | "+sample.kind+" | "+sample.alias_state;div.append(t);
+const d=document.createElement("small");d.textContent=sample.explanation;div.append(d);
+if(["proposed","approved"].includes(sample.alias_state)){const b=document.createElement("button");b.textContent=sample.alias_state==="approved"?"Cofnij alias":"Zatwierdź alias";b.onclick=async()=>{try{await api(sample.alias_state==="approved"?"/api/minimalizuj/revert":"/api/minimalizuj/approve","POST",{id:sample.id});await reload()}catch(e){status("Błąd: "+e.message)}};div.append(b)}h.append(div)}}catch(e){h.textContent="Nie można wczytać historii: "+e.message}}
+reload();buttons(false);
+</script></body></html>
