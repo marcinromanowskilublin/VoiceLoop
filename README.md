@@ -148,6 +148,21 @@ Run regression checks from `listener/` (after installing the pinned dev dependen
 
 The CI workflow also runs a dependency audit and publishes a synthetic evidence artifact. [**CI workflow**](.github/workflows/ci.yml) · [**Full setup, optional tools & docs**](docs/README.md)
 
+## Ownership and license
+
+VoiceLoop is Marcin Romanowski's original project. Copyright in the original
+project code, documentation, architecture descriptions, and project-created
+diagrams belongs to Marcin Romanowski unless a file or the project history
+identifies another rightsholder. Public availability does not transfer that
+ownership.
+
+The covered work is licensed under [GNU AGPL-3.0-only](LICENSE). Dependencies,
+vendored libraries, product names, and contributor-owned material retain their
+separate rights and terms. See the [copyright notice](NOTICE.md),
+[third-party notices](THIRD_PARTY_NOTICES.md),
+[provenance record](docs/PROVENANCE.md), and
+[contribution policy](CONTRIBUTING.md).
+
 ## Project, not clinical software
 
 Created by **Marcin Romanowski**, psychiatrist and software builder. Clinical experience informs questions about ambiguity, consent, interruption and human oversight; it does **not** validate an AI system for medical use. VoiceLoop is **not a medical device** and **has not been clinically validated**. It does not claim diagnostic, therapeutic or crisis-response effectiveness.
