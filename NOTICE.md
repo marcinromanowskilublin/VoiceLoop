@@ -2,15 +2,33 @@
 
 Copyright (c) 2026 Marcin Romanowski (`marcinromanowskilublin`).
 
-Unless a file states otherwise, copyright in the original VoiceLoop source
-code, implementation, architecture documentation, and architecture diagrams
-is held by Marcin Romanowski. Publishing the repository does not transfer that
-copyright ownership.
+VoiceLoop is Marcin Romanowski's original project. Unless a file or the project
+history identifies another rightsholder, Marcin Romanowski owns the copyright
+in the original VoiceLoop source code, project documentation, architecture
+descriptions, and project-created diagrams. Making the repository public does
+not transfer that ownership.
 
-VoiceLoop is free and open-source software licensed under the
-[GNU Affero General Public License v3.0 only](LICENSE). The license grants
-recipients rights to use, study, modify, and redistribute the covered work,
-subject to its terms, including the network source-availability requirement.
+The covered VoiceLoop work is made available under the
+[GNU Affero General Public License v3.0 only](LICENSE). That license grants
+important permissions to recipients, subject to its conditions. It does not
+transfer copyright ownership, remove attribution requirements, or authorize a
+person to present somebody else's work as their own.
 
-Third-party components retain their own copyright and license terms. No
-trademark license is granted for the VoiceLoop name, logo, or visual identity.
+Dependencies, vendored libraries, service names, product names, and any other
+third-party material remain the property of their respective rightsholders and
+are governed by their own terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+and [docs/PROVENANCE.md](docs/PROVENANCE.md). Contributions remain attributable
+to their contributors as described in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+This statement does not claim or transfer copyright that another contributor
+holds in a specific, independently copyrightable contribution. Repository
+access or a Git commit identity alone is not treated as proof of copyright
+ownership.
+
+Nothing in this public repository waives, overrides, or replaces any valid
+private record or agreement concerning ownership, co-ownership, project
+continuity, succession, or rights in a specific contribution. Any such rights
+remain subject to the applicable record, agreement, license, and law.
+
+The VoiceLoop name and project identity are not licensed as trademarks merely
+because the source code is available under the AGPL.
