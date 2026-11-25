@@ -30,5 +30,11 @@ private record or agreement concerning ownership, co-ownership, project
 continuity, succession, or rights in a specific contribution. Any such rights
 remain subject to the applicable record, agreement, license, and law.
 
+Marcin Romanowski identifies Mikołaj Szczuchniak as a co-owner of the economic
+copyright in VoiceLoop, as to their respective rights. The precise scope and
+shares are not published in this repository and remain subject to the relevant
+private records and applicable law. This statement does not claim ownership of
+third-party material or another contributor's independent rights.
+
 The VoiceLoop name and project identity are not licensed as trademarks merely
 because the source code is available under the AGPL.

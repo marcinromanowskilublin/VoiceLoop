@@ -29,6 +29,13 @@ succession, or rights in a specific contribution. The existence and scope of
 such rights are determined by the relevant evidence, agreement, license, and
 applicable law, not by repository visibility alone.
 
+For public attribution, Marcin Romanowski identifies Mikołaj Szczuchniak as a
+co-owner of the economic copyright in VoiceLoop, as to their respective rights.
+The precise scope and shares are intentionally not published here and remain
+subject to the relevant private records and applicable law. This attribution
+does not extend to third-party material or another contributor's independent
+rights.
+
 ## License chronology
 
 - The repository history contains no `LICENSE`, `LICENCE`, `COPYING`, or
